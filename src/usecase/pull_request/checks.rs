@@ -287,11 +287,27 @@ fn annotation_u64(annotation: &Value, field: &str) -> u64 {
 }
 
 fn actions_job_id(target: &Target, link: &str) -> Option<u64> {
-    let prefix = format!("https://github.com/{}/actions/runs/", target.repository);
-    let remainder = link.strip_prefix(&prefix)?;
-    let (run_id, job_id) = remainder.split_once("/job/")?;
+    let path = strip_ascii_case_prefix(link, "https://github.com/")?;
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    let mut segments = path.split('/');
+    let owner = segments.next()?;
+    let repository = segments.next()?;
+    if !repository_matches(target, owner, repository)
+        || segments.next()? != "actions"
+        || segments.next()? != "runs"
+    {
+        return None;
+    }
+    let run_id = segments.next()?;
+    if segments.next()? != "job" {
+        return None;
+    }
+    let job_id = segments.next()?;
+    if segments.next().is_some() {
+        return None;
+    }
     run_id.parse::<u64>().ok()?;
-    job_id.split('?').next()?.parse().ok()
+    job_id.parse().ok()
 }
 
 fn collect_actions_log(
@@ -317,18 +333,46 @@ fn collect_actions_log(
     }
     let check_run_url = required_string(job, "check_run_url", "Actions job check run URL")?;
     let job_head_oid = required_string(job, "head_sha", "Actions job head SHA")?;
-    let expected_check_run_url = check_run_id.map(|id| {
-        format!(
-            "https://api.github.com/repos/{}/check-runs/{id}",
-            target.repository
-        )
-    });
-    if expected_check_run_url.as_deref() != Some(check_run_url) || job_head_oid != head_oid {
+    let job_check_run_id = actions_check_run_id(target, check_run_url);
+    if job_check_run_id != check_run_id || job_head_oid != head_oid {
         return Ok(Value::Null);
     }
 
     let bytes = github::pull_request::job_log(target, job_id, deadline, timeout_message)?;
     truncate_log(bytes)
+}
+
+fn actions_check_run_id(target: &Target, url: &str) -> Option<u64> {
+    let path = strip_ascii_case_prefix(url, "https://api.github.com/repos/")?;
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    let mut segments = path.split('/');
+    let owner = segments.next()?;
+    let repository = segments.next()?;
+    if !repository_matches(target, owner, repository) || segments.next()? != "check-runs" {
+        return None;
+    }
+    let check_run_id = segments.next()?;
+    if segments.next().is_some() {
+        return None;
+    }
+    check_run_id.parse().ok()
+}
+
+fn repository_matches(target: &Target, owner: &str, repository: &str) -> bool {
+    target
+        .repository
+        .split_once('/')
+        .is_some_and(|(target_owner, target_repository)| {
+            target_owner.eq_ignore_ascii_case(owner)
+                && target_repository.eq_ignore_ascii_case(repository)
+        })
+}
+
+fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let candidate = value.get(..prefix.len())?;
+    candidate
+        .eq_ignore_ascii_case(prefix)
+        .then(|| &value[prefix.len()..])
 }
 
 fn truncate_log(bytes: Vec<u8>) -> Result<Value> {
@@ -526,6 +570,29 @@ mod tests {
         assert_eq!(
             actions_job_id(&target, "https://example.test/actions/runs/10/job/20"),
             None
+        );
+    }
+
+    #[test]
+    fn actions_urls_match_repository_names_case_insensitively() {
+        let target = Target {
+            repository: "Owner/Repo".to_owned(),
+            number: "1".to_owned(),
+        };
+
+        assert_eq!(
+            actions_job_id(
+                &target,
+                "https://github.com/owner/repo/actions/runs/10/job/20"
+            ),
+            Some(20)
+        );
+        assert_eq!(
+            actions_check_run_id(
+                &target,
+                "https://api.github.com/repos/owner/repo/check-runs/100"
+            ),
+            Some(100)
         );
     }
 }

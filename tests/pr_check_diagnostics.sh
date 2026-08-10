@@ -9,8 +9,9 @@ cp "$repo_root/tests/fixtures/gh-diagnostics" "$tmpdir/bin/gh"
 chmod +x "$tmpdir/bin/gh"
 
 run_diagnostics() {
+  local repository="${GH_DIAGNOSTICS_REPOSITORY:-owner/repo}"
   env PATH="$tmpdir/bin:$PATH" GH_DIAGNOSTICS_MODE="${1:-normal}" \
-    "$GH_READ_BIN" pr checks 42 --repo owner/repo "${@:2}"
+    "$GH_READ_BIN" pr checks 42 --repo "$repository" "${@:2}"
 }
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/calls" run_diagnostics normal --failed-diagnostics --compact \
@@ -39,6 +40,13 @@ jq -e '
   .data.checks[1].log == null and
   (.data.checks[2] | has("log") | not)
 ' "$tmpdir/logs.json" >/dev/null
+
+GH_DIAGNOSTICS_REPOSITORY=Owner/Repo run_diagnostics normal \
+  --include-failed-logs --quiet --compact >"$tmpdir/mixed-case.json"
+jq -e '
+  (.data.checks[0].annotations | length) == 3 and
+  .data.checks[0].log != null
+' "$tmpdir/mixed-case.json" >/dev/null
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/mismatch-calls" run_diagnostics job-mismatch \
   --include-failed-logs --quiet --compact >"$tmpdir/job-mismatch.json"
