@@ -2,6 +2,8 @@
 
 `gh-read`は、GitHub CLI (`gh`)を子processとして使い、Pull RequestとIssueの定型的な読み取り結果をJSONで返すCLIです。Pull Requestのmetadata、checks、conversation comments、reviews、review threadsと、Issueのmetadata、commentsを取得できます。
 
+`pr overview`はPull Request本文、comment、review本文、thread本文、個別checkを取得せず、review開始やCI待機の判断に必要な状態だけを返します。
+
 ## なぜ固定queryなのか
 
 AI Agentのcommand ruleで任意の`gh api`を許可すると、endpoint、HTTP method、GraphQL documentやinputによってreadとmutationが切り替わるため、許可範囲を制御しにくくなります。`gh-read`は固定queryだけを公開する制約されたcommand surfaceです。同梱するSkillは、agentを任意の`gh api`ではなく`gh-read`へ導きます。
@@ -23,6 +25,8 @@ cargo install --path .
 ## 使い方
 
 ```bash
+gh-read pr overview 123 --repo OWNER/REPO
+gh-read pr overview https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO
 gh-read pr https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO --include-resolved
@@ -32,6 +36,11 @@ gh-read issue 456 --repo OWNER/REPO --compact
 ```
 
 `--repo`を省略した番号指定では、`gh repo view`が現在のrepositoryを解決します。review threadsは既定で未解決だけを返し、`--include-resolved`で解決済みも含めます。`--compact`は1行JSONにし、PR commentから重複する`diffHunk`を除きます。
+
+Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必要になった場合だけ既存の`pr`を使います。
+`pr overview`の`checks`はrequired checkだけを`passed`、`pending`、`failed`へ排他的に集計し、`reviewThreads.unresolved`は未解決threadの総数を返します。
+成功結果は`schemaVersion`、全取得完了時刻の`observedAt`、`data`を持ちます。
+実行時エラーではstdoutを空にし、stderrへ`schemaVersion`と再試行情報を含むJSONを1行だけ出力します。
 
 `pr checks`は既定ですべてのcheckを返し、`--required`を指定するとrequired checkだけを返します。結果はcheck名、同名ではlinkの昇順です。
 

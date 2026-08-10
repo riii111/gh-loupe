@@ -119,6 +119,8 @@ fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
     {
         (ErrorKind::NotFound, false)
     } else if normalized.contains("could not resolve host")
+        || normalized.contains("error connecting to ")
+        || normalized.contains("check your internet connection")
         || normalized.contains("connection reset")
         || normalized.contains("connection refused")
         || normalized.contains("tls handshake")
