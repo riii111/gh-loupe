@@ -139,6 +139,9 @@ struct CheckRun {
     id: u64,
     name: String,
     details_url: Option<String>,
+    state: String,
+    started_at: Option<String>,
+    completed_at: Option<String>,
 }
 
 fn validate_check_runs(response: &Value) -> Result<Vec<CheckRun>> {
@@ -166,10 +169,40 @@ fn validate_check_runs(response: &Value) -> Result<Vec<CheckRun>> {
                 "check run details URL",
             )?
             .map(str::to_owned);
+            let status = required_string(
+                run.as_object()
+                    .ok_or_else(|| invalid_response("GitHub returned an invalid check run"))?,
+                "status",
+                "check run status",
+            )?;
+            let conclusion = nullable_string(
+                run.as_object()
+                    .ok_or_else(|| invalid_response("GitHub returned an invalid check run"))?,
+                "conclusion",
+                "check run conclusion",
+            )?;
+            let state = check_run_state(status, conclusion)?;
+            let started_at = nullable_string(
+                run.as_object()
+                    .ok_or_else(|| invalid_response("GitHub returned an invalid check run"))?,
+                "started_at",
+                "check run start time",
+            )?
+            .map(str::to_owned);
+            let completed_at = nullable_string(
+                run.as_object()
+                    .ok_or_else(|| invalid_response("GitHub returned an invalid check run"))?,
+                "completed_at",
+                "check run completion time",
+            )?
+            .map(str::to_owned);
             runs.push(CheckRun {
                 id,
                 name: name.to_owned(),
                 details_url,
+                state,
+                started_at,
+                completed_at,
             });
         }
     }
@@ -186,9 +219,33 @@ fn matching_check_run(
     let run = runs
         .iter()
         .filter(|run| !used.contains(&run.id))
-        .find(|run| run.name == name && run.details_url.as_deref().unwrap_or_default() == link)?;
+        .find(|run| {
+            run.name == name
+                && run.details_url.as_deref().unwrap_or_default() == link
+                && run.state.eq_ignore_ascii_case(string_field(check, "state"))
+                && run.started_at.as_deref().unwrap_or_default() == string_field(check, "startedAt")
+                && run.completed_at.as_deref().unwrap_or_default()
+                    == string_field(check, "completedAt")
+        })?;
     used.insert(run.id);
     Some(run.id)
+}
+
+fn check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
+    if status != "completed" {
+        return match status {
+            "queued" | "in_progress" | "pending" | "requested" | "waiting" => {
+                Ok("PENDING".to_owned())
+            }
+            _ => Err(invalid_response(
+                "GitHub returned an unknown check run status",
+            )),
+        };
+    }
+    let conclusion = conclusion.ok_or_else(|| {
+        invalid_response("GitHub returned a completed check run without a conclusion")
+    })?;
+    Ok(conclusion.to_ascii_uppercase())
 }
 
 fn validate_annotations(response: &Value) -> Result<Vec<Value>> {

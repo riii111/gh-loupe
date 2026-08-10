@@ -27,6 +27,13 @@ jq -e '
 ' "$tmpdir/diagnostics.json" >/dev/null
 grep -F -- 'check-runs/100/annotations?per_page=100' "$tmpdir/calls" >/dev/null
 
+GH_DIAGNOSTICS_CALLS="$tmpdir/collision-calls" run_diagnostics status-collision \
+  --failed-diagnostics --quiet --compact >"$tmpdir/status-collision.json"
+jq -e '.data.checks[0].annotations == []' "$tmpdir/status-collision.json" >/dev/null
+if grep -F -- 'check-runs/102/annotations' "$tmpdir/collision-calls" >/dev/null; then
+  exit 1
+fi
+
 run_diagnostics normal --include-failed-logs --quiet --compact \
   >"$tmpdir/logs.json" 2>"$tmpdir/logs.stderr"
 test ! -s "$tmpdir/logs.stderr"

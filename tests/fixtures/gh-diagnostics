@@ -12,6 +12,11 @@ if [ "$1 $2" = "pr checks" ]; then
 [{"name":"pass","state":"SUCCESS","bucket":"pass","link":"https://example.test/pass","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:01:00Z"}]
 JSON
       ;;
+    status-collision)
+      cat <<'JSON'
+[{"name":"shared","state":"FAILURE","bucket":"fail","link":"https://ci.example.test/shared","workflow":"external","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]
+JSON
+      ;;
     *)
       cat <<'JSON'
 [{"name":"actions-failure","state":"FAILURE","bucket":"fail","link":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"},{"name":"external-cancel","state":"CANCELLED","bucket":"cancel","link":"https://ci.example.test/build/7","workflow":"external","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"pass","state":"SUCCESS","bucket":"pass","link":"https://example.test/pass","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
@@ -27,8 +32,14 @@ if [ "$1 $2" = "pr view" ]; then
 fi
 
 if [ "$1" = api ] && [[ "$*" == *commits/head/check-runs* ]]; then
+  if [ "${GH_DIAGNOSTICS_MODE:-normal}" = status-collision ]; then
+    cat <<'JSON'
+[{"total_count":1,"check_runs":[{"id":102,"name":"shared","details_url":"https://ci.example.test/shared","status":"completed","conclusion":"failure","started_at":"2026-08-11T11:00:00Z","completed_at":"2026-08-11T11:05:00Z"}]}]
+JSON
+    exit 0
+  fi
   cat <<'JSON'
-[{"total_count":2,"check_runs":[{"id":100,"name":"actions-failure","details_url":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42"},{"id":101,"name":"unrelated","details_url":null}]}]
+[{"total_count":2,"check_runs":[{"id":100,"name":"actions-failure","details_url":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","status":"completed","conclusion":"failure","started_at":"2026-08-11T10:00:00Z","completed_at":"2026-08-11T10:05:00Z"},{"id":101,"name":"unrelated","details_url":null,"status":"completed","conclusion":"success","started_at":"2026-08-11T08:00:00Z","completed_at":"2026-08-11T08:05:00Z"}]}]
 JSON
   exit 0
 fi
