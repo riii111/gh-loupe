@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde_json::{Value, json};
 
 use crate::error::{Exit, Result, RuntimeError};
@@ -101,7 +103,136 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 }
 ";
 
+const CHECK_CONTEXTS_QUERY: &str = r"
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            statusCheckRollup {
+              contexts(first: 100, after: $cursor) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    isRequired(pullRequestNumber: $number)
+                    status
+                    conclusion
+                    startedAt
+                    completedAt
+                    detailsUrl
+                    checkSuite {
+                      workflowRun {
+                        event
+                        workflow { name }
+                      }
+                    }
+                  }
+                  ... on StatusContext {
+                    context
+                    isRequired(pullRequestNumber: $number)
+                    state
+                    targetUrl
+                    description
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+";
+
 type FieldValidator = fn(&Value) -> bool;
+
+pub fn pull_request_check_contexts(
+    target: &Target,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<(String, Vec<Value>)> {
+    let (owner, name) = target
+        .repository
+        .split_once('/')
+        .expect("repository is validated");
+    let mut cursor = Value::Null;
+    let mut contexts = Vec::new();
+    let mut head_oid = None;
+    let number = target
+        .number
+        .parse::<u64>()
+        .expect("pull request number is validated");
+
+    loop {
+        let variables = json!({
+            "owner": owner,
+            "name": name,
+            "number": number,
+            "cursor": cursor,
+        });
+        let data = query_runtime_with_deadline(
+            CHECK_CONTEXTS_QUERY,
+            &variables,
+            deadline,
+            timeout_message,
+        )?;
+        let pull_request = value_at_runtime(&data, &["repository", "pullRequest"])?;
+        if pull_request.is_null() {
+            return Err(Exit::runtime(
+                &RuntimeError::not_found(format!(
+                    "pull request not found: {}#{}",
+                    target.repository, target.number
+                )),
+                1,
+            ));
+        }
+        let nodes = value_at_runtime(pull_request, &["commits", "nodes"])?
+            .as_array()
+            .ok_or_else(invalid_graphql_response)?;
+        let commit = nodes
+            .first()
+            .and_then(|node| node.get("commit"))
+            .ok_or_else(invalid_graphql_response)?;
+        let current_oid = value_at_runtime(commit, &["oid"])?
+            .as_str()
+            .ok_or_else(invalid_graphql_response)?;
+        if head_oid
+            .as_deref()
+            .is_some_and(|expected| expected != current_oid)
+        {
+            return Err(invalid_graphql_response());
+        }
+        head_oid = Some(current_oid.to_owned());
+        let rollup = value_at_runtime(commit, &["statusCheckRollup"])?;
+        if rollup.is_null() {
+            return Ok((current_oid.to_owned(), contexts));
+        }
+        let connection = value_at_runtime(rollup, &["contexts"])?;
+        contexts.extend(
+            value_at_runtime(connection, &["nodes"])?
+                .as_array()
+                .ok_or_else(invalid_graphql_response)?
+                .iter()
+                .cloned(),
+        );
+        let page_info = value_at_runtime(connection, &["pageInfo"])?;
+        let has_next_page = value_at_runtime(page_info, &["hasNextPage"])?
+            .as_bool()
+            .ok_or_else(invalid_graphql_response)?;
+        if !has_next_page {
+            return Ok((current_oid.to_owned(), contexts));
+        }
+        cursor = value_at_runtime(page_info, &["endCursor"])?.clone();
+        if !cursor.is_string() {
+            return Err(invalid_graphql_response());
+        }
+    }
+}
 
 pub fn pull_request_threads(
     target: &Target,
@@ -295,6 +426,39 @@ fn query_runtime(query: &str, variables: &str) -> Result<Value> {
     let query = serde_json::to_string(query).expect("GraphQL documents are always serializable");
     let payload = format!(r#"{{"query":{query},"variables":{variables}}}"#);
     let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
+    if let Some(errors) = response.get("errors") {
+        let message = format_graphql_errors(errors);
+        return Err(Exit::runtime(
+            &RuntimeError::from_cli_failure(message.as_bytes()),
+            1,
+        ));
+    }
+    response.get("data").cloned().ok_or_else(|| {
+        Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned a GraphQL response without data"),
+            1,
+        )
+    })
+}
+
+fn query_runtime_with_deadline(
+    query: &str,
+    variables: &Value,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Value> {
+    let payload = serde_json::to_string(&json!({
+        "query": query,
+        "variables": variables,
+    }))
+    .expect("fixed GraphQL requests are always serializable");
+    let response = cli::json_runtime_with_deadline(
+        ["api", "graphql", "--input", "-"],
+        Some(&payload),
+        false,
+        deadline,
+        timeout_message,
+    )?;
     if let Some(errors) = response.get("errors") {
         let message = format_graphql_errors(errors);
         return Err(Exit::runtime(

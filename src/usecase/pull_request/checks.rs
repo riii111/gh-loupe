@@ -23,6 +23,8 @@ const CHECK_FIELDS: [&str; 7] = [
 ];
 const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
+const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
+const CHECK_RUN_MARKER: &str = "__checkRun";
 
 pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions) -> Result<Value> {
     let diagnostics_requested = options.failed_diagnostics || options.include_failed_logs;
@@ -31,18 +33,26 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         options.timeout_seconds
     );
     let deadline = diagnostic_deadline(options.timeout_seconds);
-    let response = if diagnostics_requested {
-        github::pull_request::checks_with_deadline(target, required, deadline, &timeout_message)?
+    let (mut checks, diagnostic_head) = if diagnostics_requested {
+        let (head_oid, contexts) =
+            github::graphql::pull_request_check_contexts(target, deadline, &timeout_message)?;
+        (
+            validate_check_contexts(&contexts, required)?,
+            Some(head_oid),
+        )
     } else {
-        github::pull_request::checks(target, required)?
+        let response = github::pull_request::checks(target, required)?;
+        let values = response
+            .as_array()
+            .ok_or_else(|| invalid_response("GitHub returned an invalid checks response"))?;
+        (
+            values
+                .iter()
+                .map(validate_check)
+                .collect::<Result<Vec<_>>>()?,
+            None,
+        )
     };
-    let values = response
-        .as_array()
-        .ok_or_else(|| invalid_response("GitHub returned an invalid checks response"))?;
-    let mut checks = values
-        .iter()
-        .map(validate_check)
-        .collect::<Result<Vec<_>>>()?;
     checks.sort_by(|left, right| {
         string_field(left, "name")
             .cmp(string_field(right, "name"))
@@ -50,7 +60,17 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
     });
 
     if diagnostics_requested {
-        collect_diagnostics(target, &mut checks, options, deadline, &timeout_message)?;
+        collect_diagnostics(
+            target,
+            &mut checks,
+            options,
+            diagnostic_head.as_deref().expect("diagnostic head is set"),
+            deadline,
+            &timeout_message,
+        )?;
+        for check in &mut checks {
+            check.remove(CHECK_RUN_MARKER);
+        }
     }
     Ok(output::success(json!({ "checks": checks })))
 }
@@ -59,6 +79,7 @@ fn collect_diagnostics(
     target: &Target,
     checks: &mut [Map<String, Value>],
     options: CheckDiagnosticsOptions,
+    head_oid: &str,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<()> {
@@ -75,19 +96,34 @@ fn collect_diagnostics(
 
     let progress = Progress::start(failed.len(), options.quiet);
     ensure_before_deadline(deadline, timeout_message)?;
-    let head = github::pull_request::head_oid(target, deadline, timeout_message)?;
-    let head_oid = head
-        .get("headRefOid")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_response("GitHub returned an invalid pull request head"))?;
-    let check_runs = github::pull_request::check_runs(target, head_oid, deadline, timeout_message)?;
-    let check_runs = validate_check_runs(&check_runs)?;
+    let has_failed_check_run = failed
+        .iter()
+        .any(|index| checks[*index].get(CHECK_RUN_MARKER) == Some(&Value::Bool(true)));
+    let check_runs = if has_failed_check_run {
+        validate_check_runs(&github::pull_request::check_runs(
+            target,
+            head_oid,
+            deadline,
+            timeout_message,
+        )?)?
+    } else {
+        Vec::new()
+    };
     let mut used_check_runs = HashSet::new();
 
     for index in failed {
         ensure_before_deadline(deadline, timeout_message)?;
         let check = &mut checks[index];
-        let check_run_id = matching_check_run(check, &check_runs, &mut used_check_runs);
+        let is_check_run = check.get(CHECK_RUN_MARKER) == Some(&Value::Bool(true));
+        let check_run_id = if is_check_run {
+            Some(
+                matching_check_run(check, &check_runs, &mut used_check_runs).ok_or_else(|| {
+                    invalid_response("GitHub returned no matching REST Check Run")
+                })?,
+            )
+        } else {
+            None
+        };
         let annotations = match check_run_id {
             Some(id) => validate_annotations(&github::pull_request::annotations(
                 target,
@@ -100,14 +136,18 @@ fn collect_diagnostics(
         check.insert("annotations".to_owned(), Value::Array(annotations));
 
         if options.include_failed_logs {
-            let log = collect_actions_log(
-                target,
-                string_field(check, "link"),
-                check_run_id,
-                head_oid,
-                deadline,
-                timeout_message,
-            )?;
+            let log = if is_check_run {
+                collect_actions_log(
+                    target,
+                    string_field(check, "link"),
+                    check_run_id,
+                    head_oid,
+                    deadline,
+                    timeout_message,
+                )?
+            } else {
+                Value::Null
+            };
             check.insert("log".to_owned(), log);
         }
         progress.complete_one();
@@ -132,6 +172,132 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
         _ => return Err(invalid_response("GitHub returned an unknown check bucket")),
     }
     Ok(check)
+}
+
+fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<String, Value>>> {
+    let mut values = values.to_vec();
+    values.sort_by(|left, right| context_started_at(right).cmp(context_started_at(left)));
+    let mut status_names = HashSet::new();
+    let mut check_run_keys = HashSet::new();
+    let mut checks = Vec::new();
+
+    for value in values {
+        let object = value
+            .as_object()
+            .ok_or_else(|| invalid_response("GitHub returned an invalid check context"))?;
+        let is_required = object
+            .get("isRequired")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| invalid_response("GitHub returned an invalid required check marker"))?;
+        if required && !is_required {
+            continue;
+        }
+        let type_name = required_string(object, "__typename", "check context type")?;
+        let (name, state, link, workflow, started_at, completed_at, is_check_run) = match type_name
+        {
+            "CheckRun" => {
+                let name = required_string(object, "name", "check run name")?;
+                let status = required_string(object, "status", "check run status")?;
+                let conclusion = nullable_string(object, "conclusion", "check run conclusion")?;
+                let state = graphql_check_run_state(status, conclusion)?;
+                let link = nullable_string(object, "detailsUrl", "check run details URL")?
+                    .unwrap_or_default();
+                let started_at = nullable_string(object, "startedAt", "check run start time")?
+                    .unwrap_or(ZERO_TIME);
+                let completed_at =
+                    nullable_string(object, "completedAt", "check run completion time")?
+                        .unwrap_or(ZERO_TIME);
+                let (workflow, event) = check_run_workflow(object)?;
+                let key = format!("{name}/{workflow}/{event}");
+                if !check_run_keys.insert(key) {
+                    continue;
+                }
+                (name, state, link, workflow, started_at, completed_at, true)
+            }
+            "StatusContext" => {
+                let name = required_string(object, "context", "commit status context")?;
+                if !status_names.insert(name.to_owned()) {
+                    continue;
+                }
+                let state = required_string(object, "state", "commit status state")?.to_owned();
+                let link = nullable_string(object, "targetUrl", "commit status target URL")?
+                    .unwrap_or_default();
+                (name, state, link, "", ZERO_TIME, ZERO_TIME, false)
+            }
+            _ => {
+                return Err(invalid_response(
+                    "GitHub returned an unknown check context type",
+                ));
+            }
+        };
+        let bucket = check_bucket(&state)?;
+        checks.push(Map::from_iter([
+            ("name".to_owned(), Value::String(name.to_owned())),
+            ("state".to_owned(), Value::String(state)),
+            ("bucket".to_owned(), Value::String(bucket.to_owned())),
+            ("link".to_owned(), Value::String(link.to_owned())),
+            ("workflow".to_owned(), Value::String(workflow.to_owned())),
+            ("startedAt".to_owned(), Value::String(started_at.to_owned())),
+            (
+                "completedAt".to_owned(),
+                Value::String(completed_at.to_owned()),
+            ),
+            (CHECK_RUN_MARKER.to_owned(), Value::Bool(is_check_run)),
+        ]));
+    }
+    Ok(checks)
+}
+
+fn context_started_at(value: &Value) -> &str {
+    value.get("startedAt").and_then(Value::as_str).unwrap_or("")
+}
+
+fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
+    if status == "COMPLETED" {
+        return conclusion.map(str::to_owned).ok_or_else(|| {
+            invalid_response("GitHub returned a completed check run without a conclusion")
+        });
+    }
+    match status {
+        "IN_PROGRESS" | "PENDING" | "QUEUED" | "REQUESTED" | "WAITING" => Ok(status.to_owned()),
+        _ => Err(invalid_response(
+            "GitHub returned an unknown check run status",
+        )),
+    }
+}
+
+fn check_run_workflow(object: &Map<String, Value>) -> Result<(&str, &str)> {
+    let suite = object
+        .get("checkSuite")
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid_response("GitHub returned an invalid check suite"))?;
+    let Some(run) = suite.get("workflowRun") else {
+        return Err(invalid_response("GitHub returned an invalid workflow run"));
+    };
+    if run.is_null() {
+        return Ok(("", ""));
+    }
+    let run = run
+        .as_object()
+        .ok_or_else(|| invalid_response("GitHub returned an invalid workflow run"))?;
+    let event = required_string(run, "event", "workflow run event")?;
+    let workflow = run
+        .get("workflow")
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid_response("GitHub returned an invalid workflow"))?;
+    Ok((required_string(workflow, "name", "workflow name")?, event))
+}
+
+fn check_bucket(state: &str) -> Result<&'static str> {
+    match state {
+        "SUCCESS" => Ok("pass"),
+        "SKIPPED" | "NEUTRAL" => Ok("skipping"),
+        "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => Ok("fail"),
+        "CANCELLED" => Ok("cancel"),
+        "EXPECTED" | "REQUESTED" | "WAITING" | "QUEUED" | "PENDING" | "IN_PROGRESS" | "STALE"
+        | "STARTUP_FAILURE" => Ok("pending"),
+        _ => Err(invalid_response("GitHub returned an unknown check state")),
+    }
 }
 
 #[derive(Clone)]

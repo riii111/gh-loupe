@@ -29,10 +29,12 @@ grep -F -- 'check-runs/100/annotations?per_page=100' "$tmpdir/calls" >/dev/null
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/collision-calls" run_diagnostics status-collision \
   --failed-diagnostics --quiet --compact >"$tmpdir/status-collision.json"
-jq -e '.data.checks[0].annotations == []' "$tmpdir/status-collision.json" >/dev/null
-if grep -F -- 'check-runs/102/annotations' "$tmpdir/collision-calls" >/dev/null; then
-  exit 1
-fi
+jq -e '
+  (.data.checks | length) == 2 and
+  ([.data.checks[] | select(.workflow == "")][0].annotations == []) and
+  ([.data.checks[] | select(.workflow == "CI")][0].annotations[].path == "collision.rs")
+' "$tmpdir/status-collision.json" >/dev/null
+test "$(grep -c 'check-runs/102/annotations' "$tmpdir/collision-calls")" -eq 1
 
 run_diagnostics normal --include-failed-logs --quiet --compact \
   >"$tmpdir/logs.json" 2>"$tmpdir/logs.stderr"

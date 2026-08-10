@@ -24,53 +24,6 @@ pub fn checks(target: &Target, required: bool) -> Result<Value> {
     cli::json_runtime(args, None, true)
 }
 
-pub fn checks_with_deadline(
-    target: &Target,
-    required: bool,
-    deadline: Instant,
-    timeout_message: &str,
-) -> Result<Value> {
-    let mut args = vec![
-        "pr",
-        "checks",
-        &target.number,
-        "--repo",
-        &target.repository,
-        "--json",
-        "name,state,bucket,link,workflow,startedAt,completedAt",
-    ];
-    if required {
-        args.push("--required");
-        return cli::json_runtime_or_empty_with_deadline(
-            args,
-            None,
-            true,
-            "no required checks reported on ",
-            deadline,
-            timeout_message,
-        );
-    }
-    cli::json_runtime_with_deadline(args, None, true, deadline, timeout_message)
-}
-
-pub fn head_oid(target: &Target, deadline: Instant, timeout_message: &str) -> Result<Value> {
-    cli::json_runtime_with_deadline(
-        [
-            "pr",
-            "view",
-            &target.number,
-            "--repo",
-            &target.repository,
-            "--json",
-            "headRefOid",
-        ],
-        None,
-        false,
-        deadline,
-        timeout_message,
-    )
-}
-
 pub fn check_runs(
     target: &Target,
     head_oid: &str,

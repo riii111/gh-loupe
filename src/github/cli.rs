@@ -56,22 +56,6 @@ where
     parse_runtime_json(output, allow_nonzero_json, None)
 }
 
-pub(super) fn json_runtime_or_empty_with_deadline<I, S>(
-    args: I,
-    payload: Option<&str>,
-    allow_nonzero_json: bool,
-    empty_error_prefix: &str,
-    deadline: Instant,
-    timeout_message: &str,
-) -> Result<Value>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let output = runtime_output(args, payload, deadline, timeout_message)?;
-    parse_runtime_json(output, allow_nonzero_json, Some(empty_error_prefix))
-}
-
 pub(super) fn bytes_runtime_with_deadline<I, S>(
     args: I,
     deadline: Instant,
