@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${GH_DIAGNOSTICS_CALLS:-}" ]; then
+  printf '%s\n' "$*" >>"$GH_DIAGNOSTICS_CALLS"
+fi
+
+if [ "$1 $2" = "pr checks" ]; then
+  case "${GH_DIAGNOSTICS_MODE:-normal}" in
+    no-failures)
+      cat <<'JSON'
+[{"name":"pass","state":"SUCCESS","bucket":"pass","link":"https://example.test/pass","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:01:00Z"}]
+JSON
+      ;;
+    *)
+      cat <<'JSON'
+[{"name":"actions-failure","state":"FAILURE","bucket":"fail","link":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"},{"name":"external-cancel","state":"CANCELLED","bucket":"cancel","link":"https://ci.example.test/build/7","workflow":"external","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"pass","state":"SUCCESS","bucket":"pass","link":"https://example.test/pass","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
+JSON
+      ;;
+  esac
+  exit 0
+fi
+
+if [ "$1 $2" = "pr view" ]; then
+  printf '{"headRefOid":"head"}\n'
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *commits/head/check-runs* ]]; then
+  cat <<'JSON'
+[{"total_count":2,"check_runs":[{"id":100,"name":"actions-failure","details_url":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42"},{"id":101,"name":"unrelated","details_url":null}]}]
+JSON
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *check-runs/100/annotations* ]]; then
+  if [ "${GH_DIAGNOSTICS_MODE:-normal}" = annotation-failure ]; then
+    printf '[[{"path":"partial.rs"}]]\n'
+    printf 'simulated annotation pagination failure\n' >&2
+    exit 31
+  fi
+  cat <<'JSON'
+[[{"path":"z.rs","start_line":9,"end_line":10,"annotation_level":"failure","title":"zeta","message":"later"}],[{"path":"a.rs","start_line":2,"end_line":2,"annotation_level":"failure","title":"beta","message":"same"},{"path":"a.rs","start_line":1,"end_line":1,"annotation_level":"warning","title":null,"message":"first"}]]
+JSON
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *actions/jobs/20/logs* ]]; then
+  case "${GH_DIAGNOSTICS_MODE:-normal}" in
+    log-failure)
+      printf 'simulated log failure\n' >&2
+      exit 42
+      ;;
+    timeout)
+      sleep 30 &
+      sleeper=$!
+      if [ -n "${GH_DIAGNOSTICS_PID_FILE:-}" ]; then
+        printf '%s\n' "$sleeper" >"$GH_DIAGNOSTICS_PID_FILE"
+      fi
+      wait "$sleeper"
+      ;;
+    progress)
+      sleep 16
+      ;;
+  esac
+  for line in $(seq 1 205); do
+    printf 'line-%03d\n' "$line"
+  done
+  head -c 70000 /dev/zero | tr '\0' x
+  printf 'tail\n'
+  exit 0
+fi
+
+printf 'unexpected gh invocation: %s\n' "$*" >&2
+exit 99

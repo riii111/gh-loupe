@@ -41,6 +41,56 @@ where
     json_runtime_with_empty(args, payload, allow_nonzero_json, Some(empty_error_prefix))
 }
 
+pub(super) fn json_runtime_with_deadline<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = runtime_output(args, payload, deadline, timeout_message)?;
+    parse_runtime_json(output, allow_nonzero_json, None)
+}
+
+pub(super) fn json_runtime_or_empty_with_deadline<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    empty_error_prefix: &str,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = runtime_output(args, payload, deadline, timeout_message)?;
+    parse_runtime_json(output, allow_nonzero_json, Some(empty_error_prefix))
+}
+
+pub(super) fn bytes_runtime_with_deadline<I, S>(
+    args: I,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Vec<u8>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = runtime_output(args, None, deadline, timeout_message)?;
+    if !output.status.success() {
+        return Err(classify_failure(
+            output.status.code().unwrap_or(1),
+            &output.stderr,
+        ));
+    }
+    Ok(output.stdout)
+}
+
 fn json_runtime_with_empty<I, S>(
     args: I,
     payload: Option<&str>,
@@ -67,6 +117,14 @@ where
             None,
         )
     })?;
+    parse_runtime_json(output, allow_nonzero_json, empty_error_prefix)
+}
+
+fn parse_runtime_json(
+    output: ProcessOutput,
+    allow_nonzero_json: bool,
+    empty_error_prefix: Option<&str>,
+) -> Result<Value> {
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() && (!allow_nonzero_json || !matches!(code, 1 | 8)) {
         return Err(classify_failure(code, &output.stderr));
@@ -88,6 +146,41 @@ where
         Err(error) => Err(runtime_exit(
             ErrorKind::InvalidResponse,
             format!("GitHub returned invalid JSON: {error}"),
+            false,
+            None,
+        )),
+    }
+}
+
+fn runtime_output<I, S>(
+    args: I,
+    payload: Option<&str>,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<ProcessOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new("gh");
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if payload.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    match execute(command, payload, Some(deadline)) {
+        Ok(output) => Ok(output),
+        Err(ProcessError::TimedOut) => Err(runtime_exit(
+            ErrorKind::Timeout,
+            timeout_message.to_owned(),
+            true,
+            None,
+        )),
+        Err(error) => Err(runtime_exit(
+            ErrorKind::GitHubCli,
+            format!("failed to execute GitHub CLI: {error}"),
             false,
             None,
         )),
@@ -238,6 +331,12 @@ fn execute(
     payload: Option<&str>,
     deadline: Option<Instant>,
 ) -> std::result::Result<ProcessOutput, ProcessError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        command.process_group(0);
+    }
     let child = command.spawn().map_err(ProcessError::Io)?;
     collect_output(child, payload, deadline)
 }
@@ -308,6 +407,8 @@ fn wait_until(
 }
 
 fn terminate_and_reap(child: &mut Child) -> std::result::Result<(), ProcessError> {
+    #[cfg(unix)]
+    kill_process_group(child.id())?;
     match child.kill() {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
@@ -315,6 +416,35 @@ fn terminate_and_reap(child: &mut Child) -> std::result::Result<(), ProcessError
     }
     child.wait().map_err(ProcessError::Io)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn kill_process_group(child_id: u32) -> std::result::Result<(), ProcessError> {
+    const SIGKILL: i32 = 9;
+    const ESRCH: i32 = 3;
+
+    let process_group = i32::try_from(child_id).map_err(|_| {
+        ProcessError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "child process identifier exceeds i32",
+        ))
+    })?;
+    // SAFETY: the child is placed in a process group whose ID equals its validated PID.
+    let result = unsafe { kill(-process_group, SIGKILL) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ESRCH) {
+        Ok(())
+    } else {
+        Err(ProcessError::Io(error))
+    }
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(process_group: i32, signal: i32) -> i32;
 }
 
 fn write_child_stdin(child: &mut std::process::Child, payload: &str) -> io::Result<()> {

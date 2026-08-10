@@ -28,12 +28,18 @@ gh-read pr https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO --include-resolved
 gh-read pr checks 123 --repo OWNER/REPO
 gh-read pr checks 123 --repo OWNER/REPO --required --compact
+gh-read pr checks 123 --repo OWNER/REPO --failed-diagnostics
+gh-read pr checks 123 --repo OWNER/REPO --include-failed-logs --timeout 120
 gh-read issue 456 --repo OWNER/REPO --compact
 ```
 
 `--repo`を省略した番号指定では、`gh repo view`が現在のrepositoryを解決します。review threadsは既定で未解決だけを返し、`--include-resolved`で解決済みも含めます。`--compact`は1行JSONにし、PR commentから重複する`diffHunk`を除きます。
 
 `pr checks`は既定ですべてのcheckを返し、`--required`を指定するとrequired checkだけを返します。結果はcheck名、同名ではlinkの昇順です。
+
+失敗checkを調べるときは、まず`--failed-diagnostics`でCheck Run annotationを取得します。`--include-failed-logs`はannotationに加えてGitHub Actions jobのlogを取得し、各logを末尾200行、最大64 KiBへ制限します。Actions jobではない失敗checkの`log`は`null`です。診断の既定timeoutは90秒で、`--timeout SECONDS`には正の整数を指定します。進捗は開始時と15秒ごとにstderrへ出力され、`--quiet`でのみ抑制されます。
+
+診断optionは`fail`と`cancel`だけを対象にします。annotationまたは存在するActions logを一つでも取得できなければ、部分結果をstdoutへ出さず構造化エラーで終了します。
 
 ## 開発
 

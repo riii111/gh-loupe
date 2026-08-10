@@ -65,13 +65,3 @@ for mode in missing-pr missing-repository; do
   jq -e '.error.kind == "notFound" and .error.retryable == false' \
     "$tmpdir/$mode.stderr" >/dev/null
 done
-
-for option in --failed-diagnostics --include-failed-logs --timeout --quiet; do
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "$GH_READ_BIN" pr checks 42 --repo riii111/dotfiles "$option" \
-    >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"
-  status=$?
-  set -e
-  test "$status" -eq 2
-  test ! -s "$tmpdir/argument.stdout"
-done
