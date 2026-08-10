@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::error::{Exit, Result};
 use crate::github;
-use crate::model::Target;
+use crate::model::{CheckDiagnosticsOptions, Target};
 use crate::output;
 use crate::usecase;
 
@@ -28,6 +28,7 @@ enum Action {
     },
     PrChecks {
         required: bool,
+        diagnostics: CheckDiagnosticsOptions,
     },
     PrOverview,
     PrThread {
@@ -72,7 +73,10 @@ pub fn run() -> Result<()> {
         _ => resolve_target(&target, repo, action.resource())?,
     };
     let result = match action {
-        Action::PrChecks { required } => usecase::pull_request::checks::execute(&target, required)?,
+        Action::PrChecks {
+            required,
+            diagnostics,
+        } => usecase::pull_request::checks::execute(&target, required, diagnostics)?,
         Action::PrOverview => usecase::pull_request::overview::execute(&target)?,
         Action::PrThread {
             thread_id,
@@ -253,6 +257,10 @@ where
     let mut target = None;
     let mut repo = None;
     let mut required = false;
+    let mut failed_diagnostics = false;
+    let mut include_failed_logs = false;
+    let mut timeout_seconds = 90;
+    let mut quiet = false;
     let mut compact = false;
     let mut positional_only = false;
     let mut unrecognized = Vec::new();
@@ -287,6 +295,32 @@ where
                 repo = Some(value);
             }
             "--required" => required = true,
+            "--failed-diagnostics" => failed_diagnostics = true,
+            "--include-failed-logs" => {
+                include_failed_logs = true;
+                failed_diagnostics = true;
+            }
+            option if exact_long_option_value(option, "--timeout").is_some() => {
+                let value = exact_long_option_value(option, "--timeout")
+                    .expect("the option value was matched above");
+                timeout_seconds = parse_timeout(program, value)?;
+            }
+            "--timeout" => {
+                let Some(value) = values.next() else {
+                    return Err(checks_argument_error(
+                        program,
+                        "argument --timeout: expected one argument",
+                    ));
+                };
+                if value.starts_with('-') {
+                    return Err(checks_argument_error(
+                        program,
+                        "argument --timeout: expected one argument",
+                    ));
+                }
+                timeout_seconds = parse_timeout(program, &value)?;
+            }
+            "--quiet" => quiet = true,
             "--compact" => compact = true,
             "-h" | "--help" => {
                 print_checks_help(program);
@@ -310,7 +344,15 @@ where
         ));
     }
     Ok(Args {
-        action: Action::PrChecks { required },
+        action: Action::PrChecks {
+            required,
+            diagnostics: CheckDiagnosticsOptions {
+                failed_diagnostics,
+                include_failed_logs,
+                timeout_seconds,
+                quiet,
+            },
+        },
         target,
         repo,
         compact,
@@ -820,8 +862,20 @@ fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> 
     (name == option).then_some(value)
 }
 
+fn parse_timeout(program: &str, value: &str) -> Result<u64> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| {
+            checks_argument_error(program, "argument --timeout: expected a positive integer")
+        })
+}
+
 fn checks_usage(program: &str) -> String {
-    format!("usage: {program} pr checks [-h] [--repo REPO] [--required] [--compact] target")
+    format!(
+        "usage: {program} pr checks [-h] [--repo REPO] [--required] [--failed-diagnostics] [--include-failed-logs] [--timeout SECONDS] [--quiet] [--compact] target"
+    )
 }
 
 fn checks_argument_error(program: &str, message: &str) -> Exit {
@@ -913,7 +967,7 @@ fn print_help(program: &str, resource: Resource) {
 
 fn print_checks_help(program: &str) {
     let text = format!(
-        "{}\n\npositional arguments:\n  target       PR number or GitHub pull request URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --required   only return required checks\n  --compact    emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n  --compact              emit one-line JSON\n",
         checks_usage(program)
     );
     io::stdout().write_all(text.as_bytes()).expect("write help");
