@@ -40,13 +40,21 @@ jq -e '
   (.data.checks[2] | has("log") | not)
 ' "$tmpdir/logs.json" >/dev/null
 
+GH_DIAGNOSTICS_CALLS="$tmpdir/mismatch-calls" run_diagnostics job-mismatch \
+  --include-failed-logs --quiet --compact >"$tmpdir/job-mismatch.json"
+jq -e '.data.checks[0].log == null' "$tmpdir/job-mismatch.json" >/dev/null
+grep -F -- 'actions/jobs/20' "$tmpdir/mismatch-calls" >/dev/null
+if grep -F -- 'actions/jobs/20/logs' "$tmpdir/mismatch-calls" >/dev/null; then
+  exit 1
+fi
+
 run_diagnostics no-failures --failed-diagnostics --compact \
   >"$tmpdir/no-failures.json" 2>"$tmpdir/no-failures.stderr"
 test ! -s "$tmpdir/no-failures.stderr"
 jq -e '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
   "$tmpdir/no-failures.json" >/dev/null
 
-for mode in annotation-failure log-failure; do
+for mode in annotation-failure metadata-failure log-failure; do
   set +e
   run_diagnostics "$mode" --include-failed-logs --compact \
     >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"

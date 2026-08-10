@@ -45,6 +45,19 @@ JSON
   exit 0
 fi
 
+if [ "$1" = api ] && [[ "$*" == *actions/jobs/20 ]] && [[ "$*" != *actions/jobs/20/logs* ]]; then
+  if [ "${GH_DIAGNOSTICS_MODE:-normal}" = metadata-failure ]; then
+    printf 'simulated job metadata failure\n' >&2
+    exit 43
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE:-normal}" = job-mismatch ]; then
+    printf '{"id":20,"check_run_url":"https://api.github.com/repos/owner/repo/check-runs/999","head_sha":"head"}\n'
+  else
+    printf '{"id":20,"check_run_url":"https://api.github.com/repos/owner/repo/check-runs/100","head_sha":"head"}\n'
+  fi
+  exit 0
+fi
+
 if [ "$1" = api ] && [[ "$*" == *actions/jobs/20/logs* ]]; then
   case "${GH_DIAGNOSTICS_MODE:-normal}" in
     log-failure)

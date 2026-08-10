@@ -121,6 +121,26 @@ pub fn annotations(
     )
 }
 
+pub fn job(
+    target: &Target,
+    job_id: u64,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Value> {
+    cli::json_runtime_with_deadline(
+        [
+            "api",
+            "--method",
+            "GET",
+            &format!("repos/{}/actions/jobs/{job_id}", target.repository),
+        ],
+        None,
+        false,
+        deadline,
+        timeout_message,
+    )
+}
+
 pub fn job_log(
     target: &Target,
     job_id: u64,

@@ -100,14 +100,14 @@ fn collect_diagnostics(
         check.insert("annotations".to_owned(), Value::Array(annotations));
 
         if options.include_failed_logs {
-            let log = match actions_job_id(target, string_field(check, "link")) {
-                Some(job_id) => {
-                    let bytes =
-                        github::pull_request::job_log(target, job_id, deadline, timeout_message)?;
-                    truncate_log(bytes)?
-                }
-                None => Value::Null,
-            };
+            let log = collect_actions_log(
+                target,
+                string_field(check, "link"),
+                check_run_id,
+                head_oid,
+                deadline,
+                timeout_message,
+            )?;
             check.insert("log".to_owned(), log);
         }
         progress.complete_one();
@@ -292,6 +292,43 @@ fn actions_job_id(target: &Target, link: &str) -> Option<u64> {
     let (run_id, job_id) = remainder.split_once("/job/")?;
     run_id.parse::<u64>().ok()?;
     job_id.split('?').next()?.parse().ok()
+}
+
+fn collect_actions_log(
+    target: &Target,
+    link: &str,
+    check_run_id: Option<u64>,
+    head_oid: &str,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<Value> {
+    let Some(job_id) = actions_job_id(target, link) else {
+        return Ok(Value::Null);
+    };
+    let job = github::pull_request::job(target, job_id, deadline, timeout_message)?;
+    let job = job
+        .as_object()
+        .ok_or_else(|| invalid_response("GitHub returned an invalid Actions job response"))?;
+    let returned_id = required_u64(job, "id", "Actions job identifier")?;
+    if returned_id != job_id {
+        return Err(invalid_response(
+            "GitHub returned a mismatched Actions job identifier",
+        ));
+    }
+    let check_run_url = required_string(job, "check_run_url", "Actions job check run URL")?;
+    let job_head_oid = required_string(job, "head_sha", "Actions job head SHA")?;
+    let expected_check_run_url = check_run_id.map(|id| {
+        format!(
+            "https://api.github.com/repos/{}/check-runs/{id}",
+            target.repository
+        )
+    });
+    if expected_check_run_url.as_deref() != Some(check_run_url) || job_head_oid != head_oid {
+        return Ok(Value::Null);
+    }
+
+    let bytes = github::pull_request::job_log(target, job_id, deadline, timeout_message)?;
+    truncate_log(bytes)
 }
 
 fn truncate_log(bytes: Vec<u8>) -> Result<Value> {
