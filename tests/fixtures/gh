@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${GH_TEST_NETWORK_FAILURE:-}" = 1 ]; then
+  printf 'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n' >&2
+  exit 1
+fi
+
+if [ "${GH_TEST_REPOSITORY_NOT_FOUND:-}" = 1 ]; then
+  printf "GraphQL: Could not resolve to a Repository with the name 'riii111/missing'. (repository)\n" >&2
+  exit 1
+fi
+
 if [ "${GH_TEST_FAILURE:-}" = 1 ]; then
   printf 'simulated gh failure\n' >&2
   exit 23

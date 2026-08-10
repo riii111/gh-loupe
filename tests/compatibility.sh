@@ -104,7 +104,8 @@ run_overview() {
 assert_overview_runtime_error() {
   local name="$1"
   local expected_kind="$2"
-  shift 2
+  local expected_retryable="$3"
+  shift 3
   local -a environment=()
   while [ "$1" != "--" ]; do
     environment+=("$1")
@@ -121,8 +122,8 @@ assert_overview_runtime_error() {
   test "$status" -ne 0
   test ! -s "$tmpdir/$name.overview.stdout"
   test "$(wc -l <"$tmpdir/$name.overview.stderr")" -eq 1
-  jq -e --arg kind "$expected_kind" \
-    '.schemaVersion == 1 and .error.kind == $kind and (.error.retryAfterSeconds == null)' \
+  jq -e --arg kind "$expected_kind" --argjson retryable "$expected_retryable" \
+    '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == $retryable and (.error.retryAfterSeconds == null)' \
     "$tmpdir/$name.overview.stderr" >/dev/null
 }
 
@@ -219,11 +220,15 @@ jq -e '.data.checks == {"required": 0, "passed": 0, "pending": 0, "failed": 0}' 
 assert_argument_error overview-abbreviated-option pr overview 42 --comp
 assert_argument_error overview-unknown-option pr overview 42 --include-resolved
 assert_argument_error overview-invalid-target pr overview nope --repo riii111/dotfiles
-assert_overview_runtime_error overview-unknown-bucket invalidResponse \
+assert_overview_runtime_error overview-unknown-bucket invalidResponse false \
   GH_OVERVIEW_CHECKS=unknown -- pr overview 42 --repo riii111/dotfiles
-assert_overview_runtime_error overview-missing notFound \
+assert_overview_runtime_error overview-missing notFound false \
   GH_TEST_MISSING_PR=1 -- pr overview 42 --repo riii111/dotfiles
-assert_overview_runtime_error overview-gh-failure githubCli \
+assert_overview_runtime_error overview-network network true \
+  GH_TEST_NETWORK_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-repository-not-found notFound false \
+  GH_TEST_REPOSITORY_NOT_FOUND=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-gh-failure githubCli false \
   GH_TEST_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
-assert_overview_runtime_error overview-invalid-json invalidResponse \
+assert_overview_runtime_error overview-invalid-json invalidResponse false \
   GH_TEST_INVALID_JSON=1 -- pr overview 42 --repo riii111/dotfiles

@@ -1,10 +1,6 @@
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "used by follow-up subcommands with schema v1 errors"
-)]
 pub enum ErrorKind {
     Authentication,
     Authorization,
@@ -110,6 +106,7 @@ impl RuntimeError {
                 "not found",
                 "http 404",
                 "could not resolve to a pull request",
+                "could not resolve to a repository",
             ],
         ) {
             (ErrorKind::NotFound, false)
@@ -119,6 +116,8 @@ impl RuntimeError {
             &lower,
             &[
                 "network",
+                "error connecting to ",
+                "check your internet connection",
                 "connection reset",
                 "connection refused",
                 "could not resolve host",
@@ -165,10 +164,6 @@ impl Exit {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "used by follow-up subcommands with schema v1 errors"
-    )]
     pub fn runtime(error: &RuntimeError, code: i32) -> Self {
         Self {
             message: Some(
