@@ -6,6 +6,12 @@ if [ "${GH_TEST_FAILURE:-}" = 1 ]; then
   exit 23
 fi
 
+if [ "${GH_TEST_STDIN_FAILURE:-}" = 1 ]; then
+  exec 0<&-
+  printf 'simulated stdin failure\n' >&2
+  exit 29
+fi
+
 if [ "$1 $2" = "repo view" ]; then
   printf '{"nameWithOwner":"riii111/dotfiles"}\n'
   exit 0

@@ -50,6 +50,7 @@ compare_case pr-missing-repo-value -- pr --repo
 compare_case pr-option-instead-of-repo-value -- pr --repo --compact 42
 compare_case pr-unrecognized-option -- pr 42 --bogus
 compare_case issue-pr-only-option -- issue 42 --include-resolved
+compare_case root-end-options -- -- pr 0
 compare_case pr-end-options -- pr -- 42
 compare_case pr-default GH_FAIL_RESOLVED_COMMENTS=1 -- pr 42
 compare_case pr-pages -- pr 42 --include-resolved
@@ -74,5 +75,6 @@ compare_case conflicting-issue-repo -- issue https://github.com/riii111/dotfiles
 compare_case missing-pr GH_TEST_MISSING_PR=1 -- pr 42
 compare_case missing-issue GH_TEST_MISSING_ISSUE=1 -- issue 42
 compare_case gh-failure GH_TEST_FAILURE=1 -- pr 42
+compare_case stdin-failure GH_TEST_STDIN_FAILURE=1 -- pr 42 --repo riii111/dotfiles
 compare_case pagination-failure GH_TEST_PAGINATION_FAILURE=1 -- pr 42
 compare_case graphql-error GH_TEST_GRAPHQL_ERROR=1 -- pr 42

@@ -163,7 +163,7 @@ fn parse_args() -> Result<Args> {
         .and_then(OsStr::to_str)
         .unwrap_or("gh-read")
         .to_owned();
-    let Some(resource_value) = values.next() else {
+    let Some(mut resource_value) = values.next() else {
         return Err(argument_error(
             &program,
             None,
@@ -171,7 +171,21 @@ fn parse_args() -> Result<Args> {
             "the following arguments are required: resource",
         ));
     };
-    if resource_value == "-h" || is_long_option(&resource_value, "--help") {
+    let root_positional_only = resource_value == "--";
+    if root_positional_only {
+        let Some(value) = values.next() else {
+            return Err(argument_error(
+                &program,
+                None,
+                None,
+                "the following arguments are required: resource",
+            ));
+        };
+        resource_value = value;
+    }
+    if !root_positional_only
+        && (resource_value == "-h" || is_long_option(&resource_value, "--help"))
+    {
         print_root_help(&program);
         std::process::exit(0);
     }
@@ -302,6 +316,18 @@ fn stdout_line(message: &str) {
     writeln!(io::stdout(), "{message}").expect("write output");
 }
 
+fn write_child_stdin(child: &mut std::process::Child, payload: &str) -> io::Result<()> {
+    let result = child
+        .stdin
+        .take()
+        .expect("stdin is piped when a payload is present")
+        .write_all(payload.as_bytes());
+    match result {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+
 fn gh_json<I, S>(args: I, payload: Option<&str>, allow_nonzero_json: bool) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
@@ -319,12 +345,7 @@ where
         .spawn()
         .map_err(|error| Exit::message(error.to_string()))?;
     if let Some(payload) = payload {
-        child
-            .stdin
-            .take()
-            .expect("stdin is piped when a payload is present")
-            .write_all(payload.as_bytes())
-            .map_err(|error| Exit::message(error.to_string()))?;
+        write_child_stdin(&mut child, payload).map_err(|error| Exit::message(error.to_string()))?;
     }
     let output = child
         .wait_with_output()
@@ -726,5 +747,38 @@ fn main() {
             stderr_line(&message);
         }
         std::process::exit(error.code);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader};
+
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_stdin_still_allows_child_status_and_stderr_to_be_collected() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "exec 0<&-; printf 'ready\\n'; printf 'simulated stdin failure\\n' >&2; exit 29",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn child");
+
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().expect("stdout is piped"))
+            .read_line(&mut ready)
+            .expect("read synchronization marker");
+        assert_eq!(ready, "ready\n");
+
+        write_child_stdin(&mut child, "payload").expect("BrokenPipe is ignored");
+        let output = child.wait_with_output().expect("collect child output");
+        assert_eq!(output.status.code(), Some(29));
+        assert_eq!(output.stderr, b"simulated stdin failure\n");
     }
 }
