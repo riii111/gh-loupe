@@ -16,7 +16,37 @@ where
     json_with_deadline(args, payload, allow_nonzero_json, None)
 }
 
-pub(super) fn runtime_json<I, S>(args: I, payload: Option<&str>) -> Result<Value>
+pub(super) fn json_runtime<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    json_runtime_with_empty(args, payload, allow_nonzero_json, None)
+}
+
+pub(super) fn json_runtime_or_empty<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    empty_error_prefix: &str,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    json_runtime_with_empty(args, payload, allow_nonzero_json, Some(empty_error_prefix))
+}
+
+fn json_runtime_with_empty<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    empty_error_prefix: Option<&str>,
+) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -30,61 +60,71 @@ where
         command.stdin(Stdio::piped());
     }
     let output = execute(command, payload, None).map_err(|error| {
-        Exit::runtime(
-            &RuntimeError {
-                kind: ErrorKind::GitHubCli,
-                message: error.to_string(),
-                retryable: false,
-                retry_after_seconds: None,
-            },
-            1,
+        runtime_exit(
+            ErrorKind::GitHubCli,
+            format!("failed to execute GitHub CLI: {error}"),
+            false,
+            None,
         )
     })?;
-    if !output.status.success() {
-        let exit_code = output.status.code();
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let message = if message.is_empty() {
-            format!(
-                "GitHub CLI failed with exit code {}",
-                exit_code.unwrap_or(1)
-            )
-        } else {
-            message
-        };
-        return Err(Exit::runtime(
-            &classify_runtime_failure(exit_code, message),
-            1,
-        ));
+    let code = output.status.code().unwrap_or(1);
+    if !output.status.success() && (!allow_nonzero_json || !matches!(code, 1 | 8)) {
+        return Err(classify_failure(code, &output.stderr));
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| runtime_invalid_response(format!("GitHub returned invalid JSON: {error}")))
+    match serde_json::from_slice(&output.stdout) {
+        Ok(response) => Ok(response),
+        Err(_error)
+            if code == 1
+                && output.stdout.is_empty()
+                && empty_error_prefix.is_some_and(|prefix| {
+                    String::from_utf8_lossy(&output.stderr)
+                        .trim()
+                        .starts_with(prefix)
+                }) =>
+        {
+            Ok(Value::Array(Vec::new()))
+        }
+        Err(_error) if !output.status.success() => Err(classify_failure(code, &output.stderr)),
+        Err(error) => Err(runtime_exit(
+            ErrorKind::InvalidResponse,
+            format!("GitHub returned invalid JSON: {error}"),
+            false,
+            None,
+        )),
+    }
 }
 
-pub(super) fn classify_runtime_failure(exit_code: Option<i32>, message: String) -> RuntimeError {
+pub(super) fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
+    let message = String::from_utf8_lossy(stderr).trim().to_owned();
+    let message = if message.is_empty() {
+        format!("GitHub CLI exited with status {code}")
+    } else {
+        message
+    };
     let normalized = message.to_ascii_lowercase();
-    let (kind, retryable) = if exit_code == Some(4) {
-        (ErrorKind::Authentication, false)
-    } else if normalized.contains("rate limit") {
-        (ErrorKind::RateLimited, true)
-    } else if normalized.contains("bad credentials")
+    let (kind, retryable) = if code == 4
+        || normalized.contains("gh auth login")
+        || normalized.contains("http 401")
         || normalized.contains("authentication")
-        || normalized.contains("not logged")
-        || normalized.contains("auth login")
     {
         (ErrorKind::Authentication, false)
-    } else if normalized.contains("resource not accessible")
-        || normalized.contains("forbidden")
-        || normalized.contains("permission")
-    {
+    } else if normalized.contains("rate limit") || normalized.contains("secondary rate") {
+        (ErrorKind::RateLimited, true)
+    } else if normalized.contains("http 403") || normalized.contains("forbidden") {
         (ErrorKind::Authorization, false)
-    } else if normalized.contains("not found") || normalized.contains("could not resolve to") {
+    } else if normalized.contains("http 404")
+        || normalized.contains("not found")
+        || normalized.contains("could not resolve to a pullrequest")
+        || normalized.contains("could not resolve to a repository")
+    {
         (ErrorKind::NotFound, false)
-    } else if normalized.contains("dial tcp")
+    } else if normalized.contains("could not resolve host")
+        || normalized.contains("dial tcp")
         || normalized.contains("no such host")
+        || normalized.contains("connection reset")
+        || normalized.contains("connection refused")
+        || normalized.contains("tls handshake")
         || normalized.contains("network")
-        || normalized.contains("connection")
-        || normalized.contains("resolve host")
-        || normalized.contains("name resolution")
     {
         (ErrorKind::Network, true)
     } else if normalized.contains("timed out") || normalized.contains("timeout") {
@@ -93,30 +133,39 @@ pub(super) fn classify_runtime_failure(exit_code: Option<i32>, message: String) 
         (ErrorKind::GitHubCli, false)
     };
     let retry_after_seconds = (kind == ErrorKind::RateLimited)
-        .then(|| retry_after_seconds(&normalized))
+        .then(|| parse_retry_after_seconds(&normalized))
         .flatten();
-    RuntimeError {
-        kind,
-        message,
-        retryable,
-        retry_after_seconds,
-    }
+    runtime_exit(kind, message, retryable, retry_after_seconds)
 }
 
-fn retry_after_seconds(message: &str) -> Option<u64> {
-    let words = message
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>();
-    words.windows(3).find_map(|words| {
-        (words[0] == "retry" && words[1] == "after")
-            .then(|| words[2].parse().ok())
-            .flatten()
-    })
+fn parse_retry_after_seconds(message: &str) -> Option<u64> {
+    ["retry-after:", "retry after"]
+        .into_iter()
+        .find_map(|marker| {
+            let remainder = message.split_once(marker)?.1.trim_start();
+            let digits = remainder
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>();
+            (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+        })
 }
 
-pub(super) fn runtime_invalid_response(message: impl Into<String>) -> Exit {
-    Exit::invalid_response(message)
+fn runtime_exit(
+    kind: ErrorKind,
+    message: String,
+    retryable: bool,
+    retry_after_seconds: Option<u64>,
+) -> Exit {
+    Exit::runtime(
+        &RuntimeError {
+            kind,
+            message,
+            retryable,
+            retry_after_seconds,
+        },
+        1,
+    )
 }
 
 pub(super) fn json_with_deadline<I, S>(
@@ -346,43 +395,36 @@ mod tests {
     }
 
     #[test]
-    fn runtime_failures_are_classified_for_retry_decisions() {
-        let cases = [
-            ("Bad credentials", ErrorKind::Authentication, false),
-            (
-                "Resource not accessible by integration",
-                ErrorKind::Authorization,
-                false,
-            ),
-            ("pull request not found", ErrorKind::NotFound, false),
-            ("API rate limit exceeded", ErrorKind::RateLimited, true),
-            ("request timed out", ErrorKind::Timeout, true),
-            ("network connection failed", ErrorKind::Network, true),
-            ("unknown gh failure", ErrorKind::GitHubCli, false),
-        ];
-
-        for (message, kind, retryable) in cases {
-            let error = classify_runtime_failure(Some(1), message.to_owned());
-            assert_eq!(error.kind, kind);
-            assert_eq!(error.retryable, retryable);
-            assert_eq!(error.retry_after_seconds, None);
-        }
-
-        let error = classify_runtime_failure(
-            Some(1),
-            "API rate limit exceeded; retry after 45 seconds".to_owned(),
+    fn runtime_failures_are_classified_without_losing_retry_after() {
+        let rate_limit = classify_failure(1, b"secondary rate limit; retry-after: 45\n");
+        assert_eq!(
+            rate_limit.stderr_line(),
+            Some(
+                r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"secondary rate limit; retry-after: 45","retryable":true,"retryAfterSeconds":45}}"#
+            )
         );
-        assert_eq!(error.retry_after_seconds, Some(45));
 
-        let error = classify_runtime_failure(Some(4), "unknown gh failure".to_owned());
-        assert_eq!(error.kind, ErrorKind::Authentication);
-        assert!(!error.retryable);
-
-        let error = classify_runtime_failure(
-            Some(1),
-            "dial tcp: lookup api.github.com: no such host".to_owned(),
+        let network = classify_failure(1, b"could not resolve host: api.github.com\n");
+        assert!(
+            network
+                .stderr_line()
+                .expect("structured network error")
+                .contains(r#""kind":"network"#)
         );
-        assert_eq!(error.kind, ErrorKind::Network);
-        assert!(error.retryable);
+
+        let empty_authentication = classify_failure(4, b"");
+        assert!(
+            empty_authentication
+                .stderr_line()
+                .expect("structured authentication error")
+                .contains(r#""kind":"authentication""#)
+        );
+
+        let dns = classify_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
+        assert!(
+            dns.stderr_line()
+                .expect("structured DNS error")
+                .contains(r#""kind":"network""#)
+        );
     }
 }

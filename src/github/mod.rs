@@ -1,5 +1,6 @@
 mod cli;
 pub mod graphql;
+pub mod pull_request;
 pub mod rest;
 
 use serde_json::Value;
@@ -16,12 +17,10 @@ pub fn current_repository() -> Result<String> {
 }
 
 pub fn current_repository_runtime() -> Result<String> {
-    let response = cli::runtime_json(["repo", "view", "--json", "nameWithOwner"], None)?;
+    let response = cli::json_runtime(["repo", "view", "--json", "nameWithOwner"], None, false)?;
     response
         .get("nameWithOwner")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| {
-            cli::runtime_invalid_response("GitHub returned an invalid repository response")
-        })
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid repository response"))
 }

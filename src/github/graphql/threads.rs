@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::error::{ErrorKind, Exit, Result, RuntimeError};
+use crate::error::{Exit, Result};
 use crate::model::Target;
 
 use super::super::cli;
@@ -57,14 +57,11 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
         let data = query(THREADS_QUERY, &variables)?;
         let pull_request = value_at(&data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
-            return Err(runtime_error(
-                ErrorKind::NotFound,
-                format!(
-                    "pull request not found: {}#{}",
-                    target.repository, target.number
-                ),
-                false,
-            ));
+            let message = format!(
+                "pull request not found: {}#{}",
+                target.repository, target.number
+            );
+            return Err(cli::classify_failure(1, message.as_bytes()));
         }
         let connection = value_at(pull_request, &["reviewThreads"])?;
         threads.extend(nodes(connection)?.iter().cloned());
@@ -141,13 +138,10 @@ fn query(document: &str, variables: &str) -> Result<Value> {
     let document = serde_json::to_string(document)
         .map_err(|error| invalid_response(format!("failed to encode GitHub request: {error}")))?;
     let payload = format!(r#"{{"query":{document},"variables":{variables}}}"#);
-    let response = cli::runtime_json(["api", "graphql", "--input", "-"], Some(&payload))?;
+    let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
     if let Some(errors) = response.get("errors") {
         let message = format!("GitHub GraphQL error: {errors}");
-        return Err(Exit::runtime(
-            &cli::classify_runtime_failure(None, message),
-            1,
-        ));
+        return Err(cli::classify_failure(1, message.as_bytes()));
     }
     response
         .get("data")
@@ -189,17 +183,5 @@ fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
 }
 
 fn invalid_response(message: impl Into<String>) -> Exit {
-    cli::runtime_invalid_response(message)
-}
-
-fn runtime_error(kind: ErrorKind, message: String, retryable: bool) -> Exit {
-    Exit::runtime(
-        &RuntimeError {
-            kind,
-            message,
-            retryable,
-            retry_after_seconds: None,
-        },
-        1,
-    )
+    Exit::invalid_response(message)
 }
