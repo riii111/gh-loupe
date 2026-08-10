@@ -51,6 +51,96 @@ impl RuntimeError {
             }
         })
     }
+
+    pub fn invalid_response(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::InvalidResponse,
+            message: message.into(),
+            retryable: false,
+            retry_after_seconds: None,
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::NotFound,
+            message: message.into(),
+            retryable: false,
+            retry_after_seconds: None,
+        }
+    }
+
+    pub fn github_cli(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::GitHubCli,
+            message: message.into(),
+            retryable: false,
+            retry_after_seconds: None,
+        }
+    }
+
+    pub fn from_cli_failure(stderr: &[u8]) -> Self {
+        let message = String::from_utf8_lossy(stderr).trim().to_owned();
+        let message = if message.is_empty() {
+            "GitHub CLI failed without an error message".to_owned()
+        } else {
+            message
+        };
+        let lower = message.to_ascii_lowercase();
+        let (kind, retryable) = if contains_any(
+            &lower,
+            &[
+                "not logged in",
+                "authentication",
+                "bad credentials",
+                "http 401",
+            ],
+        ) {
+            (ErrorKind::Authentication, false)
+        } else if lower.contains("rate limit") {
+            (ErrorKind::RateLimited, true)
+        } else if contains_any(
+            &lower,
+            &["forbidden", "http 403", "resource not accessible"],
+        ) {
+            (ErrorKind::Authorization, false)
+        } else if contains_any(
+            &lower,
+            &[
+                "not found",
+                "http 404",
+                "could not resolve to a pull request",
+            ],
+        ) {
+            (ErrorKind::NotFound, false)
+        } else if contains_any(&lower, &["timed out", "timeout"]) {
+            (ErrorKind::Timeout, true)
+        } else if contains_any(
+            &lower,
+            &[
+                "network",
+                "connection reset",
+                "connection refused",
+                "could not resolve host",
+                "temporary failure",
+                "tls handshake",
+            ],
+        ) {
+            (ErrorKind::Network, true)
+        } else {
+            (ErrorKind::GitHubCli, false)
+        };
+        Self {
+            kind,
+            message,
+            retryable,
+            retry_after_seconds: None,
+        }
+    }
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| value.contains(needle))
 }
 
 pub struct Exit {

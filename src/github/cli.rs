@@ -16,6 +16,53 @@ where
     json_with_deadline(args, payload, allow_nonzero_json, None)
 }
 
+pub(super) fn json_runtime<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new("gh");
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if payload.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let output = execute(command, payload, None)
+        .map_err(|error| Exit::runtime(&RuntimeError::github_cli(error.to_string()), 1))?;
+    let code = output.status.code().unwrap_or(1);
+    if !output.status.success() && !allow_nonzero_json {
+        return Err(Exit::runtime(
+            &RuntimeError::from_cli_failure(&output.stderr),
+            code,
+        ));
+    }
+    if !output.status.success()
+        && allow_nonzero_json
+        && String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .starts_with("no required checks reported")
+    {
+        return Ok(Value::Array(Vec::new()));
+    }
+    match serde_json::from_slice(&output.stdout) {
+        Ok(response) => Ok(response),
+        Err(_error) if !output.status.success() => Err(Exit::runtime(
+            &RuntimeError::from_cli_failure(&output.stderr),
+            code,
+        )),
+        Err(error) => Err(Exit::runtime(
+            &RuntimeError::invalid_response(format!("GitHub returned invalid JSON: {error}")),
+            1,
+        )),
+    }
+}
+
 pub(super) fn json_with_deadline<I, S>(
     args: I,
     payload: Option<&str>,
