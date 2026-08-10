@@ -5,6 +5,7 @@ use crate::model::Target;
 
 use super::cli;
 
+pub mod thread;
 pub mod threads;
 
 const THREADS_QUERY: &str = r"
