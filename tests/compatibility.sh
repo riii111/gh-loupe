@@ -40,6 +40,34 @@ compare_case() {
   cmp "$tmpdir/$name.python.stderr" "$tmpdir/$name.rust.stderr"
 }
 
+assert_rust_failure() {
+  local name="$1"
+  local expected_status="$2"
+  local expected_stderr="$3"
+  shift 3
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.rust.stdout" 2>"$tmpdir/$name.rust.stderr"
+  local rust_status=$?
+  set -e
+
+  if [ "$rust_status" -ne "$expected_status" ]; then
+    printf '%s: exit status differs: expected=%s Rust=%s\n' \
+      "$name" "$expected_status" "$rust_status" >&2
+    return 1
+  fi
+  test ! -s "$tmpdir/$name.rust.stdout"
+  printf '%s\n' "$expected_stderr" >"$tmpdir/$name.expected.stderr"
+  cmp "$tmpdir/$name.expected.stderr" "$tmpdir/$name.rust.stderr"
+}
+
 compare_case root-help -- --help
 compare_case pr-help -- pr --help
 compare_case issue-help -- issue --help
@@ -78,3 +106,6 @@ compare_case gh-failure GH_TEST_FAILURE=1 -- pr 42
 compare_case stdin-failure GH_TEST_STDIN_FAILURE=1 -- pr 42 --repo riii111/dotfiles
 compare_case pagination-failure GH_TEST_PAGINATION_FAILURE=1 -- pr 42
 compare_case graphql-error GH_TEST_GRAPHQL_ERROR=1 -- pr 42
+assert_rust_failure invalid-json 1 \
+  'GitHub returned invalid JSON: expected ident at line 1 column 2' \
+  GH_TEST_INVALID_JSON=1 -- pr 42
