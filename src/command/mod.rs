@@ -22,16 +22,7 @@ struct Args {
     compact: bool,
 }
 
-pub fn main() {
-    if let Err(error) = run() {
-        if let Some(message) = error.message {
-            stderr_line(&message);
-        }
-        std::process::exit(error.code);
-    }
-}
-
-fn run() -> Result<()> {
+pub fn run() -> Result<()> {
     let args = parse_args()?;
     let target = resolve_target(&args.target, args.repo, args.resource)?;
     let result = match args.resource {
@@ -338,10 +329,6 @@ fn print_help(program: &str, resource: Resource) {
         ),
     };
     io::stdout().write_all(text.as_bytes()).expect("write help");
-}
-
-fn stderr_line(message: &str) {
-    writeln!(io::stderr(), "{message}").expect("write error");
 }
 
 fn stdout_line(message: &str) {

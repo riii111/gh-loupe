@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::error::{Exit, Result};
 use crate::model::Target;
 
-use super::process;
+use super::cli;
 
 const THREADS_QUERY: &str = r"
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -190,9 +190,9 @@ fn query(query: &str, variables: &str) -> Result<Value> {
     let query = serde_json::to_string(query)
         .map_err(|error| Exit::message(format!("failed to encode GitHub request: {error}")))?;
     let payload = format!(r#"{{"query":{query},"variables":{variables}}}"#);
-    let response = process::json(["api", "graphql", "--input", "-"], Some(&payload), false)?;
+    let response = cli::json(["api", "graphql", "--input", "-"], Some(&payload), false)?;
     if let Some(errors) = response.get("errors") {
-        return Err(Exit::child(1, python_json(errors).as_bytes()));
+        return Err(Exit::child(1, format_graphql_errors(errors).as_bytes()));
     }
     response
         .get("data")
@@ -208,7 +208,7 @@ fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
     })
 }
 
-fn python_json(value: &Value) -> String {
+fn format_graphql_errors(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(value) => value.to_string(),
@@ -219,7 +219,7 @@ fn python_json(value: &Value) -> String {
         Value::Array(values) => {
             let values = values
                 .iter()
-                .map(python_json)
+                .map(format_graphql_errors)
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("[{values}]")
@@ -231,7 +231,7 @@ fn python_json(value: &Value) -> String {
                     format!(
                         "{}: {}",
                         serde_json::to_string(key).expect("serializing a string cannot fail"),
-                        python_json(value)
+                        format_graphql_errors(value)
                     )
                 })
                 .collect::<Vec<_>>()

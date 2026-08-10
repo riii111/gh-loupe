@@ -4,6 +4,13 @@ mod github;
 mod model;
 mod usecase;
 
+use std::io::{self, Write};
+
 fn main() {
-    command::main();
+    if let Err(error) = command::run() {
+        if let Some(message) = error.message {
+            writeln!(io::stderr(), "{message}").expect("write error");
+        }
+        std::process::exit(error.code);
+    }
 }

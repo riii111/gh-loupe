@@ -3,10 +3,10 @@ use serde_json::Value;
 use crate::error::{Exit, Result};
 use crate::model::Target;
 
-use super::process;
+use super::cli;
 
 pub fn pages(endpoint: &str) -> Result<Vec<Value>> {
-    let pages = process::json(
+    let pages = cli::json(
         ["api", "--method", "GET", "--paginate", "--slurp", endpoint],
         None,
         false,
@@ -30,7 +30,7 @@ pub fn pages(endpoint: &str) -> Result<Vec<Value>> {
 }
 
 pub fn pull_request_checks(target: &Target) -> Result<Value> {
-    let checks = process::json(
+    let checks = cli::json(
         [
             "pr",
             "checks",
@@ -50,7 +50,7 @@ pub fn pull_request_checks(target: &Target) -> Result<Value> {
 }
 
 pub fn issue(target: &Target) -> Result<Value> {
-    let issue = process::json(
+    let issue = cli::json(
         [
             "api",
             &format!("repos/{}/issues/{}", target.repository, target.number),
