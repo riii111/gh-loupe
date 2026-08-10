@@ -117,6 +117,46 @@ if [ "$1 $2" = "api graphql" ]; then
     printf '{"data":{"repository":{"pullRequest":null}}}\n'
     exit 0
   fi
+  if [ "${GH_TEST_THREAD_DETAIL_NODE_ERROR:-}" = 1 ]; then
+    printf '{"errors":[{"message":"Could not resolve to a node with the global id of missing"}]}\n'
+    exit 0
+  fi
+  if jq -e '.query | contains("ThreadDetailComments")' <<<"$payload" >/dev/null; then
+    if [ "${GH_TEST_THREAD_DETAIL_PAGE_FAILURE:-}" = 1 ]; then
+      printf 'simulated thread detail pagination failure\n' >&2
+      exit 34
+    fi
+    cat <<'JSON'
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"first by id","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+JSON
+    exit 0
+  fi
+  if jq -e '.query | contains("ThreadDetail(")' <<<"$payload" >/dev/null; then
+    case "${GH_TEST_THREAD_DETAIL:-success}" in
+      missing)
+        printf '{"data":{"node":null}}\n'
+        ;;
+      wrong-type)
+        printf '{"data":{"node":{"__typename":"Issue"}}}\n'
+        ;;
+      wrong-pr)
+        cat <<'JSON'
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":false,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":43,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+JSON
+        ;;
+      wrong-repo)
+        cat <<'JSON'
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":false,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"other/repo"}},"comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+JSON
+        ;;
+      success)
+        cat <<'JSON'
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"later","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"second by id","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"thread-detail-comment-cursor"}}}}}
+JSON
+        ;;
+    esac
+    exit 0
+  fi
   if jq -e '.query | contains("ThreadSummaries")' <<<"$payload" >/dev/null; then
     if jq -e '.variables.cursor == "thread-summary-cursor"' <<<"$payload" >/dev/null; then
       if [ "${GH_TEST_THREAD_PAGE_FAILURE:-}" = 1 ]; then
