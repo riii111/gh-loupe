@@ -16,6 +16,154 @@ where
     json_with_deadline(args, payload, allow_nonzero_json, None)
 }
 
+pub(super) fn json_runtime<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    json_runtime_with_empty(args, payload, allow_nonzero_json, None)
+}
+
+pub(super) fn json_runtime_or_empty<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    empty_error_prefix: &str,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    json_runtime_with_empty(args, payload, allow_nonzero_json, Some(empty_error_prefix))
+}
+
+fn json_runtime_with_empty<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    empty_error_prefix: Option<&str>,
+) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new("gh");
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if payload.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let output = execute(command, payload, None).map_err(|error| {
+        runtime_exit(
+            ErrorKind::GitHubCli,
+            format!("failed to execute GitHub CLI: {error}"),
+            false,
+            None,
+        )
+    })?;
+    let code = output.status.code().unwrap_or(1);
+    if !output.status.success() && (!allow_nonzero_json || !matches!(code, 1 | 8)) {
+        return Err(classify_failure(code, &output.stderr));
+    }
+    match serde_json::from_slice(&output.stdout) {
+        Ok(response) => Ok(response),
+        Err(_error)
+            if code == 1
+                && output.stdout.is_empty()
+                && empty_error_prefix.is_some_and(|prefix| {
+                    String::from_utf8_lossy(&output.stderr)
+                        .trim()
+                        .starts_with(prefix)
+                }) =>
+        {
+            Ok(Value::Array(Vec::new()))
+        }
+        Err(_error) if !output.status.success() => Err(classify_failure(code, &output.stderr)),
+        Err(error) => Err(runtime_exit(
+            ErrorKind::InvalidResponse,
+            format!("GitHub returned invalid JSON: {error}"),
+            false,
+            None,
+        )),
+    }
+}
+
+fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
+    let message = String::from_utf8_lossy(stderr).trim().to_owned();
+    let message = if message.is_empty() {
+        format!("GitHub CLI exited with status {code}")
+    } else {
+        message
+    };
+    let normalized = message.to_ascii_lowercase();
+    let (kind, retryable) = if code == 4
+        || normalized.contains("gh auth login")
+        || normalized.contains("http 401")
+        || normalized.contains("authentication")
+    {
+        (ErrorKind::Authentication, false)
+    } else if normalized.contains("rate limit") || normalized.contains("secondary rate") {
+        (ErrorKind::RateLimited, true)
+    } else if normalized.contains("http 403") || normalized.contains("forbidden") {
+        (ErrorKind::Authorization, false)
+    } else if normalized.contains("http 404")
+        || normalized.contains("not found")
+        || normalized.contains("could not resolve to a pullrequest")
+        || normalized.contains("could not resolve to a repository")
+    {
+        (ErrorKind::NotFound, false)
+    } else if normalized.contains("could not resolve host")
+        || normalized.contains("connection reset")
+        || normalized.contains("connection refused")
+        || normalized.contains("tls handshake")
+        || normalized.contains("network")
+    {
+        (ErrorKind::Network, true)
+    } else {
+        (ErrorKind::GitHubCli, false)
+    };
+    let retry_after_seconds = (kind == ErrorKind::RateLimited)
+        .then(|| parse_retry_after_seconds(&normalized))
+        .flatten();
+    runtime_exit(kind, message, retryable, retry_after_seconds)
+}
+
+fn parse_retry_after_seconds(message: &str) -> Option<u64> {
+    ["retry-after:", "retry after"]
+        .into_iter()
+        .find_map(|marker| {
+            let remainder = message.split_once(marker)?.1.trim_start();
+            let digits = remainder
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>();
+            (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+        })
+}
+
+fn runtime_exit(
+    kind: ErrorKind,
+    message: String,
+    retryable: bool,
+    retry_after_seconds: Option<u64>,
+) -> Exit {
+    Exit::runtime(
+        &RuntimeError {
+            kind,
+            message,
+            retryable,
+            retry_after_seconds,
+        },
+        1,
+    )
+}
+
 pub(super) fn json_with_deadline<I, S>(
     args: I,
     payload: Option<&str>,
@@ -239,6 +387,25 @@ mod tests {
                 .expect("check child status")
                 .success(),
             "timed-out child still exists"
+        );
+    }
+
+    #[test]
+    fn runtime_failures_are_classified_without_losing_retry_after() {
+        let rate_limit = classify_failure(1, b"secondary rate limit; retry-after: 45\n");
+        assert_eq!(
+            rate_limit.stderr_line(),
+            Some(
+                r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"secondary rate limit; retry-after: 45","retryable":true,"retryAfterSeconds":45}}"#
+            )
+        );
+
+        let network = classify_failure(1, b"could not resolve host: api.github.com\n");
+        assert!(
+            network
+                .stderr_line()
+                .expect("structured network error")
+                .contains(r#""kind":"network"#)
         );
     }
 }

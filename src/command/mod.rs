@@ -15,23 +15,47 @@ enum Resource {
 }
 
 struct Args {
-    resource: Resource,
+    action: Action,
     target: String,
     repo: Option<String>,
-    include_resolved: bool,
     compact: bool,
 }
 
-pub fn run() -> Result<()> {
-    let args = parse_args()?;
-    let target = resolve_target(&args.target, args.repo, args.resource)?;
-    let result = match args.resource {
-        Resource::Pr => {
-            usecase::pull_request::inspect::execute(&target, args.include_resolved, args.compact)?
+enum Action {
+    PrInspect { include_resolved: bool },
+    PrChecks { required: bool },
+    IssueInspect,
+}
+
+impl Action {
+    const fn resource(&self) -> Resource {
+        match self {
+            Self::PrInspect { .. } | Self::PrChecks { .. } => Resource::Pr,
+            Self::IssueInspect => Resource::Issue,
         }
-        Resource::Issue => usecase::issue::inspect::execute(&target)?,
+    }
+}
+
+pub fn run() -> Result<()> {
+    let Args {
+        action,
+        target,
+        repo,
+        compact,
+    } = parse_args()?;
+    let target = if matches!(&action, Action::PrChecks { .. }) {
+        resolve_checks_target(&target, repo, &program_name())?
+    } else {
+        resolve_target(&target, repo, action.resource())?
     };
-    let output = if args.compact {
+    let result = match action {
+        Action::PrChecks { required } => usecase::pull_request::checks::execute(&target, required)?,
+        Action::PrInspect { include_resolved } => {
+            usecase::pull_request::inspect::execute(&target, include_resolved, compact)?
+        }
+        Action::IssueInspect => usecase::issue::inspect::execute(&target)?,
+    };
+    let output = if compact {
         serde_json::to_string(&result)
     } else {
         serde_json::to_string_pretty(&result)
@@ -88,13 +112,18 @@ fn parse_args() -> Result<Args> {
         }
     };
 
+    let mut remaining = values.peekable();
+    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "checks") {
+        remaining.next();
+        return parse_checks_args(&program, remaining);
+    }
+
     let mut target = None;
     let mut repo = None;
     let mut include_resolved = false;
     let mut compact = false;
     let mut positional_only = false;
     let mut unrecognized = Vec::new();
-    let mut remaining = values;
     while let Some(value) = remaining.next() {
         if positional_only {
             if target.is_none() {
@@ -158,10 +187,83 @@ fn parse_args() -> Result<Args> {
         ));
     }
     Ok(Args {
-        resource,
+        action: match resource {
+            Resource::Pr => Action::PrInspect { include_resolved },
+            Resource::Issue => Action::IssueInspect,
+        },
         target,
         repo,
-        include_resolved,
+        compact,
+    })
+}
+
+fn parse_checks_args<I>(program: &str, mut values: std::iter::Peekable<I>) -> Result<Args>
+where
+    I: Iterator<Item = String>,
+{
+    let mut target = None;
+    let mut repo = None;
+    let mut required = false;
+    let mut compact = false;
+    let mut positional_only = false;
+    let mut unrecognized = Vec::new();
+
+    while let Some(value) = values.next() {
+        if positional_only {
+            if target.is_none() {
+                target = Some(value);
+            } else {
+                unrecognized.push(value);
+            }
+            continue;
+        }
+        match value.as_str() {
+            "--" => positional_only = true,
+            option if exact_long_option_value(option, "--repo").is_some() => {
+                repo = exact_long_option_value(option, "--repo").map(str::to_owned);
+            }
+            "--repo" => {
+                let Some(value) = values.next() else {
+                    return Err(checks_argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                };
+                if value != "-" && value.starts_with('-') {
+                    return Err(checks_argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                }
+                repo = Some(value);
+            }
+            "--required" => required = true,
+            "--compact" => compact = true,
+            "-h" | "--help" => {
+                print_checks_help(program);
+                std::process::exit(0);
+            }
+            option if option.starts_with('-') => unrecognized.push(option.to_owned()),
+            value if target.is_none() => target = Some(value.to_owned()),
+            value => unrecognized.push(value.to_owned()),
+        }
+    }
+    let Some(target) = target else {
+        return Err(checks_argument_error(
+            program,
+            "the following arguments are required: target",
+        ));
+    };
+    if !unrecognized.is_empty() {
+        return Err(checks_argument_error(
+            program,
+            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
+        ));
+    }
+    Ok(Args {
+        action: Action::PrChecks { required },
+        target,
+        repo,
         compact,
     })
 }
@@ -207,6 +309,54 @@ fn resolve_repo(repo: Option<String>) -> Result<String> {
         return Err(Exit::message("--repo must use OWNER/REPO format"));
     }
     Ok(repo)
+}
+
+fn resolve_checks_target(target: &str, repo: Option<String>, program: &str) -> Result<Target> {
+    if let Some((url_repo, number)) = parse_url(target, Resource::Pr) {
+        if !is_repo(url_repo) {
+            return Err(checks_argument_error(
+                program,
+                "pr URL must contain a valid OWNER/REPO",
+            ));
+        }
+        if repo
+            .as_ref()
+            .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
+        {
+            return Err(checks_argument_error(
+                program,
+                "--repo conflicts with the pull request URL",
+            ));
+        }
+        let Some(number) = positive_number(number) else {
+            return Err(checks_argument_error(
+                program,
+                "pr must be a positive number or GitHub pr URL",
+            ));
+        };
+        return Ok(Target {
+            repository: url_repo.to_owned(),
+            number,
+        });
+    }
+
+    let Some(number) = positive_number(target) else {
+        return Err(checks_argument_error(
+            program,
+            "pr must be a positive number or GitHub pr URL",
+        ));
+    };
+    let repository = match repo {
+        Some(repo) => repo,
+        None => github::current_repository_runtime()?,
+    };
+    if !is_repo(&repository) {
+        return Err(checks_argument_error(
+            program,
+            "--repo must use OWNER/REPO format",
+        ));
+    }
+    Ok(Target { repository, number })
 }
 
 fn parse_url(target: &str, resource: Resource) -> Option<(&str, &str)> {
@@ -299,6 +449,29 @@ fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> 
     (name == option).then_some(value)
 }
 
+fn checks_usage(program: &str) -> String {
+    format!("usage: {program} pr checks [-h] [--repo REPO] [--required] [--compact] target")
+}
+
+fn checks_argument_error(program: &str, message: &str) -> Exit {
+    Exit {
+        message: Some(format!(
+            "{}\n{program} pr checks: error: {message}",
+            checks_usage(program)
+        )),
+        code: 2,
+    }
+}
+
+fn program_name() -> String {
+    let value = env::args().next().unwrap_or_else(|| "gh-read".to_owned());
+    Path::new(&value)
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("gh-read")
+        .to_owned()
+}
+
 fn print_root_help(program: &str) {
     let text = format!(
         "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n\noptions:\n  -h, --help  show this help message and exit\n",
@@ -318,6 +491,14 @@ fn print_help(program: &str, resource: Resource) {
             usage(program, Some(resource))
         ),
     };
+    io::stdout().write_all(text.as_bytes()).expect("write help");
+}
+
+fn print_checks_help(program: &str) {
+    let text = format!(
+        "{}\n\npositional arguments:\n  target       PR number or GitHub pull request URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --required   only return required checks\n  --compact    emit one-line JSON\n",
+        checks_usage(program)
+    );
     io::stdout().write_all(text.as_bytes()).expect("write help");
 }
 

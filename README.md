@@ -26,10 +26,14 @@ cargo install --path .
 gh-read pr 123 --repo OWNER/REPO
 gh-read pr https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO --include-resolved
+gh-read pr checks 123 --repo OWNER/REPO
+gh-read pr checks 123 --repo OWNER/REPO --required --compact
 gh-read issue 456 --repo OWNER/REPO --compact
 ```
 
 `--repo`を省略した番号指定では、`gh repo view`が現在のrepositoryを解決します。review threadsは既定で未解決だけを返し、`--include-resolved`で解決済みも含めます。`--compact`は1行JSONにし、PR commentから重複する`diffHunk`を除きます。
+
+`pr checks`は既定ですべてのcheckを返し、`--required`を指定するとrequired checkだけを返します。結果はcheck名、同名ではlinkの昇順です。
 
 ## 開発
 
