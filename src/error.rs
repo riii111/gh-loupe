@@ -165,6 +165,18 @@ impl Exit {
         }
     }
 
+    pub fn invalid_response(message: impl Into<String>) -> Self {
+        Self::runtime(
+            &RuntimeError {
+                kind: ErrorKind::InvalidResponse,
+                message: message.into(),
+                retryable: false,
+                retry_after_seconds: None,
+            },
+            1,
+        )
+    }
+
     pub fn stderr_line(&self) -> Option<&str> {
         self.message.as_deref()
     }

@@ -12,10 +12,11 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 1. PR番号またはPR URLを確定し、`gh-read pr overview <番号またはURL> --compact`を実行する。
 別repoなら`--repo OWNER/REPO`を加える。
 2. `pullRequest`、required checkの集計、未解決review thread数から、review開始、CI待機、head更新への追従、追加取得のいずれが必要か判断する。
-3. PR本文、conversation comments、review本文、thread本文が必要な場合だけ`gh-read pr <番号またはURL> --compact`を実行する。
-4. resolvedを含む全review threadが必要な場合だけ既存の`pr`へ`--include-resolved`を加える。
-5. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
-6. 既存の`pr`で`diffHunk`が必要な場合だけ`--compact`を外す。
+3. threadの位置と件数が必要なら、`gh-read pr threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
+4. resolvedを含む一覧が必要な場合だけ`pr threads`へ`--include-resolved`を加える。既定は未解決threadだけである。
+5. PR本文、conversation comments、review本文、各threadのcomment本文が必要な場合だけ`gh-read pr <番号またはURL> --compact`を実行する。
+6. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
+7. 既存の`pr`で`diffHunk`が必要な場合だけ`--compact`を外す。
 
 ## Rules
 
@@ -23,5 +24,7 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 - `gh-read`にないraw endpoint、任意GraphQL、任意jq/queryで代用しない。
 - コメント取得中にreply、resolve、dismiss、editを行わない。
 - `pr overview`の`checks`はrequired checkの集計であり、`reviewThreads.unresolved`は未解決threadの総数である。
+- `pr threads`の`data.threads`が空なら、未解決threadはないと報告する。
 - 既存の`pr`で`reviewThreads`が空なら、未解決threadはないと報告する。
 - 取得失敗を「コメントなし」と解釈しない。
+- `pr threads`の構造化エラーでは`kind`と`retryable`を確認し、部分結果として扱わない。
