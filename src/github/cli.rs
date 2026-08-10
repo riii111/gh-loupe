@@ -187,7 +187,7 @@ where
     }
 }
 
-fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
+pub(super) fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
     let message = String::from_utf8_lossy(stderr).trim().to_owned();
     let message = if message.is_empty() {
         format!("GitHub CLI exited with status {code}")
@@ -212,6 +212,8 @@ fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
     {
         (ErrorKind::NotFound, false)
     } else if normalized.contains("could not resolve host")
+        || normalized.contains("dial tcp")
+        || normalized.contains("no such host")
         || normalized.contains("error connecting to ")
         || normalized.contains("check your internet connection")
         || normalized.contains("connection reset")
@@ -220,6 +222,8 @@ fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
         || normalized.contains("network")
     {
         (ErrorKind::Network, true)
+    } else if normalized.contains("timed out") || normalized.contains("timeout") {
+        (ErrorKind::Timeout, true)
     } else {
         (ErrorKind::GitHubCli, false)
     };
@@ -538,6 +542,21 @@ mod tests {
                 .stderr_line()
                 .expect("structured network error")
                 .contains(r#""kind":"network"#)
+        );
+
+        let empty_authentication = classify_failure(4, b"");
+        assert!(
+            empty_authentication
+                .stderr_line()
+                .expect("structured authentication error")
+                .contains(r#""kind":"authentication""#)
+        );
+
+        let dns = classify_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
+        assert!(
+            dns.stderr_line()
+                .expect("structured DNS error")
+                .contains(r#""kind":"network""#)
         );
     }
 }

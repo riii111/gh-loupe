@@ -1,0 +1,100 @@
+use serde_json::{Map, Value};
+
+use crate::error::{Exit, Result};
+use crate::github::graphql;
+use crate::model::Target;
+
+pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
+    let mut summaries = graphql::threads::execute(target, include_resolved)?
+        .into_iter()
+        .map(project)
+        .collect::<Result<Vec<_>>>()?;
+    summaries.sort_by(|left, right| {
+        left.first_created_at
+            .cmp(&right.first_created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(summaries.into_iter().map(|summary| summary.value).collect())
+}
+
+struct Summary {
+    first_created_at: String,
+    id: String,
+    value: Value,
+}
+
+fn project(thread: Value) -> Result<Summary> {
+    let id = string_field(&thread, "id")?.to_owned();
+    let comments = thread
+        .get("comments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Exit::invalid_response("GitHub comments must be an array"))?;
+    let first_created_at = comments
+        .iter()
+        .map(|comment| string_field(comment, "createdAt"))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .min()
+        .ok_or_else(|| Exit::invalid_response("GitHub review thread has no comments"))?
+        .to_owned();
+    let last_updated_at = comments
+        .iter()
+        .map(|comment| string_field(comment, "updatedAt"))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .expect("a first comment was validated")
+        .to_owned();
+
+    let mut value = Map::new();
+    value.insert("id".to_owned(), Value::String(id.clone()));
+    value.insert(
+        "isResolved".to_owned(),
+        Value::Bool(bool_field(&thread, "isResolved")?),
+    );
+    value.insert(
+        "isOutdated".to_owned(),
+        Value::Bool(bool_field(&thread, "isOutdated")?),
+    );
+    for field in ["path", "line", "originalLine", "startLine", "diffSide"] {
+        value.insert(field.to_owned(), nullable_location(&thread, field)?);
+    }
+    value.insert("commentCount".to_owned(), Value::from(comments.len()));
+    value.insert("lastUpdatedAt".to_owned(), Value::String(last_updated_at));
+    Ok(Summary {
+        first_created_at,
+        id,
+        value: Value::Object(value),
+    })
+}
+
+fn string_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a string")))
+}
+
+fn bool_field(value: &Value, field: &str) -> Result<bool> {
+    value
+        .get(field)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a boolean")))
+}
+
+fn nullable_location(value: &Value, field: &str) -> Result<Value> {
+    let value = value
+        .get(field)
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))?;
+    let valid = match field {
+        "path" | "diffSide" => value.is_null() || value.is_string(),
+        "line" | "originalLine" | "startLine" => value.is_null() || value.as_i64().is_some(),
+        _ => false,
+    };
+    if !valid {
+        return Err(Exit::invalid_response(format!(
+            "GitHub field {field} has an invalid value"
+        )));
+    }
+    Ok(value.clone())
+}
