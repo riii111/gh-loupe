@@ -1,6 +1,7 @@
 use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value, json};
@@ -115,8 +116,8 @@ impl Exit {
     }
 }
 
-fn argument_error(program: &str, resource: Option<Resource>, message: &str) -> Exit {
-    let usage = match resource {
+fn usage(program: &str, resource: Option<Resource>) -> String {
+    match resource {
         Some(Resource::Pr) => format!(
             "usage: {program} pr [-h] [--repo REPO] [--include-resolved] [--compact] target"
         ),
@@ -124,23 +125,56 @@ fn argument_error(program: &str, resource: Option<Resource>, message: &str) -> E
             format!("usage: {program} issue [-h] [--repo REPO] [--compact] target")
         }
         None => format!("usage: {program} [-h] {{pr,issue}} ..."),
+    }
+}
+
+fn argument_error(
+    program: &str,
+    usage_resource: Option<Resource>,
+    error_resource: Option<Resource>,
+    message: &str,
+) -> Exit {
+    let usage = usage(program, usage_resource);
+    let error_program = match error_resource {
+        Some(Resource::Pr) => format!("{program} pr"),
+        Some(Resource::Issue) => format!("{program} issue"),
+        None => program.to_owned(),
     };
     Exit {
-        message: Some(format!("{usage}\n{program}: error: {message}")),
+        message: Some(format!("{usage}\n{error_program}: error: {message}")),
         code: 2,
     }
+}
+
+fn is_long_option(value: &str, option: &str) -> bool {
+    value.len() > 2 && value.starts_with("--") && option.starts_with(value)
+}
+
+fn long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
+    let (name, value) = value.split_once('=')?;
+    is_long_option(name, option).then_some(value)
 }
 
 fn parse_args() -> Result<Args> {
     let mut values = env::args();
     let program = values.next().unwrap_or_else(|| "gh-read".to_owned());
+    let program = Path::new(&program)
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("gh-read")
+        .to_owned();
     let Some(resource_value) = values.next() else {
         return Err(argument_error(
             &program,
             None,
+            None,
             "the following arguments are required: resource",
         ));
     };
+    if resource_value == "-h" || is_long_option(&resource_value, "--help") {
+        print_root_help(&program);
+        std::process::exit(0);
+    }
     let resource = match resource_value.as_str() {
         "pr" => Resource::Pr,
         "issue" => Resource::Issue,
@@ -148,7 +182,10 @@ fn parse_args() -> Result<Args> {
             return Err(argument_error(
                 &program,
                 None,
-                &format!("argument resource: invalid choice: '{other}' (choose from pr, issue)"),
+                None,
+                &format!(
+                    "argument resource: invalid choice: '{other}' (choose from 'pr', 'issue')"
+                ),
             ));
         }
     };
@@ -157,52 +194,75 @@ fn parse_args() -> Result<Args> {
     let mut repo = None;
     let mut include_resolved = false;
     let mut compact = false;
+    let mut positional_only = false;
+    let mut unrecognized = Vec::new();
     let mut remaining = values;
     while let Some(value) = remaining.next() {
+        if positional_only {
+            if target.is_none() {
+                target = Some(value);
+            } else {
+                unrecognized.push(value);
+            }
+            continue;
+        }
         match value.as_str() {
-            "--repo" => {
+            "--" => positional_only = true,
+            option if long_option_value(option, "--repo").is_some() => {
+                repo = long_option_value(option, "--repo").map(str::to_owned);
+            }
+            option if is_long_option(option, "--repo") => {
                 let Some(value) = remaining.next() else {
                     return Err(argument_error(
                         &program,
                         Some(resource),
+                        Some(resource),
                         "argument --repo: expected one argument",
                     ));
                 };
+                if value != "-" && value.starts_with('-') {
+                    return Err(argument_error(
+                        &program,
+                        Some(resource),
+                        Some(resource),
+                        "argument --repo: expected one argument",
+                    ));
+                }
                 repo = Some(value);
             }
-            option if option.starts_with("--repo=") => {
-                repo = Some(option["--repo=".len()..].to_owned());
+            option if resource == Resource::Pr && is_long_option(option, "--include-resolved") => {
+                include_resolved = true;
             }
-            "--include-resolved" if resource == Resource::Pr => include_resolved = true,
-            "--compact" => compact = true,
-            "-h" | "--help" => {
+            option if is_long_option(option, "--compact") => compact = true,
+            "-h" => {
                 print_help(&program, resource);
                 std::process::exit(0);
             }
-            option if option.starts_with('-') => {
-                return Err(argument_error(
-                    &program,
-                    Some(resource),
-                    &format!("unrecognized arguments: {option}"),
-                ));
+            option if is_long_option(option, "--help") => {
+                print_help(&program, resource);
+                std::process::exit(0);
             }
+            option if option.starts_with('-') => unrecognized.push(option.to_owned()),
             value if target.is_none() => target = Some(value.to_owned()),
-            value => {
-                return Err(argument_error(
-                    &program,
-                    Some(resource),
-                    &format!("unrecognized arguments: {value}"),
-                ));
-            }
+            value => unrecognized.push(value.to_owned()),
         }
     }
     let Some(target) = target else {
         return Err(argument_error(
             &program,
             Some(resource),
+            Some(resource),
             "the following arguments are required: target",
         ));
     };
+    if !unrecognized.is_empty() {
+        return Err(argument_error(
+            &program,
+            None,
+            None,
+            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
+        ));
+    }
     Ok(Args {
         resource,
         target,
@@ -212,13 +272,23 @@ fn parse_args() -> Result<Args> {
     })
 }
 
+fn print_root_help(program: &str) {
+    let text = format!(
+        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n\noptions:\n  -h, --help  show this help message and exit\n",
+        usage(program, None)
+    );
+    io::stdout().write_all(text.as_bytes()).expect("write help");
+}
+
 fn print_help(program: &str, resource: Resource) {
     let text = match resource {
         Resource::Pr => format!(
-            "usage: {program} pr [-h] [--repo REPO] [--include-resolved] [--compact] target\n\nread pull request metadata and review data\n"
+            "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-resolved  include resolved review threads\n  --compact           omit repeated diff hunks and emit compact JSON\n",
+            usage(program, Some(resource))
         ),
         Resource::Issue => format!(
-            "usage: {program} issue [-h] [--repo REPO] [--compact] target\n\nread issue metadata and comments\n"
+            "{}\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n",
+            usage(program, Some(resource))
         ),
     };
     io::stdout().write_all(text.as_bytes()).expect("write help");
@@ -232,7 +302,7 @@ fn stdout_line(message: &str) {
     writeln!(io::stdout(), "{message}").expect("write output");
 }
 
-fn gh_json<I, S>(args: I, payload: Option<&Value>, allow_nonzero_json: bool) -> Result<Value>
+fn gh_json<I, S>(args: I, payload: Option<&str>, allow_nonzero_json: bool) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -249,13 +319,11 @@ where
         .spawn()
         .map_err(|error| Exit::message(error.to_string()))?;
     if let Some(payload) = payload {
-        let encoded = serde_json::to_vec(payload)
-            .map_err(|error| Exit::message(format!("failed to encode GitHub request: {error}")))?;
         child
             .stdin
             .take()
             .expect("stdin is piped when a payload is present")
-            .write_all(&encoded)
+            .write_all(payload.as_bytes())
             .map_err(|error| Exit::message(error.to_string()))?;
     }
     let output = child
@@ -311,12 +379,11 @@ fn python_json(value: &Value) -> String {
     }
 }
 
-fn graphql(query: &str, variables: Value) -> Result<Value> {
-    let response = gh_json(
-        ["api", "graphql", "--input", "-"],
-        Some(&json!({"query": query, "variables": variables})),
-        false,
-    )?;
+fn graphql(query: &str, variables: &str) -> Result<Value> {
+    let query = serde_json::to_string(query)
+        .map_err(|error| Exit::message(format!("failed to encode GitHub request: {error}")))?;
+    let payload = format!(r#"{{"query":{query},"variables":{variables}}}"#);
+    let response = gh_json(["api", "graphql", "--input", "-"], Some(&payload), false)?;
     if let Some(errors) = response.get("errors") {
         stderr_line(&python_json(errors));
         return Err(Exit::code(1));
@@ -408,7 +475,19 @@ fn parse_url(target: &str, resource: Resource) -> Option<(&str, &str)> {
     Some((&path[..repo_length], number))
 }
 
-fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Result<(String, u64)> {
+fn positive_number(value: &str) -> Option<String> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let value = value.trim_start_matches('0');
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn resolve_target(
+    target: &str,
+    repo: Option<String>,
+    resource: Resource,
+) -> Result<(String, String)> {
     if let Some((url_repo, number)) = parse_url(target, resource) {
         if !is_repo(url_repo) {
             let name = match resource {
@@ -425,18 +504,13 @@ fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Res
         {
             return Err(Exit::message("--repo conflicts with the pull request URL"));
         }
-        let number = number.parse::<u64>().ok().filter(|number| *number > 0);
+        let number = positive_number(number);
         if let Some(number) = number {
             return Ok((url_repo.to_owned(), number));
         }
     }
 
-    let number = target
-        .bytes()
-        .all(|byte| byte.is_ascii_digit())
-        .then(|| target.parse::<u64>().ok())
-        .flatten()
-        .filter(|number| *number > 0);
+    let number = positive_number(target);
     let Some(number) = number else {
         let name = match resource {
             Resource::Pr => "pr",
@@ -457,16 +531,20 @@ fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
     })
 }
 
-fn fetch_threads(repo: &str, number: u64, include_resolved: bool) -> Result<(Value, Vec<Value>)> {
+fn fetch_threads(repo: &str, number: &str, include_resolved: bool) -> Result<(Value, Vec<Value>)> {
     let (owner, name) = repo.split_once('/').expect("repository is validated");
     let mut cursor = Value::Null;
     let mut threads = Vec::new();
 
     let pull_request = loop {
-        let data = graphql(
-            THREADS_QUERY,
-            json!({"owner": owner, "name": name, "number": number, "cursor": cursor}),
-        )?;
+        let owner = serde_json::to_string(owner).expect("serializing a string cannot fail");
+        let name = serde_json::to_string(name).expect("serializing a string cannot fail");
+        let cursor_json = serde_json::to_string(&cursor)
+            .map_err(|error| Exit::message(format!("failed to encode GitHub request: {error}")))?;
+        let variables = format!(
+            r#"{{"owner":{owner},"name":{name},"number":{number},"cursor":{cursor_json}}}"#
+        );
+        let data = graphql(THREADS_QUERY, &variables)?;
         let current = value_at(&data, &["repository", "pullRequest"])?;
         if current.is_null() {
             return Err(Exit::message(format!(
@@ -513,7 +591,11 @@ fn fetch_threads(repo: &str, number: u64, include_resolved: bool) -> Result<(Val
             .as_bool()
             .ok_or_else(|| Exit::message("GitHub returned an invalid GraphQL response"))?
         {
-            let data = graphql(COMMENTS_QUERY, json!({"id": id, "cursor": cursor}))?;
+            let variables =
+                serde_json::to_string(&json!({"id": id, "cursor": cursor})).map_err(|error| {
+                    Exit::message(format!("failed to encode GitHub request: {error}"))
+                })?;
+            let data = graphql(COMMENTS_QUERY, &variables)?;
             let page = value_at(&data, &["node", "comments"])?;
             let nodes = value_at(page, &["nodes"])?
                 .as_array()
@@ -546,12 +628,12 @@ fn fetch_threads(repo: &str, number: u64, include_resolved: bool) -> Result<(Val
     Ok((pull_request, threads))
 }
 
-fn fetch_checks(repo: &str, number: u64) -> Result<Value> {
+fn fetch_checks(repo: &str, number: &str) -> Result<Value> {
     let checks = gh_json(
         [
             "pr",
             "checks",
-            &number.to_string(),
+            number,
             "--repo",
             repo,
             "--json",
@@ -566,7 +648,7 @@ fn fetch_checks(repo: &str, number: u64) -> Result<Value> {
     Ok(checks)
 }
 
-fn fetch_issue(repo: &str, number: u64) -> Result<Value> {
+fn fetch_issue(repo: &str, number: &str) -> Result<Value> {
     let issue = gh_json(
         ["api", &format!("repos/{repo}/issues/{number}")],
         None,
@@ -584,7 +666,7 @@ fn run() -> Result<()> {
     let mut result = Map::new();
     match args.resource {
         Resource::Pr => {
-            let (pull_request, mut threads) = fetch_threads(&repo, number, args.include_resolved)?;
+            let (pull_request, mut threads) = fetch_threads(&repo, &number, args.include_resolved)?;
             if args.compact {
                 for thread in &mut threads {
                     if let Some(comments) = thread.get_mut("comments").and_then(Value::as_array_mut)
@@ -598,7 +680,7 @@ fn run() -> Result<()> {
                 }
             }
             result.insert("pullRequest".to_owned(), pull_request);
-            result.insert("checks".to_owned(), fetch_checks(&repo, number)?);
+            result.insert("checks".to_owned(), fetch_checks(&repo, &number)?);
             result.insert(
                 "conversationComments".to_owned(),
                 Value::Array(rest_pages(&format!(
@@ -618,7 +700,7 @@ fn run() -> Result<()> {
             );
         }
         Resource::Issue => {
-            result.insert("issue".to_owned(), fetch_issue(&repo, number)?);
+            result.insert("issue".to_owned(), fetch_issue(&repo, &number)?);
             result.insert(
                 "comments".to_owned(),
                 Value::Array(rest_pages(&format!(
