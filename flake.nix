@@ -60,7 +60,7 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             nativeCheckInputs = [
               pkgs.jq
-              pkgs.python3
+              pkgs.python313
             ];
             postInstall = ''
               wrapProgram "$out/bin/gh-read" --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gh ]}"
@@ -94,7 +94,7 @@
               pkgs.gh
               pkgs.jq
               pkgs.lefthook
-              pkgs.python3
+              pkgs.python313
             ];
           };
         }

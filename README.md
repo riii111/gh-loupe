@@ -44,3 +44,4 @@ cargo machete
 ```
 
 Agent向けSkillの正本は[`skills/gh-read`](skills/gh-read)にあります。
+compatibility testは、Nix開発環境とCIでPython 3.13のreference実装を使用します。
