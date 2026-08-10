@@ -19,7 +19,6 @@ fi
 
 if [ "$1 $2" = "repo view" ]; then
   if [ "${GH_TEST_REPO_AUTH_FAILURE:-}" = 1 ]; then
-    printf 'Bad credentials\n' >&2
     exit 4
   fi
   printf '{"nameWithOwner":"riii111/dotfiles"}\n'
@@ -48,7 +47,7 @@ if [ "$1 $2" = "api graphql" ]; then
   if jq -e '.query | contains("ThreadSummaries")' <<<"$payload" >/dev/null; then
     if jq -e '.variables.cursor == "thread-summary-cursor"' <<<"$payload" >/dev/null; then
       if [ "${GH_TEST_THREAD_PAGE_FAILURE:-}" = 1 ]; then
-        printf 'network connection failed during thread pagination\n' >&2
+        printf 'dial tcp: lookup api.github.com: no such host\n' >&2
         exit 32
       fi
       cat <<'JSON'

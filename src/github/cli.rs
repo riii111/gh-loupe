@@ -41,27 +41,31 @@ where
         )
     })?;
     if !output.status.success() {
+        let exit_code = output.status.code();
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         let message = if message.is_empty() {
             format!(
                 "GitHub CLI failed with exit code {}",
-                output.status.code().unwrap_or(1)
+                exit_code.unwrap_or(1)
             )
         } else {
             message
         };
-        return Err(Exit::runtime(&classify_runtime_failure(message), 1));
+        return Err(Exit::runtime(
+            &classify_runtime_failure(exit_code, message),
+            1,
+        ));
     }
     serde_json::from_slice(&output.stdout)
         .map_err(|error| runtime_invalid_response(format!("GitHub returned invalid JSON: {error}")))
 }
 
-pub(super) fn classify_runtime_failure(message: String) -> RuntimeError {
+pub(super) fn classify_runtime_failure(exit_code: Option<i32>, message: String) -> RuntimeError {
     let normalized = message.to_ascii_lowercase();
-    let (kind, retryable) = if normalized.contains("rate limit") {
+    let (kind, retryable) = if exit_code == Some(4) {
+        (ErrorKind::Authentication, false)
+    } else if normalized.contains("rate limit") {
         (ErrorKind::RateLimited, true)
-    } else if normalized.contains("timed out") || normalized.contains("timeout") {
-        (ErrorKind::Timeout, true)
     } else if normalized.contains("bad credentials")
         || normalized.contains("authentication")
         || normalized.contains("not logged")
@@ -75,12 +79,16 @@ pub(super) fn classify_runtime_failure(message: String) -> RuntimeError {
         (ErrorKind::Authorization, false)
     } else if normalized.contains("not found") || normalized.contains("could not resolve to") {
         (ErrorKind::NotFound, false)
-    } else if normalized.contains("network")
+    } else if normalized.contains("dial tcp")
+        || normalized.contains("no such host")
+        || normalized.contains("network")
         || normalized.contains("connection")
         || normalized.contains("resolve host")
         || normalized.contains("name resolution")
     {
         (ErrorKind::Network, true)
+    } else if normalized.contains("timed out") || normalized.contains("timeout") {
+        (ErrorKind::Timeout, true)
     } else {
         (ErrorKind::GitHubCli, false)
     };
@@ -354,14 +362,27 @@ mod tests {
         ];
 
         for (message, kind, retryable) in cases {
-            let error = classify_runtime_failure(message.to_owned());
+            let error = classify_runtime_failure(Some(1), message.to_owned());
             assert_eq!(error.kind, kind);
             assert_eq!(error.retryable, retryable);
             assert_eq!(error.retry_after_seconds, None);
         }
 
-        let error =
-            classify_runtime_failure("API rate limit exceeded; retry after 45 seconds".to_owned());
+        let error = classify_runtime_failure(
+            Some(1),
+            "API rate limit exceeded; retry after 45 seconds".to_owned(),
+        );
         assert_eq!(error.retry_after_seconds, Some(45));
+
+        let error = classify_runtime_failure(Some(4), "unknown gh failure".to_owned());
+        assert_eq!(error.kind, ErrorKind::Authentication);
+        assert!(!error.retryable);
+
+        let error = classify_runtime_failure(
+            Some(1),
+            "dial tcp: lookup api.github.com: no such host".to_owned(),
+        );
+        assert_eq!(error.kind, ErrorKind::Network);
+        assert!(error.retryable);
     }
 }

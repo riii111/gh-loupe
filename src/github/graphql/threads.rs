@@ -144,7 +144,10 @@ fn query(document: &str, variables: &str) -> Result<Value> {
     let response = cli::runtime_json(["api", "graphql", "--input", "-"], Some(&payload))?;
     if let Some(errors) = response.get("errors") {
         let message = format!("GitHub GraphQL error: {errors}");
-        return Err(Exit::runtime(&cli::classify_runtime_failure(message), 1));
+        return Err(Exit::runtime(
+            &cli::classify_runtime_failure(None, message),
+            1,
+        ));
     }
     response
         .get("data")
