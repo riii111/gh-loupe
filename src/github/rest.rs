@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::error::{Exit, Result};
+use crate::error::{Exit, Result, RuntimeError};
 use crate::model::Target;
 
 use super::cli;
@@ -21,6 +21,31 @@ pub fn pull_request_checks(target: &Target) -> Result<Value> {
     )?;
     if !checks.is_array() {
         return Err(Exit::message("GitHub returned an invalid checks response"));
+    }
+    Ok(checks)
+}
+
+pub fn required_check_buckets(target: &Target) -> Result<Value> {
+    let checks = cli::json_runtime_or_empty(
+        [
+            "pr",
+            "checks",
+            &target.number,
+            "--repo",
+            &target.repository,
+            "--required",
+            "--json",
+            "bucket",
+        ],
+        None,
+        true,
+        "no required checks reported on ",
+    )?;
+    if !checks.is_array() {
+        return Err(Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned an invalid required checks response"),
+            1,
+        ));
     }
     Ok(checks)
 }

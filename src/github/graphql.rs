@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::error::{Exit, Result};
+use crate::error::{Exit, Result, RuntimeError};
 use crate::model::Target;
 
 use super::cli;
@@ -78,6 +78,29 @@ query($id: ID!, $cursor: String) {
 }
 ";
 
+const OVERVIEW_QUERY: &str = r"
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      url
+      state
+      isDraft
+      headRefOid
+      baseRefOid
+      reviewDecision
+      mergeStateStatus
+      reviewThreads(first: 100, after: $cursor) {
+        nodes { isResolved }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+";
+
+type FieldValidator = fn(&Value) -> bool;
+
 pub fn pull_request_threads(
     target: &Target,
     include_resolved: bool,
@@ -136,6 +159,72 @@ pub fn pull_request_threads(
     }
 
     Ok((pull_request, threads))
+}
+
+pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
+    let (owner, name) = target
+        .repository
+        .split_once('/')
+        .expect("repository is validated");
+    let mut cursor = Value::Null;
+    let mut unresolved = 0;
+
+    let pull_request = loop {
+        let owner = serde_json::to_string(owner).expect("serializing a string cannot fail");
+        let name = serde_json::to_string(name).expect("serializing a string cannot fail");
+        let cursor_json = serde_json::to_string(&cursor).map_err(|error| {
+            Exit::runtime(
+                &RuntimeError::invalid_response(format!(
+                    "failed to encode GitHub request: {error}"
+                )),
+                1,
+            )
+        })?;
+        let variables = format!(
+            r#"{{"owner":{owner},"name":{name},"number":{},"cursor":{cursor_json}}}"#,
+            target.number
+        );
+        let data = query_runtime(OVERVIEW_QUERY, &variables)?;
+        let current = value_at_runtime(&data, &["repository", "pullRequest"])?;
+        if current.is_null() {
+            return Err(Exit::runtime(
+                &RuntimeError::not_found(format!(
+                    "pull request not found: {}#{}",
+                    target.repository, target.number
+                )),
+                1,
+            ));
+        }
+        let mut current = current.clone();
+        let connection = current
+            .as_object_mut()
+            .and_then(|current| current.shift_remove("reviewThreads"))
+            .ok_or_else(invalid_graphql_response)?;
+        let nodes = value_at_runtime(&connection, &["nodes"])?
+            .as_array()
+            .ok_or_else(invalid_graphql_response)?;
+        for node in nodes {
+            let is_resolved = node
+                .get("isResolved")
+                .and_then(Value::as_bool)
+                .ok_or_else(invalid_graphql_response)?;
+            unresolved += usize::from(!is_resolved);
+        }
+        let page_info = value_at_runtime(&connection, &["pageInfo"])?;
+        let has_next_page = value_at_runtime(page_info, &["hasNextPage"])?
+            .as_bool()
+            .ok_or_else(invalid_graphql_response)?;
+        if !has_next_page {
+            validate_overview_fields(&current)?;
+            break current;
+        }
+        cursor = value_at_runtime(page_info, &["endCursor"])?.clone();
+        if !cursor.is_string() {
+            return Err(invalid_graphql_response());
+        }
+    };
+
+    Ok((pull_request, unresolved))
 }
 
 fn append_comment_pages(thread: &mut Value) -> Result<()> {
@@ -198,6 +287,68 @@ fn query(query: &str, variables: &str) -> Result<Value> {
         .get("data")
         .cloned()
         .ok_or_else(|| Exit::message("GitHub returned a GraphQL response without data"))
+}
+
+fn query_runtime(query: &str, variables: &str) -> Result<Value> {
+    let query = serde_json::to_string(query).expect("GraphQL documents are always serializable");
+    let payload = format!(r#"{{"query":{query},"variables":{variables}}}"#);
+    let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
+    if let Some(errors) = response.get("errors") {
+        let message = format_graphql_errors(errors);
+        return Err(Exit::runtime(
+            &RuntimeError::from_cli_failure(message.as_bytes()),
+            1,
+        ));
+    }
+    response.get("data").cloned().ok_or_else(|| {
+        Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned a GraphQL response without data"),
+            1,
+        )
+    })
+}
+
+fn validate_overview_fields(pull_request: &Value) -> Result<()> {
+    let fields: [(&str, FieldValidator); 8] = [
+        ("number", Value::is_u64),
+        ("url", Value::is_string),
+        ("state", string_or_null),
+        ("isDraft", bool_or_null),
+        ("headRefOid", string_or_null),
+        ("baseRefOid", string_or_null),
+        ("reviewDecision", string_or_null),
+        ("mergeStateStatus", string_or_null),
+    ];
+    for (field, valid) in fields {
+        let value = pull_request
+            .get(field)
+            .ok_or_else(invalid_graphql_response)?;
+        if !valid(value) {
+            return Err(invalid_graphql_response());
+        }
+    }
+    Ok(())
+}
+
+fn string_or_null(value: &Value) -> bool {
+    value.is_string() || value.is_null()
+}
+
+fn bool_or_null(value: &Value) -> bool {
+    value.is_boolean() || value.is_null()
+}
+
+fn value_at_runtime<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
+    path.iter().try_fold(value, |value, key| {
+        value.get(*key).ok_or_else(invalid_graphql_response)
+    })
+}
+
+fn invalid_graphql_response() -> Exit {
+    Exit::runtime(
+        &RuntimeError::invalid_response("GitHub returned an invalid GraphQL response"),
+        1,
+    )
 }
 
 fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
