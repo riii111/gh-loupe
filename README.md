@@ -30,6 +30,8 @@ gh-read pr overview https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO
 gh-read pr https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr 123 --repo OWNER/REPO --include-resolved
+gh-read pr checks 123 --repo OWNER/REPO
+gh-read pr checks 123 --repo OWNER/REPO --required --compact
 gh-read issue 456 --repo OWNER/REPO --compact
 ```
 
@@ -39,6 +41,8 @@ Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必
 `pr overview`の`checks`はrequired checkだけを`passed`、`pending`、`failed`へ排他的に集計し、`reviewThreads.unresolved`は未解決threadの総数を返します。
 成功結果は`schemaVersion`、全取得完了時刻の`observedAt`、`data`を持ちます。
 実行時エラーではstdoutを空にし、stderrへ`schemaVersion`と再試行情報を含むJSONを1行だけ出力します。
+
+`pr checks`は既定ですべてのcheckを返し、`--required`を指定するとrequired checkだけを返します。結果はcheck名、同名ではlinkの昇順です。
 
 ## 開発
 

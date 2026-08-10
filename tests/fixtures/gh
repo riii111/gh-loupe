@@ -33,7 +33,7 @@ if [ "$1 $2" = "repo view" ]; then
 fi
 
 if [ "$1 $2" = "pr checks" ]; then
-  if [[ " $* " == *" --required "* ]]; then
+  if [[ " $* " == *" --json bucket "* ]]; then
     if [ "$*" != "pr checks 42 --repo riii111/dotfiles --required --json bucket" ]; then
       printf 'unexpected overview checks invocation: %s\n' "$*" >&2
       exit 90
@@ -53,6 +53,49 @@ if [ "$1 $2" = "pr checks" ]; then
     esac
     exit 0
   fi
+  if [ -n "${GH_TEST_ARGS_FILE:-}" ]; then
+    printf '%s\n' "$@" >"$GH_TEST_ARGS_FILE"
+  fi
+  case "${GH_TEST_CHECKS_NEW:-}" in
+    success)
+      cat <<'JSON'
+[{"name":"zeta","state":"PENDING","bucket":"pending","link":"https://example.test/z","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"pass","link":"https://example.test/b","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"skipping","link":"https://example.test/a","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
+JSON
+      exit 8
+      ;;
+    missing)
+      printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":"https://example.test/test","workflow":"CI","startedAt":"2026-08-11T10:00:00Z"}]\n'
+      exit 0
+      ;;
+    wrong-type)
+      printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":42,"workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
+      exit 0
+      ;;
+    unknown)
+      printf '[{"name":"test","state":"SUCCESS","bucket":"mystery","link":"https://example.test/test","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
+      exit 0
+      ;;
+    object)
+      printf '{"name":"test"}\n'
+      exit 0
+      ;;
+    authentication)
+      printf 'HTTP 401: Requires authentication; run gh auth login\n' >&2
+      exit 4
+      ;;
+    no-required)
+      printf "no required checks reported on the 'feature' branch\n" >&2
+      exit 1
+      ;;
+    missing-pr)
+      printf 'GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)\n' >&2
+      exit 1
+      ;;
+    missing-repository)
+      printf "GraphQL: Could not resolve to a Repository with the name 'missing'. (repository)\n" >&2
+      exit 1
+      ;;
+  esac
   printf '[{"name":"ci","state":"SUCCESS","bucket":"pass","link":"https://example.test/ci"}]\n'
   case "${GH_TEST_CHECKS_STATUS:-success}" in
     pending) exit 8 ;;

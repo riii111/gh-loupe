@@ -66,15 +66,6 @@ impl RuntimeError {
         }
     }
 
-    pub fn github_cli(message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::GitHubCli,
-            message: message.into(),
-            retryable: false,
-            retry_after_seconds: None,
-        }
-    }
-
     pub fn from_cli_failure(stderr: &[u8]) -> Self {
         let message = String::from_utf8_lossy(stderr).trim().to_owned();
         let message = if message.is_empty() {

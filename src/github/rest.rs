@@ -26,7 +26,7 @@ pub fn pull_request_checks(target: &Target) -> Result<Value> {
 }
 
 pub fn required_check_buckets(target: &Target) -> Result<Value> {
-    let checks = cli::json_runtime(
+    let checks = cli::json_runtime_or_empty(
         [
             "pr",
             "checks",
@@ -39,6 +39,7 @@ pub fn required_check_buckets(target: &Target) -> Result<Value> {
         ],
         None,
         true,
+        "no required checks reported on ",
     )?;
     if !checks.is_array() {
         return Err(Exit::runtime(
