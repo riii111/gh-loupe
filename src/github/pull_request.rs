@@ -24,31 +24,6 @@ pub fn checks(target: &Target, required: bool) -> Result<Value> {
     cli::json_runtime(args, None, true)
 }
 
-pub fn check_runs(
-    target: &Target,
-    head_oid: &str,
-    deadline: Instant,
-    timeout_message: &str,
-) -> Result<Value> {
-    cli::json_runtime_with_deadline(
-        [
-            "api",
-            "--method",
-            "GET",
-            "--paginate",
-            "--slurp",
-            &format!(
-                "repos/{}/commits/{head_oid}/check-runs?per_page=100",
-                target.repository
-            ),
-        ],
-        None,
-        false,
-        deadline,
-        timeout_message,
-    )
-}
-
 pub fn annotations(
     target: &Target,
     check_run_id: u64,

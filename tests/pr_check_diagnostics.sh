@@ -36,6 +36,15 @@ jq -e '
 ' "$tmpdir/status-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/collision-calls")" -eq 1
 
+GH_DIAGNOSTICS_CALLS="$tmpdir/check-run-collision-calls" run_diagnostics check-run-collision \
+  --failed-diagnostics --quiet --compact >"$tmpdir/check-run-collision.json"
+jq -e '
+  [.data.checks[].name] == ["duplicate", "duplicate"] and
+  [.data.checks[].annotations[0].path] == ["first.rs", "second.rs"]
+' "$tmpdir/check-run-collision.json" >/dev/null
+test "$(grep -c 'check-runs/102/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
+test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
+
 run_diagnostics normal --include-failed-logs --quiet --compact \
   >"$tmpdir/logs.json" 2>"$tmpdir/logs.stderr"
 test ! -s "$tmpdir/logs.stderr"

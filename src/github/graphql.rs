@@ -116,6 +116,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
                 nodes {
                   __typename
                   ... on CheckRun {
+                    databaseId
                     name
                     isRequired(pullRequestNumber: $number)
                     status

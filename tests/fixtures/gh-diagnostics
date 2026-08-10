@@ -11,17 +11,22 @@ if [ "$1 $2" = "api graphql" ]; then
   case "${GH_DIAGNOSTICS_MODE:-normal}" in
     no-failures)
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","name":"pass","isRequired":true,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:01:00Z","detailsUrl":"https://example.test/pass","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":103,"name":"pass","isRequired":true,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:01:00Z","detailsUrl":"https://example.test/pass","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
 JSON
       ;;
     status-collision)
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"shared","isRequired":true,"state":"FAILURE","targetUrl":"https://ci.example.test/shared","description":"status"},{"__typename":"CheckRun","name":"shared","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"0001-01-01T00:00:00Z","completedAt":"0001-01-01T00:00:00Z","detailsUrl":"https://ci.example.test/shared","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"shared","isRequired":true,"state":"FAILURE","targetUrl":"https://ci.example.test/shared","description":"status"},{"__typename":"CheckRun","databaseId":102,"name":"shared","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"0001-01-01T00:00:00Z","completedAt":"0001-01-01T00:00:00Z","detailsUrl":"https://ci.example.test/shared","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+JSON
+      ;;
+    check-run-collision)
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":102,"name":"duplicate","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/duplicate","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}},{"__typename":"CheckRun","databaseId":103,"name":"duplicate","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/duplicate","checkSuite":{"workflowRun":{"event":"PULL_REQUEST","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
 JSON
       ;;
     *)
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","name":"actions-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}},{"__typename":"CheckRun","name":"external-cancel","isRequired":true,"status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z","detailsUrl":"https://ci.example.test/build/7","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","name":"pass","isRequired":true,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z","detailsUrl":"https://example.test/pass","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":100,"name":"actions-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}},{"__typename":"CheckRun","databaseId":101,"name":"external-cancel","isRequired":true,"status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z","detailsUrl":"https://ci.example.test/build/7","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":103,"name":"pass","isRequired":true,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z","detailsUrl":"https://example.test/pass","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
 JSON
       ;;
   esac
@@ -85,7 +90,16 @@ if [ "$1" = api ] && [[ "$*" == *check-runs/101/annotations* ]]; then
 fi
 
 if [ "$1" = api ] && [[ "$*" == *check-runs/102/annotations* ]]; then
-  printf '[[{"path":"collision.rs","start_line":1,"end_line":1,"annotation_level":"failure","title":null,"message":"check run"}]]\n'
+  if [ "${GH_DIAGNOSTICS_MODE:-normal}" = check-run-collision ]; then
+    printf '[[{"path":"first.rs","start_line":1,"end_line":1,"annotation_level":"failure","title":null,"message":"first"}]]\n'
+  else
+    printf '[[{"path":"collision.rs","start_line":1,"end_line":1,"annotation_level":"failure","title":null,"message":"check run"}]]\n'
+  fi
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *check-runs/103/annotations* ]]; then
+  printf '[[{"path":"second.rs","start_line":2,"end_line":2,"annotation_level":"failure","title":null,"message":"second"}]]\n'
   exit 0
 fi
 
