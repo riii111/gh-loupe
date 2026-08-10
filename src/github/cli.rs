@@ -1,12 +1,27 @@
 use std::ffi::OsStr;
-use std::io::{self, Write};
-use std::process::{Command, Stdio};
+use std::io::{self, Read, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::error::{Exit, Result};
+use crate::error::{ErrorKind, Exit, Result, RuntimeError};
 
 pub(super) fn json<I, S>(args: I, payload: Option<&str>, allow_nonzero_json: bool) -> Result<Value>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    json_with_deadline(args, payload, allow_nonzero_json, None)
+}
+
+pub(super) fn json_with_deadline<I, S>(
+    args: I,
+    payload: Option<&str>,
+    allow_nonzero_json: bool,
+    deadline: Option<Instant>,
+) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -19,15 +34,21 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    let mut child = command
-        .spawn()
-        .map_err(|error| Exit::message(error.to_string()))?;
-    if let Some(payload) = payload {
-        write_child_stdin(&mut child, payload).map_err(|error| Exit::message(error.to_string()))?;
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| Exit::message(error.to_string()))?;
+    let output = match execute(command, payload, deadline) {
+        Ok(output) => output,
+        Err(ProcessError::TimedOut) => {
+            return Err(Exit::runtime(
+                &RuntimeError {
+                    kind: ErrorKind::Timeout,
+                    message: "GitHub CLI execution timed out".to_owned(),
+                    retryable: true,
+                    retry_after_seconds: None,
+                },
+                1,
+            ));
+        }
+        Err(error) => return Err(Exit::message(error.to_string())),
+    };
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() && !allow_nonzero_json {
         return Err(Exit::child(code, &output.stderr));
@@ -39,6 +60,113 @@ where
             "GitHub returned invalid JSON: {error}"
         ))),
     }
+}
+
+struct ProcessOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+#[derive(Debug)]
+enum ProcessError {
+    Io(io::Error),
+    TimedOut,
+    ReaderPanicked,
+}
+
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => error.fmt(formatter),
+            Self::TimedOut => formatter.write_str("GitHub CLI execution timed out"),
+            Self::ReaderPanicked => formatter.write_str("failed to collect GitHub CLI output"),
+        }
+    }
+}
+
+fn execute(
+    mut command: Command,
+    payload: Option<&str>,
+    deadline: Option<Instant>,
+) -> std::result::Result<ProcessOutput, ProcessError> {
+    let child = command.spawn().map_err(ProcessError::Io)?;
+    collect_output(child, payload, deadline)
+}
+
+fn collect_output(
+    mut child: Child,
+    payload: Option<&str>,
+    deadline: Option<Instant>,
+) -> std::result::Result<ProcessOutput, ProcessError> {
+    let stdout = collect_pipe(child.stdout.take().expect("stdout is piped"));
+    let stderr = collect_pipe(child.stderr.take().expect("stderr is piped"));
+    if let Some(payload) = payload
+        && let Err(error) = write_child_stdin(&mut child, payload)
+    {
+        terminate_and_reap(&mut child)?;
+        return Err(ProcessError::Io(error));
+    }
+    let status = wait_until(&mut child, deadline);
+    let stdout = stdout
+        .join()
+        .map_err(|_| ProcessError::ReaderPanicked)?
+        .map_err(ProcessError::Io)?;
+    let stderr = stderr
+        .join()
+        .map_err(|_| ProcessError::ReaderPanicked)?
+        .map_err(ProcessError::Io)?;
+    let status = status?;
+    Ok(ProcessOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn collect_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        pipe.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })
+}
+
+fn wait_until(
+    child: &mut Child,
+    deadline: Option<Instant>,
+) -> std::result::Result<ExitStatus, ProcessError> {
+    let Some(deadline) = deadline else {
+        return child.wait().map_err(ProcessError::Io);
+    };
+    loop {
+        if let Some(status) = child.try_wait().map_err(ProcessError::Io)? {
+            return Ok(status);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            terminate_and_reap(child)?;
+            return Err(ProcessError::TimedOut);
+        }
+        thread::sleep(
+            deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(10)),
+        );
+    }
+}
+
+fn terminate_and_reap(child: &mut Child) -> std::result::Result<(), ProcessError> {
+    match child.kill() {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+        Err(error) => return Err(ProcessError::Io(error)),
+    }
+    child.wait().map_err(ProcessError::Io)?;
+    Ok(())
 }
 
 fn write_child_stdin(child: &mut std::process::Child, payload: &str) -> io::Result<()> {
@@ -83,5 +211,34 @@ mod tests {
         let output = child.wait_with_output().expect("collect child output");
         assert_eq!(output.status.code(), Some(29));
         assert_eq!(output.stderr, b"simulated stdin failure\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deadline_terminates_and_reaps_the_child() {
+        let child = Command::new("sh")
+            .args(["-c", "exec sleep 60"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id().to_string();
+        let result = collect_output(
+            child,
+            None,
+            Some(Instant::now() + Duration::from_millis(50)),
+        );
+
+        assert!(matches!(result, Err(ProcessError::TimedOut)));
+        assert!(
+            !Command::new("kill")
+                .args(["-0", &pid])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("check child status")
+                .success(),
+            "timed-out child still exists"
+        );
     }
 }

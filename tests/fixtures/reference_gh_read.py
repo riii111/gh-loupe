@@ -238,10 +238,12 @@ def fetch_issue(repo: str, number: int) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Read fixed GitHub PR and Issue metadata without mutations."
+        description="Read fixed GitHub PR and Issue metadata without mutations.",
+        allow_abbrev=False,
     )
     subparsers = parser.add_subparsers(dest="resource", required=True)
     pr = subparsers.add_parser("pr", help="read pull request metadata and review data")
+    pr.allow_abbrev = False
     pr.add_argument("target", help="PR number or GitHub pull request URL")
     pr.add_argument("--repo", help="OWNER/REPO; inferred from cwd when omitted")
     pr.add_argument(
@@ -255,6 +257,7 @@ def parse_args() -> argparse.Namespace:
         help="omit repeated diff hunks and emit compact JSON",
     )
     issue = subparsers.add_parser("issue", help="read issue metadata and comments")
+    issue.allow_abbrev = False
     issue.add_argument("target", help="Issue number or GitHub issue URL")
     issue.add_argument("--repo", help="OWNER/REPO; inferred from cwd when omitted")
     issue.add_argument("--compact", action="store_true", help="emit one-line JSON")

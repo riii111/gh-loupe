@@ -68,6 +68,24 @@ assert_rust_failure() {
   cmp "$tmpdir/$name.expected.stderr" "$tmpdir/$name.rust.stderr"
 }
 
+assert_argument_error() {
+  local name="$1"
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.argument.stdout" 2>"$tmpdir/$name.argument.stderr"
+  local status=$?
+  set -e
+
+  if [ "$status" -ne 2 ]; then
+    printf '%s: expected argument error status 2, got %s\n' "$name" "$status" >&2
+    return 1
+  fi
+  test ! -s "$tmpdir/$name.argument.stdout"
+  test -s "$tmpdir/$name.argument.stderr"
+}
+
 compare_case root-help -- --help
 compare_case pr-help -- pr --help
 compare_case issue-help -- issue --help
@@ -85,8 +103,14 @@ compare_case pr-pages -- pr 42 --include-resolved
 compare_case pr-url -- pr https://github.com/riii111/dotfiles/pull/42
 compare_case repo-equals -- pr 42 --repo=riii111/dotfiles
 compare_case abbreviated-repo -- pr 42 --rep riii111/dotfiles
+compare_case abbreviated-repo-equals -- pr 42 --rep=riii111/dotfiles
 compare_case abbreviated-compact -- pr 42 --comp
 compare_case abbreviated-include-resolved -- pr 42 --incl
+compare_case abbreviated-help -- pr --hel
+assert_argument_error abbreviated-repo-status pr 42 --rep riii111/dotfiles
+assert_argument_error abbreviated-compact-status pr 42 --comp
+assert_argument_error abbreviated-include-resolved-status pr 42 --incl
+assert_argument_error unknown-option-status pr 42 --bogus
 compare_case options-before-target -- pr --compact --repo riii111/dotfiles 42
 compare_case pr-compact -- pr 42 --compact
 compare_case checks-pending GH_TEST_CHECKS_STATUS=pending -- pr 42

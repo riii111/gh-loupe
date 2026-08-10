@@ -69,9 +69,7 @@ fn parse_args() -> Result<Args> {
         };
         resource_value = value;
     }
-    if !root_positional_only
-        && (resource_value == "-h" || is_long_option(&resource_value, "--help"))
-    {
+    if !root_positional_only && (resource_value == "-h" || resource_value == "--help") {
         print_root_help(&program);
         std::process::exit(0);
     }
@@ -108,10 +106,10 @@ fn parse_args() -> Result<Args> {
         }
         match value.as_str() {
             "--" => positional_only = true,
-            option if long_option_value(option, "--repo").is_some() => {
-                repo = long_option_value(option, "--repo").map(str::to_owned);
+            option if exact_long_option_value(option, "--repo").is_some() => {
+                repo = exact_long_option_value(option, "--repo").map(str::to_owned);
             }
-            option if is_long_option(option, "--repo") => {
+            "--repo" => {
                 let Some(value) = remaining.next() else {
                     return Err(argument_error(
                         &program,
@@ -130,15 +128,11 @@ fn parse_args() -> Result<Args> {
                 }
                 repo = Some(value);
             }
-            option if resource == Resource::Pr && is_long_option(option, "--include-resolved") => {
+            "--include-resolved" if resource == Resource::Pr => {
                 include_resolved = true;
             }
-            option if is_long_option(option, "--compact") => compact = true,
-            "-h" => {
-                print_help(&program, resource);
-                std::process::exit(0);
-            }
-            option if is_long_option(option, "--help") => {
+            "--compact" => compact = true,
+            "-h" | "--help" => {
                 print_help(&program, resource);
                 std::process::exit(0);
             }
@@ -300,13 +294,9 @@ fn argument_error(
     }
 }
 
-fn is_long_option(value: &str, option: &str) -> bool {
-    value.len() > 2 && value.starts_with("--") && option.starts_with(value)
-}
-
-fn long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
+fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
     let (name, value) = value.split_once('=')?;
-    is_long_option(name, option).then_some(value)
+    (name == option).then_some(value)
 }
 
 fn print_root_help(program: &str) {
