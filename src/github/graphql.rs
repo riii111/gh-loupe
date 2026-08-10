@@ -5,6 +5,8 @@ use crate::model::Target;
 
 use super::cli;
 
+pub mod threads;
+
 const THREADS_QUERY: &str = r"
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {

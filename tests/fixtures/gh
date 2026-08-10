@@ -18,6 +18,10 @@ if [ "${GH_TEST_INVALID_JSON:-}" = 1 ]; then
 fi
 
 if [ "$1 $2" = "repo view" ]; then
+  if [ "${GH_TEST_REPO_AUTH_FAILURE:-}" = 1 ]; then
+    printf 'Bad credentials\n' >&2
+    exit 4
+  fi
   printf '{"nameWithOwner":"riii111/dotfiles"}\n'
   exit 0
 fi
@@ -39,6 +43,42 @@ if [ "$1 $2" = "api graphql" ]; then
   fi
   if [ "${GH_TEST_MISSING_PR:-}" = 1 ]; then
     printf '{"data":{"repository":{"pullRequest":null}}}\n'
+    exit 0
+  fi
+  if jq -e '.query | contains("ThreadSummaries")' <<<"$payload" >/dev/null; then
+    if jq -e '.variables.cursor == "thread-summary-cursor"' <<<"$payload" >/dev/null; then
+      if [ "${GH_TEST_THREAD_PAGE_FAILURE:-}" = 1 ]; then
+        printf 'network connection failed during thread pagination\n' >&2
+        exit 32
+      fi
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-same-a","isResolved":false,"isOutdated":true,"path":null,"line":null,"originalLine":null,"startLine":null,"diffSide":null,"comments":{"nodes":[{"id":"comment-a","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:30:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+    else
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-later","isResolved":false,"isOutdated":false,"path":"later.rs","line":30,"originalLine":29,"startLine":28,"diffSide":"RIGHT","comments":{"nodes":[{"id":"comment-later","createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T01:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}},{"id":"thread-same-b","isResolved":false,"isOutdated":false,"path":"same.rs","line":12,"originalLine":10,"startLine":null,"diffSide":"LEFT","comments":{"nodes":[{"id":"comment-b1","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:10:00Z"}],"pageInfo":{"hasNextPage":true,"endCursor":"comment-summary-cursor"}}},{"id":"thread-resolved-summary","isResolved":true,"isOutdated":false,"path":"done.rs","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","comments":{"nodes":[{"id":"comment-r1","createdAt":"2025-12-31T00:00:00Z","updatedAt":"2025-12-31T00:10:00Z"}],"pageInfo":{"hasNextPage":true,"endCursor":"resolved-summary-cursor"}}}],"pageInfo":{"hasNextPage":true,"endCursor":"thread-summary-cursor"}}}}}}
+JSON
+    fi
+    exit 0
+  fi
+  if jq -e '.query | contains("ThreadSummaryComments")' <<<"$payload" >/dev/null; then
+    if jq -e '.variables.id == "thread-resolved-summary"' <<<"$payload" >/dev/null; then
+      if [ "${GH_FAIL_RESOLVED_COMMENTS:-}" = 1 ]; then
+        printf 'resolved summary comments should not be fetched\n' >&2
+        exit 88
+      fi
+      cat <<'JSON'
+{"data":{"node":{"comments":{"nodes":[{"id":"comment-r2","createdAt":"2025-12-31T01:00:00Z","updatedAt":"2025-12-31T02:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+JSON
+      exit 0
+    fi
+    if [ "${GH_TEST_COMMENT_PAGE_FAILURE:-}" = 1 ]; then
+      printf 'simulated comment pagination failure\n' >&2
+      exit 33
+    fi
+    cat <<'JSON'
+{"data":{"node":{"comments":{"nodes":[{"id":"comment-b2","createdAt":"2026-01-01T01:00:00Z","updatedAt":"2026-01-03T00:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+JSON
     exit 0
   fi
   if jq -e '.query | contains("reviewThreads")' <<<"$payload" >/dev/null; then

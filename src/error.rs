@@ -1,10 +1,6 @@
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "used by follow-up subcommands with schema v1 errors"
-)]
 pub enum ErrorKind {
     Authentication,
     Authorization,
@@ -75,10 +71,6 @@ impl Exit {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "used by follow-up subcommands with schema v1 errors"
-    )]
     pub fn runtime(error: &RuntimeError, code: i32) -> Self {
         Self {
             message: Some(
@@ -87,6 +79,18 @@ impl Exit {
             ),
             code,
         }
+    }
+
+    pub fn invalid_response(message: impl Into<String>) -> Self {
+        Self::runtime(
+            &RuntimeError {
+                kind: ErrorKind::InvalidResponse,
+                message: message.into(),
+                retryable: false,
+                retry_after_seconds: None,
+            },
+            1,
+        )
     }
 
     pub fn stderr_line(&self) -> Option<&str> {

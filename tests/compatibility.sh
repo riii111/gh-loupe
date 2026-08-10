@@ -86,6 +86,55 @@ assert_argument_error() {
   test -s "$tmpdir/$name.argument.stderr"
 }
 
+run_threads() {
+  local name="$1"
+  shift
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.threads.stdout" 2>"$tmpdir/$name.threads.stderr"
+  test ! -s "$tmpdir/$name.threads.stderr"
+  jq -e '
+    .schemaVersion == 1 and
+    (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+    (.data | keys == ["threads"])
+  ' "$tmpdir/$name.threads.stdout" >/dev/null
+}
+
+assert_threads_runtime_failure() {
+  local name="$1"
+  local expected_kind="$2"
+  shift 2
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.runtime.stdout" 2>"$tmpdir/$name.runtime.stderr"
+  local status=$?
+  set -e
+
+  test "$status" -ne 0
+  test ! -s "$tmpdir/$name.runtime.stdout"
+  test "$(wc -l <"$tmpdir/$name.runtime.stderr")" -eq 1
+  jq -e --arg kind "$expected_kind" '
+    .schemaVersion == 1 and
+    .error.kind == $kind and
+    (.error.message | type == "string") and
+    (.error.retryable | type == "boolean") and
+    (.error.retryAfterSeconds == null)
+  ' "$tmpdir/$name.runtime.stderr" >/dev/null
+}
+
 compare_case root-help -- --help
 compare_case pr-help -- pr --help
 compare_case issue-help -- issue --help
@@ -133,3 +182,80 @@ compare_case graphql-error GH_TEST_GRAPHQL_ERROR=1 -- pr 42
 assert_rust_failure invalid-json 1 \
   'GitHub returned invalid JSON: expected ident at line 1 column 2' \
   GH_TEST_INVALID_JSON=1 -- pr 42
+
+assert_argument_error threads-missing-target pr threads
+assert_argument_error threads-abbreviated-repo pr threads 42 --rep riii111/dotfiles
+assert_argument_error threads-abbreviated-compact pr threads 42 --comp
+assert_argument_error threads-abbreviated-include-resolved pr threads 42 --incl
+assert_argument_error threads-invalid-zero pr threads 0 --repo riii111/dotfiles
+assert_argument_error threads-invalid-repo pr threads 42 --repo ../..
+assert_argument_error threads-conflicting-repo \
+  pr threads https://github.com/riii111/dotfiles/pull/42 --repo other/repo
+
+run_threads threads-default GH_FAIL_RESOLVED_COMMENTS=1 -- \
+  pr threads 42 --repo riii111/dotfiles
+jq -e '
+  .data.threads == [
+    {
+      "id": "thread-same-a",
+      "isResolved": false,
+      "isOutdated": true,
+      "path": null,
+      "line": null,
+      "originalLine": null,
+      "startLine": null,
+      "diffSide": null,
+      "commentCount": 1,
+      "lastUpdatedAt": "2026-01-01T00:30:00Z"
+    },
+    {
+      "id": "thread-same-b",
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "same.rs",
+      "line": 12,
+      "originalLine": 10,
+      "startLine": null,
+      "diffSide": "LEFT",
+      "commentCount": 2,
+      "lastUpdatedAt": "2026-01-03T00:00:00Z"
+    },
+    {
+      "id": "thread-later",
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "later.rs",
+      "line": 30,
+      "originalLine": 29,
+      "startLine": 28,
+      "diffSide": "RIGHT",
+      "commentCount": 1,
+      "lastUpdatedAt": "2026-01-02T01:00:00Z"
+    }
+  ] and
+  ([.. | objects | keys[]] | any(. == "body" or . == "author" or . == "url" or . == "diffHunk" or . == "resolvedBy") | not)
+' "$tmpdir/threads-default.threads.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/threads-default.threads.stdout")" -gt 1
+
+run_threads threads-including-resolved -- \
+  pr threads 42 --repo riii111/dotfiles --include-resolved --compact
+jq -e '
+  .data.threads[0].id == "thread-resolved-summary" and
+  .data.threads[0].commentCount == 2 and
+  .data.threads[0].lastUpdatedAt == "2025-12-31T02:00:00Z" and
+  (.data.threads | length == 4)
+' "$tmpdir/threads-including-resolved.threads.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/threads-including-resolved.threads.stdout")" -eq 1
+
+assert_threads_runtime_failure threads-thread-page-failure network \
+  GH_TEST_THREAD_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
+assert_threads_runtime_failure threads-comment-page-failure githubCli \
+  GH_TEST_COMMENT_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
+assert_threads_runtime_failure threads-missing-pr notFound \
+  GH_TEST_MISSING_PR=1 -- pr threads 42 --repo riii111/dotfiles
+assert_threads_runtime_failure threads-graphql-error githubCli \
+  GH_TEST_GRAPHQL_ERROR=1 -- pr threads 42 --repo riii111/dotfiles
+assert_threads_runtime_failure threads-invalid-json invalidResponse \
+  GH_TEST_INVALID_JSON=1 -- pr threads 42 --repo riii111/dotfiles
+assert_threads_runtime_failure threads-repo-auth authentication \
+  GH_TEST_REPO_AUTH_FAILURE=1 -- pr threads 42
