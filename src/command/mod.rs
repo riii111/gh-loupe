@@ -31,6 +31,10 @@ enum Action {
         diagnostics: CheckDiagnosticsOptions,
     },
     PrOverview,
+    PrThread {
+        thread_id: String,
+        include_diff_hunk: bool,
+    },
     PrThreads {
         include_resolved: bool,
     },
@@ -43,6 +47,7 @@ impl Action {
             Self::PrInspect { .. }
             | Self::PrChecks { .. }
             | Self::PrOverview
+            | Self::PrThread { .. }
             | Self::PrThreads { .. } => Resource::Pr,
             Self::IssueInspect => Resource::Issue,
         }
@@ -59,7 +64,12 @@ pub fn run() -> Result<()> {
     let target = match &action {
         Action::PrChecks { .. } => resolve_checks_target(&target, repo, &program_name())?,
         Action::PrOverview => resolve_overview_target(&target, repo, &program_name())?,
-        Action::PrThreads { .. } => resolve_threads_target(&target, repo, &program_name())?,
+        Action::PrThread { .. } => {
+            resolve_pr_subcommand_target(&target, repo, &program_name(), thread_argument_error)?
+        }
+        Action::PrThreads { .. } => {
+            resolve_pr_subcommand_target(&target, repo, &program_name(), threads_argument_error)?
+        }
         _ => resolve_target(&target, repo, action.resource())?,
     };
     let result = match action {
@@ -68,6 +78,16 @@ pub fn run() -> Result<()> {
             diagnostics,
         } => usecase::pull_request::checks::execute(&target, required, diagnostics)?,
         Action::PrOverview => usecase::pull_request::overview::execute(&target)?,
+        Action::PrThread {
+            thread_id,
+            include_diff_hunk,
+        } => output::success(serde_json::json!({
+            "thread": usecase::pull_request::thread::execute(
+                &target,
+                &thread_id,
+                include_diff_hunk,
+            )?,
+        })),
         Action::PrThreads { include_resolved } => output::success(serde_json::json!({
             "threads": usecase::pull_request::threads::execute(&target, include_resolved)?,
         })),
@@ -145,6 +165,10 @@ fn parse_args() -> Result<Args> {
     if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "threads") {
         remaining.next();
         return parse_threads_args(&program, remaining);
+    }
+    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "thread") {
+        remaining.next();
+        return parse_thread_args(&program, remaining);
     }
 
     let mut target = None;
@@ -475,6 +499,90 @@ where
     })
 }
 
+fn parse_thread_args<I>(program: &str, mut values: std::iter::Peekable<I>) -> Result<Args>
+where
+    I: Iterator<Item = String>,
+{
+    let mut target = None;
+    let mut thread_id = None;
+    let mut repo = None;
+    let mut include_diff_hunk = false;
+    let mut compact = false;
+    let mut positional_only = false;
+    let mut unrecognized = Vec::new();
+
+    while let Some(value) = values.next() {
+        if positional_only {
+            if target.is_none() {
+                target = Some(value);
+            } else if thread_id.is_none() {
+                thread_id = Some(value);
+            } else {
+                unrecognized.push(value);
+            }
+            continue;
+        }
+        match value.as_str() {
+            "--" => positional_only = true,
+            option if exact_long_option_value(option, "--repo").is_some() => {
+                repo = exact_long_option_value(option, "--repo").map(str::to_owned);
+            }
+            "--repo" => {
+                let Some(value) = values.next() else {
+                    return Err(thread_argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                };
+                if value != "-" && value.starts_with('-') {
+                    return Err(thread_argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                }
+                repo = Some(value);
+            }
+            "--include-diff-hunk" => include_diff_hunk = true,
+            "--compact" => compact = true,
+            "-h" | "--help" => {
+                print_thread_help(program);
+                std::process::exit(0);
+            }
+            option if option.starts_with('-') => unrecognized.push(option.to_owned()),
+            value if target.is_none() => target = Some(value.to_owned()),
+            value if thread_id.is_none() => thread_id = Some(value.to_owned()),
+            value => unrecognized.push(value.to_owned()),
+        }
+    }
+    let Some(target) = target else {
+        return Err(thread_argument_error(
+            program,
+            "the following arguments are required: target, thread_id",
+        ));
+    };
+    let Some(thread_id) = thread_id else {
+        return Err(thread_argument_error(
+            program,
+            "the following arguments are required: thread_id",
+        ));
+    };
+    if !unrecognized.is_empty() {
+        return Err(thread_argument_error(
+            program,
+            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
+        ));
+    }
+    Ok(Args {
+        action: Action::PrThread {
+            thread_id,
+            include_diff_hunk,
+        },
+        target,
+        repo,
+        compact,
+    })
+}
+
 fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Result<Target> {
     if let Some((url_repo, number)) = parse_url(target, resource) {
         if !is_repo(url_repo) {
@@ -566,10 +674,15 @@ fn resolve_checks_target(target: &str, repo: Option<String>, program: &str) -> R
     Ok(Target { repository, number })
 }
 
-fn resolve_threads_target(target: &str, repo: Option<String>, program: &str) -> Result<Target> {
+fn resolve_pr_subcommand_target(
+    target: &str,
+    repo: Option<String>,
+    program: &str,
+    argument_error: fn(&str, &str) -> Exit,
+) -> Result<Target> {
     if let Some((url_repo, number)) = parse_url(target, Resource::Pr) {
         if !is_repo(url_repo) {
-            return Err(threads_argument_error(
+            return Err(argument_error(
                 program,
                 "pr URL must contain a valid OWNER/REPO",
             ));
@@ -578,13 +691,13 @@ fn resolve_threads_target(target: &str, repo: Option<String>, program: &str) -> 
             .as_ref()
             .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
         {
-            return Err(threads_argument_error(
+            return Err(argument_error(
                 program,
                 "--repo conflicts with the pull request URL",
             ));
         }
         let Some(number) = positive_number(number) else {
-            return Err(threads_argument_error(
+            return Err(argument_error(
                 program,
                 "pr must be a positive number or GitHub pr URL",
             ));
@@ -596,7 +709,7 @@ fn resolve_threads_target(target: &str, repo: Option<String>, program: &str) -> 
     }
 
     let Some(number) = positive_number(target) else {
-        return Err(threads_argument_error(
+        return Err(argument_error(
             program,
             "pr must be a positive number or GitHub pr URL",
         ));
@@ -606,10 +719,7 @@ fn resolve_threads_target(target: &str, repo: Option<String>, program: &str) -> 
         None => github::current_repository_runtime()?,
     };
     if !is_repo(&repository) {
-        return Err(threads_argument_error(
-            program,
-            "--repo must use OWNER/REPO format",
-        ));
+        return Err(argument_error(program, "--repo must use OWNER/REPO format"));
     }
     Ok(Target { repository, number })
 }
@@ -794,6 +904,22 @@ fn threads_argument_error(program: &str, message: &str) -> Exit {
     }
 }
 
+fn thread_usage(program: &str) -> String {
+    format!(
+        "usage: {program} pr thread [-h] [--repo REPO] [--include-diff-hunk] [--compact] target thread_id"
+    )
+}
+
+fn thread_argument_error(program: &str, message: &str) -> Exit {
+    Exit {
+        message: Some(format!(
+            "{}\n{program} pr thread: error: {message}",
+            thread_usage(program)
+        )),
+        code: 2,
+    }
+}
+
 fn overview_usage(program: &str) -> String {
     format!("usage: {program} pr overview [-h] [--repo REPO] [--compact] target")
 }
@@ -851,6 +977,14 @@ fn print_threads_help(program: &str) {
     let text = format!(
         "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-resolved  include resolved review threads\n  --compact           emit one-line JSON\n",
         threads_usage(program)
+    );
+    io::stdout().write_all(text.as_bytes()).expect("write help");
+}
+
+fn print_thread_help(program: &str) {
+    let text = format!(
+        "{}\n\npositional arguments:\n  target               PR number or GitHub pull request URL\n  thread_id            GraphQL review thread node ID\n\noptions:\n  -h, --help           show this help message and exit\n  --repo REPO          OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk  include diffHunk on every comment\n  --compact            emit one-line JSON\n",
+        thread_usage(program)
     );
     io::stdout().write_all(text.as_bytes()).expect("write help");
 }

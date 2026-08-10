@@ -106,6 +106,26 @@ run_threads() {
   ' "$tmpdir/$name.threads.stdout" >/dev/null
 }
 
+run_thread() {
+  local name="$1"
+  shift
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.thread.stdout" 2>"$tmpdir/$name.thread.stderr"
+  test ! -s "$tmpdir/$name.thread.stderr"
+  jq -e '
+    .schemaVersion == 1 and
+    (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+    (.data | keys == ["thread"])
+  ' "$tmpdir/$name.thread.stdout" >/dev/null
+}
+
 assert_threads_runtime_failure() {
   local name="$1"
   local expected_kind="$2"
@@ -358,3 +378,78 @@ assert_threads_runtime_failure threads-invalid-json invalidResponse \
   GH_TEST_INVALID_JSON=1 -- pr threads 42 --repo riii111/dotfiles
 assert_threads_runtime_failure threads-repo-auth authentication \
   GH_TEST_REPO_AUTH_FAILURE=1 -- pr threads 42
+
+assert_argument_error thread-missing-target pr thread
+assert_argument_error thread-missing-id pr thread 42 --repo riii111/dotfiles
+assert_argument_error thread-abbreviated-repo pr thread 42 thread-detail --rep riii111/dotfiles
+assert_argument_error thread-abbreviated-compact pr thread 42 thread-detail --comp
+assert_argument_error thread-abbreviated-diff-hunk pr thread 42 thread-detail --incl
+assert_argument_error thread-invalid-target pr thread nope thread-detail --repo riii111/dotfiles
+assert_argument_error thread-conflicting-repo \
+  pr thread https://github.com/riii111/dotfiles/pull/42 thread-detail --repo other/repo
+
+run_thread thread-default -- pr thread 42 thread-detail --repo riii111/dotfiles
+jq -e '
+  .data.thread == {
+    "id": "thread-detail",
+    "isResolved": false,
+    "isOutdated": true,
+    "path": "src/lib.rs",
+    "line": 42,
+    "originalLine": 39,
+    "startLine": null,
+    "diffSide": "RIGHT",
+    "comments": [
+      {
+        "id": "comment-a",
+        "url": "https://example.test/a",
+        "body": "first by id",
+        "author": null,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-03T00:00:00Z",
+        "replyToId": "comment-b"
+      },
+      {
+        "id": "comment-b",
+        "url": "https://example.test/b",
+        "body": "second by id",
+        "author": "author",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "replyToId": null
+      },
+      {
+        "id": "comment-z",
+        "url": "https://example.test/z",
+        "body": "later",
+        "author": "reviewer",
+        "createdAt": "2026-01-02T00:00:00Z",
+        "updatedAt": "2026-01-02T00:00:00Z",
+        "replyToId": null
+      }
+    ]
+  } and
+  ([.. | objects | keys[]] | any(. == "diffHunk" or . == "databaseId" or . == "resolvedBy" or . == "replyTo" or . == "pullRequest") | not)
+' "$tmpdir/thread-default.thread.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/thread-default.thread.stdout")" -gt 1
+
+run_thread thread-diff-hunk -- \
+  pr thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk --compact
+jq -e '
+  [.data.thread.comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
+  (.data.thread.comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
+' "$tmpdir/thread-diff-hunk.thread.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/thread-diff-hunk.thread.stdout")" -eq 1
+
+assert_threads_runtime_failure thread-wrong-pr notFound \
+  GH_TEST_THREAD_DETAIL=wrong-pr -- pr thread 42 thread-detail --repo riii111/dotfiles
+assert_threads_runtime_failure thread-wrong-repo notFound \
+  GH_TEST_THREAD_DETAIL=wrong-repo -- pr thread 42 thread-detail --repo riii111/dotfiles
+assert_threads_runtime_failure thread-missing notFound \
+  GH_TEST_THREAD_DETAIL=missing -- pr thread 42 thread-detail --repo riii111/dotfiles
+assert_threads_runtime_failure thread-unresolved-node notFound \
+  GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr thread 42 missing --repo riii111/dotfiles
+assert_threads_runtime_failure thread-wrong-type notFound \
+  GH_TEST_THREAD_DETAIL=wrong-type -- pr thread 42 thread-detail --repo riii111/dotfiles
+assert_threads_runtime_failure thread-comment-page-failure githubCli \
+  GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr thread 42 thread-detail --repo riii111/dotfiles
