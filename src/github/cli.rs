@@ -112,7 +112,11 @@ fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
         (ErrorKind::RateLimited, true)
     } else if normalized.contains("http 403") || normalized.contains("forbidden") {
         (ErrorKind::Authorization, false)
-    } else if normalized.contains("http 404") || normalized.contains("not found") {
+    } else if normalized.contains("http 404")
+        || normalized.contains("not found")
+        || normalized.contains("could not resolve to a pullrequest")
+        || normalized.contains("could not resolve to a repository")
+    {
         (ErrorKind::NotFound, false)
     } else if normalized.contains("could not resolve host")
         || normalized.contains("connection reset")

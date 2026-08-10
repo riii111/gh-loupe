@@ -55,6 +55,17 @@ test "$status" -eq 1
 test ! -s "$tmpdir/auth.stdout"
 jq -e '.error.kind == "authentication" and .error.retryable == false' "$tmpdir/auth.stderr" >/dev/null
 
+for mode in missing-pr missing-repository; do
+  set +e
+  run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
+  status=$?
+  set -e
+  test "$status" -eq 1
+  test ! -s "$tmpdir/$mode.stdout"
+  jq -e '.error.kind == "notFound" and .error.retryable == false' \
+    "$tmpdir/$mode.stderr" >/dev/null
+done
+
 for option in --failed-diagnostics --include-failed-logs --timeout --quiet; do
   set +e
   env PATH="$tmpdir/bin:$PATH" "$GH_READ_BIN" pr checks 42 --repo riii111/dotfiles "$option" \

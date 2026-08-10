@@ -57,6 +57,14 @@ JSON
       printf "no required checks reported on the 'feature' branch\n" >&2
       exit 1
       ;;
+    missing-pr)
+      printf 'GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)\n' >&2
+      exit 1
+      ;;
+    missing-repository)
+      printf "GraphQL: Could not resolve to a Repository with the name 'missing'. (repository)\n" >&2
+      exit 1
+      ;;
   esac
   printf '[{"name":"ci","state":"SUCCESS","bucket":"pass","link":"https://example.test/ci"}]\n'
   case "${GH_TEST_CHECKS_STATUS:-success}" in
