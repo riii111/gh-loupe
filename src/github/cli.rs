@@ -121,6 +121,8 @@ pub(super) fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
     } else if normalized.contains("could not resolve host")
         || normalized.contains("dial tcp")
         || normalized.contains("no such host")
+        || normalized.contains("error connecting to ")
+        || normalized.contains("check your internet connection")
         || normalized.contains("connection reset")
         || normalized.contains("connection refused")
         || normalized.contains("tls handshake")

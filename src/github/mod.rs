@@ -5,7 +5,7 @@ pub mod rest;
 
 use serde_json::Value;
 
-use crate::error::{Exit, Result};
+use crate::error::{Exit, Result, RuntimeError};
 
 pub fn current_repository() -> Result<String> {
     let response = cli::json(["repo", "view", "--json", "nameWithOwner"], None, false)?;
@@ -22,5 +22,10 @@ pub fn current_repository_runtime() -> Result<String> {
         .get("nameWithOwner")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid repository response"))
+        .ok_or_else(|| {
+            Exit::runtime(
+                &RuntimeError::invalid_response("GitHub returned an invalid repository response"),
+                1,
+            )
+        })
 }
