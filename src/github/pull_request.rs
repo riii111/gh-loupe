@@ -75,6 +75,7 @@ pub fn job_log(
     target: &Target,
     job_id: u64,
     max_bytes: usize,
+    max_lines: usize,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<cli::BoundedBytes> {
@@ -86,6 +87,7 @@ pub fn job_log(
             &format!("repos/{}/actions/jobs/{job_id}/logs", target.repository),
         ],
         max_bytes,
+        max_lines,
         deadline,
         timeout_message,
     )

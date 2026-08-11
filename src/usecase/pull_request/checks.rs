@@ -119,6 +119,7 @@ fn collect_diagnostics(
                     check_run_id,
                     head_oid,
                     LOG_BYTE_LIMIT,
+                    LOG_LINE_LIMIT,
                     deadline,
                     timeout_message,
                 )?
@@ -447,6 +448,7 @@ fn collect_actions_log(
     check_run_id: Option<u64>,
     head_oid: &str,
     max_bytes: usize,
+    max_lines: usize,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<Value> {
@@ -470,8 +472,14 @@ fn collect_actions_log(
         return Ok(Value::Null);
     }
 
-    let bytes =
-        github::pull_request::job_log(target, job_id, max_bytes, deadline, timeout_message)?;
+    let bytes = github::pull_request::job_log(
+        target,
+        job_id,
+        max_bytes,
+        max_lines,
+        deadline,
+        timeout_message,
+    )?;
     truncate_log(bytes)
 }
 
@@ -513,7 +521,11 @@ fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
         bytes,
         total_bytes,
         total_newlines,
+        valid_utf8,
     } = log;
+    if !valid_utf8 {
+        return Err(invalid_response("GitHub returned a non-UTF-8 job log"));
+    }
     let byte_start = bytes.len().saturating_sub(LOG_BYTE_LIMIT);
     let line_start = line_start(&bytes, total_newlines);
     let mut start = byte_start.max(line_start);
@@ -724,6 +736,7 @@ mod tests {
             bytes: input.into_bytes(),
             total_bytes,
             total_newlines,
+            valid_utf8: true,
         })
         .unwrap_or_else(|_| panic!("truncate log"));
 
@@ -743,6 +756,7 @@ mod tests {
             total_bytes: bytes.len() as u64,
             total_newlines: newline_count(&bytes),
             bytes,
+            valid_utf8: true,
         })
         .unwrap_or_else(|_| panic!("retain log"));
 
@@ -767,6 +781,7 @@ mod tests {
             bytes,
             total_bytes,
             total_newlines,
+            valid_utf8: true,
         })
         .unwrap_or_else(|_| panic!("truncate UTF-8 log"));
 
