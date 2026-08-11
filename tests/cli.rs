@@ -4,7 +4,7 @@ use std::process::Command;
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
-use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -61,7 +61,7 @@ fn closed_stdout_does_not_panic_for_help_or_normal_output() {
     for arguments in [["--help"].as_slice(), ["issue", "42"].as_slice()] {
         let (reader, writer) = UnixStream::pair().expect("create stdout socket pair");
         drop(reader);
-        let writer = unsafe { OwnedFd::from_raw_fd(writer.into_raw_fd()) };
+        let writer: OwnedFd = writer.into();
         let output = Command::new(env!("CARGO_BIN_EXE_gh-read"))
             .args(arguments)
             .env("PATH", &path)
