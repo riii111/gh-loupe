@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-cli.XXXXXX")"
@@ -30,11 +32,13 @@ assert_argument_error() {
   local name="$1"
   shift
 
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.argument.stdout" 2>"$tmpdir/$name.argument.stderr"
-  local status=$?
-  set -e
+  local status
+  if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" "$@" \
+    >"$tmpdir/$name.argument.stdout" 2>"$tmpdir/$name.argument.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
 
   if [ "$status" -ne 2 ]; then
     printf '%s: expected argument error status 2, got %s\n' "$name" "$status" >&2
@@ -84,10 +88,11 @@ run_review_thread() {
   ' "$tmpdir/$name.review_thread.stdout" >/dev/null
 }
 
-assert_review_thread_runtime_failure() {
+assert_runtime_failure() {
   local name="$1"
   local expected_kind="$2"
-  shift 2
+  local output_suffix="$3"
+  shift 3
   local -a environment=()
   while [ "$1" != "--" ]; do
     environment+=("$1")
@@ -95,22 +100,24 @@ assert_review_thread_runtime_failure() {
   done
   shift
 
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.runtime.stdout" 2>"$tmpdir/$name.runtime.stderr"
-  local status=$?
-  set -e
+  local status
+  if env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
+    >"$tmpdir/$name.$output_suffix.stdout" 2>"$tmpdir/$name.$output_suffix.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
 
   test "$status" -ne 0
-  test ! -s "$tmpdir/$name.runtime.stdout"
-  test "$(wc -l <"$tmpdir/$name.runtime.stderr")" -eq 1
+  test ! -s "$tmpdir/$name.$output_suffix.stdout"
+  test "$(wc -l <"$tmpdir/$name.$output_suffix.stderr")" -eq 1
   jq -e --arg kind "$expected_kind" '
     .schemaVersion == 1 and
     .error.kind == $kind and
     (.error.message | type == "string") and
     (.error.retryable | type == "boolean") and
     (.error.retryAfterSeconds == null)
-  ' "$tmpdir/$name.runtime.stderr" >/dev/null
+  ' "$tmpdir/$name.$output_suffix.stderr" >/dev/null
 }
 
 run_overview() {
@@ -140,11 +147,13 @@ assert_overview_runtime_error() {
   done
   shift
 
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
-  local status=$?
-  set -e
+  local status
+  if env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
+    >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
 
   test "$status" -ne 0
   test ! -s "$tmpdir/$name.overview.stdout"
@@ -167,11 +176,13 @@ assert_overview_runtime_error_message() {
   done
   shift
 
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
-  local status=$?
-  set -e
+  local status
+  if env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
+    >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
 
   test "$status" -ne 0
   test ! -s "$tmpdir/$name.overview.stdout"
@@ -200,64 +211,6 @@ run_comments() {
     (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
     (.data | keys == ["comments"])
   ' "$tmpdir/$name.comments.stdout" >/dev/null
-}
-
-assert_comments_runtime_failure() {
-  local name="$1"
-  local expected_kind="$2"
-  shift 2
-  local -a environment=()
-  while [ "$1" != "--" ]; do
-    environment+=("$1")
-    shift
-  done
-  shift
-
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.comments.stdout" 2>"$tmpdir/$name.comments.stderr"
-  local status=$?
-  set -e
-
-  test "$status" -ne 0
-  test ! -s "$tmpdir/$name.comments.stdout"
-  test "$(wc -l <"$tmpdir/$name.comments.stderr")" -eq 1
-  jq -e --arg kind "$expected_kind" '
-    .schemaVersion == 1 and
-    .error.kind == $kind and
-    (.error.message | type == "string") and
-    (.error.retryable | type == "boolean") and
-    (.error.retryAfterSeconds == null)
-  ' "$tmpdir/$name.comments.stderr" >/dev/null
-}
-
-assert_issue_runtime_failure() {
-  local name="$1"
-  local expected_kind="$2"
-  shift 2
-  local -a environment=()
-  while [ "$1" != "--" ]; do
-    environment+=("$1")
-    shift
-  done
-  shift
-
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
-    >"$tmpdir/$name.issue.stdout" 2>"$tmpdir/$name.issue.stderr"
-  local status=$?
-  set -e
-
-  test "$status" -ne 0
-  test ! -s "$tmpdir/$name.issue.stdout"
-  test "$(wc -l <"$tmpdir/$name.issue.stderr")" -eq 1
-  jq -e --arg kind "$expected_kind" '
-    .schemaVersion == 1 and
-    .error.kind == $kind and
-    (.error.message | type == "string") and
-    (.error.retryable | type == "boolean") and
-    (.error.retryAfterSeconds == null)
-  ' "$tmpdir/$name.issue.stderr" >/dev/null
 }
 
 run_cli root-help -- --help
@@ -294,11 +247,12 @@ if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|t
   exit 1
 fi
 
-set +e
-GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
-  "$tmpdir/rust/gh-loupe" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"
-bare_status=$?
-set -e
+if GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
+  "$tmpdir/rust/gh-loupe" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"; then
+  bare_status=0
+else
+  bare_status=$?
+fi
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
@@ -312,13 +266,14 @@ assert_argument_error issue-pr-only-option issue 42 --include-resolved
 
 for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"
-  set +e
-  GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
+  if GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
     "$tmpdir/rust/gh-loupe" pr "$removed_subcommand" \
     >"$tmpdir/removed-$removed_subcommand.stdout" \
-    2>"$tmpdir/removed-$removed_subcommand.stderr"
-  removed_status=$?
-  set -e
+    2>"$tmpdir/removed-$removed_subcommand.stderr"; then
+    removed_status=0
+  else
+    removed_status=$?
+  fi
   test "$removed_status" -eq 2
   test ! -s "$tmpdir/removed-$removed_subcommand.stdout"
   test ! -e "$calls_file"
@@ -345,12 +300,13 @@ test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
 jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
 
-set +e
-env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
+if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
   issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
-  >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"
-issue_status=$?
-set -e
+  >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"; then
+  issue_status=0
+else
+  issue_status=$?
+fi
 test "$issue_status" -eq 1
 test ! -s "$tmpdir/issue-conflicting-repo.stdout"
 test "$(cat "$tmpdir/issue-conflicting-repo.stderr")" = \
@@ -359,24 +315,25 @@ test "$(cat "$tmpdir/issue-conflicting-repo.stderr")" = \
 run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
 jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
 
-assert_issue_runtime_failure issue-missing notFound \
+assert_runtime_failure issue-missing notFound issue \
   GH_TEST_MISSING_ISSUE=1 -- issue 42
-assert_issue_runtime_failure issue-gh-failure githubCli \
+assert_runtime_failure issue-gh-failure githubCli issue \
   GH_TEST_FAILURE=1 -- issue 42 --repo riii111/dotfiles
-assert_issue_runtime_failure issue-invalid-json invalidResponse \
+assert_runtime_failure issue-invalid-json invalidResponse issue \
   GH_TEST_INVALID_JSON=1 -- issue 42 --repo riii111/dotfiles
-assert_issue_runtime_failure issue-invalid-page invalidResponse \
+assert_runtime_failure issue-invalid-page invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-page -- issue 42 --repo riii111/dotfiles
-assert_issue_runtime_failure issue-invalid-item invalidResponse \
+assert_runtime_failure issue-invalid-item invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
-assert_issue_runtime_failure issue-missing-repository-metadata invalidResponse \
+assert_runtime_failure issue-missing-repository-metadata invalidResponse issue \
   GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
 
-set +e
-env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue 42 --repo riii111/dotfiles \
-  >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"
-issue_status=$?
-set -e
+if env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue 42 --repo riii111/dotfiles \
+  >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"; then
+  issue_status=0
+else
+  issue_status=$?
+fi
 test "$issue_status" -ne 0
 test ! -s "$tmpdir/issue-spawn.stdout"
 test "$(wc -l <"$tmpdir/issue-spawn.stderr")" -eq 1
@@ -519,12 +476,13 @@ assert_argument_error comments-conflicting-repo \
   pr comments https://github.com/riii111/dotfiles/pull/42 --repo other/repo
 
 huge_pr_calls="$tmpdir/huge-pr.calls"
-set +e
-GH_TEST_CALLS_FILE="$huge_pr_calls" PATH="$tmpdir/bin:$PATH" \
+if GH_TEST_CALLS_FILE="$huge_pr_calls" PATH="$tmpdir/bin:$PATH" \
   "$tmpdir/rust/gh-loupe" pr checks 2147483648 --repo riii111/dotfiles --failed-diagnostics \
-  >"$tmpdir/huge-pr.stdout" 2>"$tmpdir/huge-pr.stderr"
-huge_pr_status=$?
-set -e
+  >"$tmpdir/huge-pr.stdout" 2>"$tmpdir/huge-pr.stderr"; then
+  huge_pr_status=0
+else
+  huge_pr_status=$?
+fi
 test "$huge_pr_status" -eq 2
 test ! -s "$tmpdir/huge-pr.stdout"
 test ! -e "$huge_pr_calls"
@@ -534,12 +492,13 @@ if grep -Eiq 'panicked|stack backtrace' "$tmpdir/huge-pr.stderr"; then
 fi
 
 calls_file="$tmpdir/comments-invalid.calls"
-set +e
-GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
+if GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
   "$tmpdir/rust/gh-loupe" pr comments nope --repo riii111/dotfiles \
-  >"$tmpdir/comments-invalid.stdout" 2>"$tmpdir/comments-invalid.stderr"
-comments_status=$?
-set -e
+  >"$tmpdir/comments-invalid.stdout" 2>"$tmpdir/comments-invalid.stderr"; then
+  comments_status=0
+else
+  comments_status=$?
+fi
 test "$comments_status" -eq 2
 test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
@@ -594,17 +553,17 @@ test "$(sed -n '2p' "$calls_file")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments'
 test "$(wc -l <"$calls_file")" -eq 2
 
-assert_comments_runtime_failure comments-invalid-page invalidResponse \
+assert_runtime_failure comments-invalid-page invalidResponse comments \
   GH_PR_COMMENTS=invalid-page -- pr comments 42 --repo riii111/dotfiles
-assert_comments_runtime_failure comments-invalid-item invalidResponse \
+assert_runtime_failure comments-invalid-item invalidResponse comments \
   GH_PR_COMMENTS=invalid-item -- pr comments 42 --repo riii111/dotfiles
-assert_comments_runtime_failure comments-missing-field invalidResponse \
+assert_runtime_failure comments-missing-field invalidResponse comments \
   GH_PR_COMMENTS=missing-field -- pr comments 42 --repo riii111/dotfiles
-assert_comments_runtime_failure comments-wrong-type invalidResponse \
+assert_runtime_failure comments-wrong-type invalidResponse comments \
   GH_PR_COMMENTS=wrong-type -- pr comments 42 --repo riii111/dotfiles
-assert_comments_runtime_failure comments-page-failure network \
+assert_runtime_failure comments-page-failure network comments \
   GH_PR_COMMENTS_FAILURE=1 -- pr comments 42 --repo riii111/dotfiles
-assert_comments_runtime_failure comments-repo-auth authentication \
+assert_runtime_failure comments-repo-auth authentication comments \
   GH_TEST_REPO_AUTH_FAILURE=1 -- pr comments 42
 
 assert_argument_error threads-missing-target pr review-threads
@@ -678,23 +637,23 @@ for mode in repeat cycle missing empty wrong-type; do
     cycle) expected_calls=3 ;;
   esac
   calls_file="$tmpdir/threads-pagination-$mode-calls"
-  assert_review_thread_runtime_failure "threads-pagination-$mode" invalidResponse \
+  assert_runtime_failure "threads-pagination-$mode" invalidResponse runtime \
     GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_PAGINATION="$mode" -- \
     pr review-threads 42 --repo riii111/dotfiles
   test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
 done
 
-assert_review_thread_runtime_failure threads-thread-page-failure network \
+assert_runtime_failure threads-thread-page-failure network runtime \
   GH_TEST_THREAD_PAGE_FAILURE=1 -- pr review-threads 42 --repo riii111/dotfiles
-assert_review_thread_runtime_failure threads-comment-page-failure githubCli \
+assert_runtime_failure threads-comment-page-failure githubCli runtime \
   GH_TEST_COMMENT_PAGE_FAILURE=1 -- pr review-threads 42 --repo riii111/dotfiles
-assert_review_thread_runtime_failure threads-missing-pr notFound \
+assert_runtime_failure threads-missing-pr notFound runtime \
   GH_TEST_MISSING_PR=1 -- pr review-threads 42 --repo riii111/dotfiles
-assert_review_thread_runtime_failure threads-graphql-error githubCli \
+assert_runtime_failure threads-graphql-error githubCli runtime \
   GH_TEST_GRAPHQL_ERROR=1 -- pr review-threads 42 --repo riii111/dotfiles
-assert_review_thread_runtime_failure threads-invalid-json invalidResponse \
+assert_runtime_failure threads-invalid-json invalidResponse runtime \
   GH_TEST_INVALID_JSON=1 -- pr review-threads 42 --repo riii111/dotfiles
-assert_review_thread_runtime_failure threads-repo-auth authentication \
+assert_runtime_failure threads-repo-auth authentication runtime \
   GH_TEST_REPO_AUTH_FAILURE=1 -- pr review-threads 42
 
 assert_argument_error thread-missing-target pr review-thread
@@ -759,17 +718,17 @@ jq -e '
 ' "$tmpdir/thread-diff-hunk.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-diff-hunk.review_thread.stdout")" -eq 1
 
-assert_review_thread_runtime_failure thread-wrong-pr notFound \
+assert_runtime_failure thread-wrong-pr notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-pr -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_review_thread_runtime_failure thread-wrong-repo notFound \
+assert_runtime_failure thread-wrong-repo notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-repo -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_review_thread_runtime_failure thread-missing notFound \
+assert_runtime_failure thread-missing notFound runtime \
   GH_TEST_THREAD_DETAIL=missing -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_review_thread_runtime_failure thread-unresolved-node notFound \
+assert_runtime_failure thread-unresolved-node notFound runtime \
   GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr review-thread 42 missing --repo riii111/dotfiles
-assert_review_thread_runtime_failure thread-wrong-type notFound \
+assert_runtime_failure thread-wrong-type notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_review_thread_runtime_failure thread-comment-page-failure githubCli \
+assert_runtime_failure thread-comment-page-failure githubCli runtime \
   GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 
 for mode in repeat cycle; do
@@ -778,7 +737,7 @@ for mode in repeat cycle; do
     cycle) expected_calls=3 ;;
   esac
   calls_file="$tmpdir/thread-detail-pagination-$mode-calls"
-  assert_review_thread_runtime_failure "thread-detail-pagination-$mode" invalidResponse \
+  assert_runtime_failure "thread-detail-pagination-$mode" invalidResponse runtime \
     GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_DETAIL_PAGINATION="$mode" -- \
     pr review-thread 42 thread-detail --repo riii111/dotfiles
   test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"

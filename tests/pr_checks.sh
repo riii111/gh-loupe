@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-checks.XXXXXX")"
@@ -47,10 +49,11 @@ run_checks no-required --required --compact >"$tmpdir/no-required.json"
 jq -e '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
 
 for mode in missing wrong-type wrong-metadata-type unknown object; do
-  set +e
-  run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
-  status=$?
-  set -e
+  if run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
@@ -58,19 +61,21 @@ for mode in missing wrong-type wrong-metadata-type unknown object; do
     "$tmpdir/$mode.stderr" >/dev/null
 done
 
-set +e
-run_checks authentication >"$tmpdir/auth.stdout" 2>"$tmpdir/auth.stderr"
-status=$?
-set -e
+if run_checks authentication >"$tmpdir/auth.stdout" 2>"$tmpdir/auth.stderr"; then
+  status=0
+else
+  status=$?
+fi
 test "$status" -eq 1
 test ! -s "$tmpdir/auth.stdout"
 jq -e '.error.kind == "authentication" and .error.retryable == false' "$tmpdir/auth.stderr" >/dev/null
 
 for mode in missing-pr missing-repository; do
-  set +e
-  run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
-  status=$?
-  set -e
+  if run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   jq -e '.error.kind == "notFound" and .error.retryable == false' \
