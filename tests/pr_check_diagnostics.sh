@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-diagnostics.XXXXXX")"
@@ -107,11 +109,12 @@ for mode in job-mismatch job-head-mismatch job-link-repository-mismatch job-meta
   fi
 done
 
-set +e
-run_diagnostics job-id-mismatch --include-failed-logs --quiet --compact \
-  >"$tmpdir/job-id-mismatch.stdout" 2>"$tmpdir/job-id-mismatch.stderr"
-status=$?
-set -e
+if run_diagnostics job-id-mismatch --include-failed-logs --quiet --compact \
+  >"$tmpdir/job-id-mismatch.stdout" 2>"$tmpdir/job-id-mismatch.stderr"; then
+  status=0
+else
+  status=$?
+fi
 test "$status" -eq 1
 test ! -s "$tmpdir/job-id-mismatch.stdout"
 tail -n 1 "$tmpdir/job-id-mismatch.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
@@ -130,12 +133,13 @@ for mode in pagination-repeat pagination-cycle pagination-missing pagination-emp
     *) expected_calls=1 ;;
   esac
   calls_file="$tmpdir/$mode-calls"
-  set +e
-  GH_DIAGNOSTICS_CALLS="$calls_file" run_diagnostics "$mode" \
+  if GH_DIAGNOSTICS_CALLS="$calls_file" run_diagnostics "$mode" \
     --failed-diagnostics --quiet --compact \
-    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
-  status=$?
-  set -e
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
@@ -145,42 +149,46 @@ for mode in pagination-repeat pagination-cycle pagination-missing pagination-emp
 done
 
 for mode in annotation-failure metadata-failure log-failure; do
-  set +e
-  run_diagnostics "$mode" --include-failed-logs --compact \
-    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
-  status=$?
-  set -e
+  if run_diagnostics "$mode" --include-failed-logs --compact \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' >/dev/null
   test "$(grep -c '"schemaVersion":1,"error"' "$tmpdir/$mode.stderr")" -eq 1
 done
 
-set +e
-run_diagnostics annotation-malformed --failed-diagnostics --quiet --compact \
-  >"$tmpdir/annotation-malformed.stdout" 2>"$tmpdir/annotation-malformed.stderr"
-status=$?
-set -e
+if run_diagnostics annotation-malformed --failed-diagnostics --quiet --compact \
+  >"$tmpdir/annotation-malformed.stdout" 2>"$tmpdir/annotation-malformed.stderr"; then
+  status=0
+else
+  status=$?
+fi
 test "$status" -eq 1
 test ! -s "$tmpdir/annotation-malformed.stdout"
 tail -n 1 "$tmpdir/annotation-malformed.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
 for mode in graphql-missing-completed graphql-wrong-completed; do
-  set +e
-  run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
-    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
-  status=$?
-  set -e
+  if run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 done
 
-set +e
-GH_DIAGNOSTICS_PID_FILE="$tmpdir/pid" run_diagnostics timeout --include-failed-logs --timeout 1 --compact \
-  >"$tmpdir/timeout.stdout" 2>"$tmpdir/timeout.stderr"
-status=$?
-set -e
+if GH_DIAGNOSTICS_PID_FILE="$tmpdir/pid" run_diagnostics timeout --include-failed-logs --timeout 1 --compact \
+  >"$tmpdir/timeout.stdout" 2>"$tmpdir/timeout.stderr"; then
+  status=0
+else
+  status=$?
+fi
 test "$status" -eq 1
 test ! -s "$tmpdir/timeout.stdout"
 tail -n 1 "$tmpdir/timeout.stderr" | jq -e '
@@ -194,11 +202,12 @@ if kill -0 "$(cat "$tmpdir/pid")" 2>/dev/null; then
   exit 1
 fi
 
-set +e
-run_diagnostics normal --failed-diagnostics --timeout 18446744073709551615 --compact \
-  >"$tmpdir/unrepresentable-timeout.stdout" 2>"$tmpdir/unrepresentable-timeout.stderr"
-status=$?
-set -e
+if run_diagnostics normal --failed-diagnostics --timeout 18446744073709551615 --compact \
+  >"$tmpdir/unrepresentable-timeout.stdout" 2>"$tmpdir/unrepresentable-timeout.stderr"; then
+  status=0
+else
+  status=$?
+fi
 test "$status" -eq 2
 test ! -s "$tmpdir/unrepresentable-timeout.stdout"
 grep -F 'argument --timeout: value cannot be represented as a diagnostic deadline' \
@@ -213,11 +222,12 @@ run_diagnostics normal --failed-diagnostics --compact 2>&- >"$tmpdir/closed-prog
 jq -e '.data.checks | length == 3' "$tmpdir/closed-progress.json" >/dev/null
 
 for args in '--timeout 0' '--timeout nope' '--timeout' '--time 1' '--failed' '--include-failed' '--qui'; do
-  set +e
   # shellcheck disable=SC2086
-  run_diagnostics normal $args >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"
-  status=$?
-  set -e
+  if run_diagnostics normal $args >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 2
   test ! -s "$tmpdir/argument.stdout"
 done

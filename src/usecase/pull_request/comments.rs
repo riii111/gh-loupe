@@ -28,7 +28,7 @@ fn project(comment: &Value) -> Result<Value> {
     ] {
         let value = required_field(comment, source)?;
         if !value.is_string() {
-            return Err(invalid_response(format!(
+            return Err(Exit::invalid_response(format!(
                 "GitHub field {source} must be a string"
             )));
         }
@@ -41,8 +41,12 @@ fn project(comment: &Value) -> Result<Value> {
             .get("login")
             .filter(|login| login.is_string())
             .cloned()
-            .ok_or_else(|| invalid_response("GitHub user login must be a string"))?,
-        _ => return Err(invalid_response("GitHub user must be an object or null")),
+            .ok_or_else(|| Exit::invalid_response("GitHub user login must be a string"))?,
+        _ => {
+            return Err(Exit::invalid_response(
+                "GitHub user must be an object or null",
+            ));
+        }
     };
     result.insert("author".to_owned(), author);
     Ok(Value::Object(result))
@@ -51,15 +55,11 @@ fn project(comment: &Value) -> Result<Value> {
 fn required_field<'a>(value: &'a Value, field: &str) -> Result<&'a Value> {
     value
         .get(field)
-        .ok_or_else(|| invalid_response(format!("GitHub response omitted {field}")))
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))
 }
 
 fn string_value<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field]
         .as_str()
         .expect("projected comment string was validated")
-}
-
-fn invalid_response(message: impl Into<String>) -> Exit {
-    Exit::invalid_response(message)
 }

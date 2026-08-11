@@ -96,7 +96,7 @@ pub fn argument_error(program: &str, usage: &str, command: &str, message: &str) 
         format!("{program} {command}")
     };
     Exit {
-        message: Some(format!("{usage}\n{command}: error: {message}")),
+        message: format!("{usage}\n{command}: error: {message}"),
         code: 2,
     }
 }

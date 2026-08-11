@@ -185,5 +185,5 @@ fn query(document: &str, variables: &str) -> Result<Value> {
 }
 
 fn not_found(message: impl Into<String>) -> Exit {
-    Exit::runtime(&RuntimeError::not_found(message), 1)
+    Exit::runtime(&RuntimeError::not_found(message))
 }

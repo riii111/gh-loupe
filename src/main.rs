@@ -9,9 +9,7 @@ use std::io::{self, Write};
 
 fn main() {
     if let Err(error) = command::run() {
-        if let Some(message) = error.stderr_line() {
-            let _ = writeln!(io::stderr(), "{message}");
-        }
+        let _ = writeln!(io::stderr(), "{}", error.stderr_line());
         std::process::exit(error.code);
     }
 }

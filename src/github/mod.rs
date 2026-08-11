@@ -14,9 +14,8 @@ pub fn current_repository_runtime() -> Result<String> {
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| {
-            Exit::runtime(
-                &RuntimeError::invalid_response("GitHub returned an invalid repository response"),
-                1,
-            )
+            Exit::runtime(&RuntimeError::invalid_response(
+                "GitHub returned an invalid repository response",
+            ))
         })
 }

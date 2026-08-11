@@ -180,8 +180,10 @@ mod tests {
             .expect_err("unrepresentable timeout must be rejected");
 
         assert_eq!(error.code, 2);
-        assert!(error
-            .stderr_line()
-            .is_some_and(|line| line.contains("cannot be represented as a diagnostic deadline")));
+        assert!(
+            error
+                .stderr_line()
+                .contains("cannot be represented as a diagnostic deadline")
+        );
     }
 }
