@@ -47,7 +47,7 @@ fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Res
 fn resolve_repo(repo: Option<String>) -> Result<String> {
     let repo = match repo {
         Some(repo) => repo,
-        None => github::current_repository()?,
+        None => github::current_repository_runtime()?,
     };
     if !is_repo(&repo) {
         return Err(Exit::message("--repo must use OWNER/REPO format"));

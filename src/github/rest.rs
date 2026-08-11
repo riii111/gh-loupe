@@ -39,7 +39,7 @@ fn check_buckets(target: &Target, required: bool) -> Result<Value> {
 }
 
 pub fn issue(target: &Target) -> Result<Value> {
-    let issue = cli::json(
+    let issue = cli::json_runtime(
         [
             "api",
             &format!("repos/{}/issues/{}", target.repository, target.number),
@@ -48,9 +48,29 @@ pub fn issue(target: &Target) -> Result<Value> {
         false,
     )?;
     if !issue.is_object() {
-        return Err(Exit::message("GitHub returned an invalid issue response"));
+        return Err(Exit::invalid_response(
+            "GitHub returned an invalid issue response",
+        ));
     }
     Ok(issue)
+}
+
+pub fn issue_comments(target: &Target) -> Result<Vec<Value>> {
+    let endpoint = format!(
+        "repos/{}/issues/{}/comments?per_page=100",
+        target.repository, target.number
+    );
+    let pages = cli::json_runtime(
+        ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
+        None,
+        false,
+    )?;
+    flatten_pages(
+        pages,
+        "GitHub returned an invalid paginated comments response",
+        "GitHub returned an invalid comments page",
+        "GitHub returned invalid paginated items",
+    )
 }
 
 pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
@@ -63,29 +83,12 @@ pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
         None,
         false,
     )?;
-    let pages = pages.as_array().ok_or_else(|| {
-        Exit::runtime(
-            &RuntimeError::invalid_response("GitHub returned an invalid reviews response"),
-            1,
-        )
-    })?;
-    if pages.iter().any(|page| !page.is_array()) {
-        return Err(Exit::runtime(
-            &RuntimeError::invalid_response("GitHub returned an invalid reviews page"),
-            1,
-        ));
-    }
-    let reviews = pages
-        .iter()
-        .flat_map(|page| page.as_array().expect("validated above").iter().cloned())
-        .collect::<Vec<_>>();
-    if reviews.iter().any(|review| !review.is_object()) {
-        return Err(Exit::runtime(
-            &RuntimeError::invalid_response("GitHub returned an invalid review"),
-            1,
-        ));
-    }
-    Ok(reviews)
+    flatten_pages(
+        pages,
+        "GitHub returned an invalid reviews response",
+        "GitHub returned an invalid reviews page",
+        "GitHub returned an invalid review",
+    )
 }
 
 pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
@@ -98,46 +101,34 @@ pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
         None,
         false,
     )?;
-    let pages = pages.as_array().ok_or_else(|| {
-        Exit::invalid_response("GitHub returned an invalid paginated comments response")
-    })?;
-    let mut comments = Vec::new();
+    flatten_pages(
+        pages,
+        "GitHub returned an invalid paginated comments response",
+        "GitHub returned an invalid comments page",
+        "GitHub returned an invalid conversation comment",
+    )
+}
+
+fn flatten_pages(
+    pages: Value,
+    response_message: &str,
+    page_message: &str,
+    item_message: &str,
+) -> Result<Vec<Value>> {
+    let pages = pages
+        .as_array()
+        .ok_or_else(|| Exit::invalid_response(response_message))?;
+    let mut items = Vec::new();
     for page in pages {
         let page = page
             .as_array()
-            .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid comments page"))?;
-        for comment in page {
-            if !comment.is_object() {
-                return Err(Exit::invalid_response(
-                    "GitHub returned an invalid conversation comment",
-                ));
+            .ok_or_else(|| Exit::invalid_response(page_message))?;
+        for item in page {
+            if !item.is_object() {
+                return Err(Exit::invalid_response(item_message));
             }
-            comments.push(comment.clone());
+            items.push(item.clone());
         }
-    }
-    Ok(comments)
-}
-
-pub fn pages(endpoint: &str) -> Result<Vec<Value>> {
-    let pages = cli::json(
-        ["api", "--method", "GET", "--paginate", "--slurp", endpoint],
-        None,
-        false,
-    )?;
-    let pages = pages
-        .as_array()
-        .ok_or_else(|| Exit::message("GitHub returned an invalid paginated response"))?;
-    if pages.iter().any(|page| !page.is_array()) {
-        return Err(Exit::message(
-            "GitHub returned an invalid paginated response",
-        ));
-    }
-    let items = pages
-        .iter()
-        .flat_map(|page| page.as_array().expect("validated above").iter().cloned())
-        .collect::<Vec<_>>();
-    if items.iter().any(|item| !item.is_object()) {
-        return Err(Exit::message("GitHub returned invalid paginated items"));
     }
     Ok(items)
 }

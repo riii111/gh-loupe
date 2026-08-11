@@ -198,13 +198,6 @@ impl Exit {
         }
     }
 
-    pub fn child(code: i32, stderr: &[u8]) -> Self {
-        Self {
-            message: Some(String::from_utf8_lossy(stderr).trim_end().to_owned()),
-            code,
-        }
-    }
-
     pub fn runtime(error: &RuntimeError, code: i32) -> Self {
         Self {
             message: Some(
