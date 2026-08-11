@@ -1,7 +1,7 @@
 use crate::error::{Exit, Result};
 use crate::usecase;
 
-pub(super) fn parse<I>(program: &str, mut remaining: std::iter::Peekable<I>) -> Result<super::Args>
+pub(super) fn parse<I>(program: &str, mut remaining: I) -> Result<super::Args>
 where
     I: Iterator<Item = String>,
 {
@@ -21,8 +21,8 @@ where
         }
         match value.as_str() {
             "--" => positional_only = true,
-            option if exact_long_option_value(option, "--repo").is_some() => {
-                repo = exact_long_option_value(option, "--repo").map(str::to_owned);
+            option if super::exact_long_option_value(option, "--repo").is_some() => {
+                repo = super::exact_long_option_value(option, "--repo").map(str::to_owned);
             }
             "--repo" => {
                 let Some(value) = remaining.next() else {
@@ -56,7 +56,7 @@ where
         ));
     };
     if !unrecognized.is_empty() {
-        return Err(super::root_argument_error(
+        return Err(issue_argument_error(
             program,
             &format!("unrecognized arguments: {}", unrecognized.join(" ")),
         ));
@@ -75,23 +75,12 @@ pub(super) fn execute(target_value: &str, repo: Option<String>) -> Result<serde_
     usecase::issue::inspect::execute(&target)
 }
 
-fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
-    let (name, value) = value.split_once('=')?;
-    (name == option).then_some(value)
-}
-
 fn usage(program: &str) -> String {
     format!("usage: {program} issue [-h] [--repo REPO] [--compact] target")
 }
 
 fn issue_argument_error(program: &str, message: &str) -> Exit {
-    Exit {
-        message: Some(format!(
-            "{}\n{program} issue: error: {message}",
-            usage(program)
-        )),
-        code: 2,
-    }
+    super::argument_error(program, &usage(program), "issue", message)
 }
 
 fn print_help(program: &str) -> Result<()> {

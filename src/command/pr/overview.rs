@@ -1,10 +1,8 @@
 use crate::error::{Exit, Result};
+use crate::model::Target;
 use crate::usecase;
 
-pub(super) fn parse_args<I>(
-    program: &str,
-    values: std::iter::Peekable<I>,
-) -> Result<super::super::Args>
+pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Args>
 where
     I: Iterator<Item = String>,
 {
@@ -29,32 +27,16 @@ where
     })
 }
 
-pub(super) fn execute(
-    target_value: &str,
-    repo: Option<String>,
-    program: &str,
-) -> Result<serde_json::Value> {
-    let target = super::super::target::resolve_pr_subcommand_target(
-        target_value,
-        repo,
-        program,
-        argument_error,
-    )?;
-    usecase::pull_request::overview::execute(&target)
+pub(super) fn execute(target: &Target) -> Result<serde_json::Value> {
+    usecase::pull_request::overview::execute(target)
 }
 
 fn usage(program: &str) -> String {
     format!("usage: {program} pr overview [-h] [--repo REPO] [--compact] target")
 }
 
-fn argument_error(program: &str, message: &str) -> Exit {
-    Exit {
-        message: Some(format!(
-            "{}\n{program} pr overview: error: {message}",
-            usage(program)
-        )),
-        code: 2,
-    }
+pub(super) fn argument_error(program: &str, message: &str) -> Exit {
+    super::super::argument_error(program, &usage(program), "pr overview", message)
 }
 
 fn print_help(program: &str) -> Result<()> {

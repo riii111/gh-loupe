@@ -9,7 +9,6 @@ use serde_json::{Map, Value, json};
 use crate::error::{ErrorKind, Exit, Result, RuntimeError};
 use crate::github;
 use crate::model::{CheckDiagnosticsOptions, Target};
-use crate::output;
 
 const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
@@ -62,7 +61,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         checks
     };
 
-    Ok(output::success(json!({ "checks": checks })))
+    Ok(json!({ "checks": checks }))
 }
 
 fn collect_diagnostics(

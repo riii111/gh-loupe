@@ -71,10 +71,9 @@ fn parse_args() -> Result<Args> {
         std::process::exit(0);
     }
 
-    let remaining = values.peekable();
     match resource_value.as_str() {
-        "pr" => pr::parse(&program, remaining),
-        "issue" => issue::parse(&program, remaining),
+        "pr" => pr::parse(&program, values),
+        "issue" => issue::parse(&program, values),
         other => Err(root_argument_error(
             &program,
             &format!("argument resource: invalid choice: '{other}' (choose from 'pr', 'issue')"),
@@ -87,13 +86,24 @@ fn root_usage(program: &str) -> String {
 }
 
 fn root_argument_error(program: &str, message: &str) -> Exit {
+    argument_error(program, &root_usage(program), "", message)
+}
+
+pub fn argument_error(program: &str, usage: &str, command: &str, message: &str) -> Exit {
+    let command = if command.is_empty() {
+        program.to_owned()
+    } else {
+        format!("{program} {command}")
+    };
     Exit {
-        message: Some(format!(
-            "{}\n{program}: error: {message}",
-            root_usage(program)
-        )),
+        message: Some(format!("{usage}\n{command}: error: {message}")),
         code: 2,
     }
+}
+
+pub fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
+    let (name, value) = value.split_once('=')?;
+    (name == option).then_some(value)
 }
 
 fn displayed_program_name(value: Option<&str>) -> &str {
