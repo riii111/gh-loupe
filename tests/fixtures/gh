@@ -182,6 +182,23 @@ if [ "$1 $2" = "api graphql" ]; then
       printf 'simulated thread detail pagination failure\n' >&2
       exit 34
     fi
+    if [ -n "${GH_THREAD_DETAIL_PAGINATION:-}" ]; then
+      cursor="$(jq -r '.variables.cursor' <<<"$payload")"
+      case "${GH_THREAD_DETAIL_PAGINATION}" in
+        repeat) next_cursor="$cursor" ;;
+        cycle)
+          case "$cursor" in
+            thread-detail-cycle-a) next_cursor=thread-detail-cycle-b ;;
+            thread-detail-cycle-b) next_cursor=thread-detail-cycle-a ;;
+          esac
+          ;;
+      esac
+      page_info="{\"hasNextPage\":true,\"endCursor\":\"$next_cursor\"}"
+      cat <<JSON
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[],"pageInfo":$page_info}}}}
+JSON
+      exit 0
+    fi
     cat <<'JSON'
 {"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"first by id","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 JSON
@@ -206,14 +223,42 @@ JSON
 JSON
         ;;
       success)
-        cat <<'JSON'
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"later","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"second by id","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"thread-detail-comment-cursor"}}}}}
+        detail_end_cursor=thread-detail-comment-cursor
+        case "${GH_THREAD_DETAIL_PAGINATION:-}" in
+          repeat) detail_end_cursor=thread-detail-repeat-cursor ;;
+          cycle) detail_end_cursor=thread-detail-cycle-a ;;
+        esac
+        cat <<JSON
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"later","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"second by id","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}}}
 JSON
         ;;
     esac
     exit 0
   fi
   if jq -e '.query | contains("ThreadSummaries")' <<<"$payload" >/dev/null; then
+    if [ -n "${GH_THREAD_PAGINATION:-}" ]; then
+      cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
+      case "${GH_THREAD_PAGINATION}" in
+        repeat)
+          page_info='{"hasNextPage":true,"endCursor":"thread-repeat-cursor"}'
+          ;;
+        cycle)
+          case "$cursor" in
+            initial) next_cursor=thread-cycle-a ;;
+            thread-cycle-a) next_cursor=thread-cycle-b ;;
+            thread-cycle-b) next_cursor=thread-cycle-a ;;
+          esac
+          page_info="{\"hasNextPage\":true,\"endCursor\":\"$next_cursor\"}"
+          ;;
+        missing) page_info='{"hasNextPage":true}' ;;
+        empty) page_info='{"hasNextPage":true,"endCursor":""}' ;;
+        wrong-type) page_info='{"hasNextPage":true,"endCursor":42}' ;;
+      esac
+      cat <<JSON
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":$page_info}}}}}
+JSON
+      exit 0
+    fi
     if jq -e '.variables.cursor == "thread-summary-cursor"' <<<"$payload" >/dev/null; then
       if [ "${GH_TEST_THREAD_PAGE_FAILURE:-}" = 1 ]; then
         printf 'dial tcp: lookup api.github.com: no such host\n' >&2
@@ -280,6 +325,27 @@ JSON
     if [ "${GH_OVERVIEW_NULL_FIELDS:-}" = 1 ]; then
       cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":null,"isDraft":null,"headRefOid":null,"baseRefOid":null,"reviewDecision":null,"mergeStateStatus":null,"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+      exit 0
+    fi
+    if [ -n "${GH_OVERVIEW_PAGINATION:-}" ]; then
+      cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
+      case "${GH_OVERVIEW_PAGINATION}" in
+        repeat) page_info='{"hasNextPage":true,"endCursor":"overview-repeat-cursor"}' ;;
+        cycle)
+          case "$cursor" in
+            initial) next_cursor=overview-cycle-a ;;
+            overview-cycle-a) next_cursor=overview-cycle-b ;;
+            overview-cycle-b) next_cursor=overview-cycle-a ;;
+          esac
+          page_info="{\"hasNextPage\":true,\"endCursor\":\"$next_cursor\"}"
+          ;;
+        missing) page_info='{"hasNextPage":true}' ;;
+        empty) page_info='{"hasNextPage":true,"endCursor":""}' ;;
+        wrong-type) page_info='{"hasNextPage":true,"endCursor":42}' ;;
+      esac
+      cat <<JSON
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":$page_info}}}}}
 JSON
       exit 0
     fi

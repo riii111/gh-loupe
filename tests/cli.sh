@@ -325,6 +325,19 @@ jq -e '
 ' "$tmpdir/overview-default.overview.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -gt 1
 
+for mode in repeat cycle missing empty wrong-type; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    empty|missing|wrong-type) expected_calls=1 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/overview-pagination-$mode-calls"
+  assert_overview_runtime_error "overview-pagination-$mode" invalidResponse false \
+    GH_TEST_CALLS_FILE="$calls_file" GH_OVERVIEW_PAGINATION="$mode" -- \
+    pr overview 42 --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
+
 timing_file="$tmpdir/overview-timing"
 run_overview overview-concurrent "GH_OVERVIEW_TIMING_FILE=$timing_file" GH_OVERVIEW_SLEEP=1 -- \
   pr overview 42 --repo riii111/dotfiles
@@ -553,6 +566,19 @@ jq -e '
 ' "$tmpdir/threads-including-resolved.threads.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/threads-including-resolved.threads.stdout")" -eq 1
 
+for mode in repeat cycle missing empty wrong-type; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    empty|missing|wrong-type) expected_calls=1 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/threads-pagination-$mode-calls"
+  assert_threads_runtime_failure "threads-pagination-$mode" invalidResponse \
+    GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_PAGINATION="$mode" -- \
+    pr threads 42 --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
+
 assert_threads_runtime_failure threads-thread-page-failure network \
   GH_TEST_THREAD_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
 assert_threads_runtime_failure threads-comment-page-failure githubCli \
@@ -640,3 +666,15 @@ assert_threads_runtime_failure thread-wrong-type notFound \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr thread 42 thread-detail --repo riii111/dotfiles
 assert_threads_runtime_failure thread-comment-page-failure githubCli \
   GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr thread 42 thread-detail --repo riii111/dotfiles
+
+for mode in repeat cycle; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/thread-detail-pagination-$mode-calls"
+  assert_threads_runtime_failure "thread-detail-pagination-$mode" invalidResponse \
+    GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_DETAIL_PAGINATION="$mode" -- \
+    pr thread 42 thread-detail --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
