@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -22,7 +23,7 @@ where
         command.stdin(Stdio::piped());
     }
     let output =
-        execute(command, payload, None).map_err(|error| Exit::message(error.to_string()))?;
+        execute(command, payload, None, None).map_err(|error| Exit::message(error.to_string()))?;
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() && !allow_nonzero_json {
         return Err(Exit::child(code, &output.stderr));
@@ -72,27 +73,32 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = runtime_output(args, payload, deadline, timeout_message)?;
+    let output = runtime_output(args, payload, deadline, timeout_message, None)?;
     parse_runtime_json(output, allow_nonzero_json, None)
 }
 
 pub(super) fn bytes_runtime_with_deadline<I, S>(
     args: I,
+    max_bytes: usize,
     deadline: Instant,
     timeout_message: &str,
-) -> Result<Vec<u8>>
+) -> Result<BoundedBytes>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = runtime_output(args, None, deadline, timeout_message)?;
+    let output = runtime_output(args, None, deadline, timeout_message, Some(max_bytes))?;
     if !output.status.success() {
         return Err(runtime_cli_failure(
             output.status.code().unwrap_or(1),
             &output.stderr,
         ));
     }
-    Ok(output.stdout)
+    Ok(BoundedBytes {
+        bytes: output.stdout,
+        total_bytes: output.stdout_total_bytes,
+        total_newlines: output.stdout_total_newlines,
+    })
 }
 
 fn json_runtime_with_empty<I, S>(
@@ -113,7 +119,7 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    let output = execute(command, payload, None).map_err(|error| {
+    let output = execute(command, payload, None, None).map_err(|error| {
         runtime_exit(
             ErrorKind::GitHubCli,
             format!("failed to execute GitHub CLI: {error}"),
@@ -161,6 +167,7 @@ fn runtime_output<I, S>(
     payload: Option<&str>,
     deadline: Instant,
     timeout_message: &str,
+    stdout_limit: Option<usize>,
 ) -> Result<ProcessOutput>
 where
     I: IntoIterator<Item = S>,
@@ -174,7 +181,7 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    match execute(command, payload, Some(deadline)) {
+    match execute(command, payload, Some(deadline), stdout_limit) {
         Ok(output) => Ok(output),
         Err(ProcessError::TimedOut) => Err(runtime_exit(
             ErrorKind::Timeout,
@@ -215,7 +222,21 @@ fn runtime_exit(
 struct ProcessOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
+    stdout_total_bytes: u64,
+    stdout_total_newlines: u64,
     stderr: Vec<u8>,
+}
+
+pub struct BoundedBytes {
+    pub bytes: Vec<u8>,
+    pub total_bytes: u64,
+    pub total_newlines: u64,
+}
+
+struct PipeOutput {
+    bytes: Vec<u8>,
+    total_bytes: u64,
+    total_newlines: u64,
 }
 
 #[derive(Debug)]
@@ -239,6 +260,7 @@ fn execute(
     mut command: Command,
     payload: Option<&str>,
     deadline: Option<Instant>,
+    stdout_limit: Option<usize>,
 ) -> std::result::Result<ProcessOutput, ProcessError> {
     #[cfg(unix)]
     {
@@ -247,16 +269,17 @@ fn execute(
         command.process_group(0);
     }
     let child = command.spawn().map_err(ProcessError::Io)?;
-    collect_output(child, payload, deadline)
+    collect_output(child, payload, deadline, stdout_limit)
 }
 
 fn collect_output(
     mut child: Child,
     payload: Option<&str>,
     deadline: Option<Instant>,
+    stdout_limit: Option<usize>,
 ) -> std::result::Result<ProcessOutput, ProcessError> {
-    let stdout = collect_pipe(child.stdout.take().expect("stdout is piped"));
-    let stderr = collect_pipe(child.stderr.take().expect("stderr is piped"));
+    let stdout = collect_pipe(child.stdout.take().expect("stdout is piped"), stdout_limit);
+    let stderr = collect_pipe(child.stderr.take().expect("stderr is piped"), None);
     if let Some(payload) = payload
         && let Err(error) = write_child_stdin(&mut child, payload)
     {
@@ -275,20 +298,70 @@ fn collect_output(
     let status = status?;
     Ok(ProcessOutput {
         status,
-        stdout,
-        stderr,
+        stdout: stdout.bytes,
+        stdout_total_bytes: stdout.total_bytes,
+        stdout_total_newlines: stdout.total_newlines,
+        stderr: stderr.bytes,
     })
 }
 
-fn collect_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
+fn collect_pipe<R>(
+    mut pipe: R,
+    max_bytes: Option<usize>,
+) -> thread::JoinHandle<io::Result<PipeOutput>>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
+        if let Some(max_bytes) = max_bytes {
+            return collect_bounded_pipe(pipe, max_bytes);
+        }
         let mut bytes = Vec::new();
         pipe.read_to_end(&mut bytes)?;
-        Ok(bytes)
+        let total_bytes = bytes.len() as u64;
+        let total_newlines = newline_count(&bytes);
+        Ok(PipeOutput {
+            bytes,
+            total_bytes,
+            total_newlines,
+        })
     })
+}
+
+fn collect_bounded_pipe<R>(mut pipe: R, max_bytes: usize) -> io::Result<PipeOutput>
+where
+    R: Read,
+{
+    const UTF8_BOUNDARY_BYTES: usize = 4;
+
+    let capacity = max_bytes.saturating_add(UTF8_BOUNDARY_BYTES);
+    let mut bytes = VecDeque::with_capacity(capacity);
+    let mut total_bytes = 0_u64;
+    let mut total_newlines = 0_u64;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = pipe.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(read as u64);
+        total_newlines = total_newlines.saturating_add(newline_count(&buffer[..read]));
+        bytes.extend(&buffer[..read]);
+        while bytes.len() > capacity {
+            bytes.pop_front();
+        }
+    }
+    Ok(PipeOutput {
+        bytes: bytes.into_iter().collect(),
+        total_bytes,
+        total_newlines,
+    })
+}
+
+fn newline_count(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'))
 }
 
 fn wait_until(
@@ -414,6 +487,7 @@ mod tests {
             child,
             None,
             Some(Instant::now() + Duration::from_millis(50)),
+            None,
         );
 
         assert!(matches!(result, Err(ProcessError::TimedOut)));

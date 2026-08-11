@@ -7,6 +7,8 @@ use crate::model::Target;
 
 use super::cli;
 
+pub use cli::BoundedBytes;
+
 pub fn checks(target: &Target, required: bool) -> Result<Value> {
     let mut args = vec![
         "pr",
@@ -72,9 +74,10 @@ pub fn job(
 pub fn job_log(
     target: &Target,
     job_id: u64,
+    max_bytes: usize,
     deadline: Instant,
     timeout_message: &str,
-) -> Result<Vec<u8>> {
+) -> Result<cli::BoundedBytes> {
     cli::bytes_runtime_with_deadline(
         [
             "api",
@@ -82,6 +85,7 @@ pub fn job_log(
             "GET",
             &format!("repos/{}/actions/jobs/{job_id}/logs", target.repository),
         ],
+        max_bytes,
         deadline,
         timeout_message,
     )
