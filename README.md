@@ -51,16 +51,18 @@ Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必
 `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`は、マージ要件であるrequired checkだけを排他的に集計します。`checks.all`はCI全体の活動状況を表す追加サマリーで、`total`、`passed`、`pending`、`failed`を持ちます。例えば形は次のとおりです。
 
 ```json
-"checks": {
-  "required": 4,
-  "passed": 3,
-  "pending": 1,
-  "failed": 0,
-  "all": {
-    "total": 19,
-    "passed": 16,
-    "pending": 2,
-    "failed": 1
+{
+  "checks": {
+    "required": 4,
+    "passed": 3,
+    "pending": 1,
+    "failed": 0,
+    "all": {
+      "total": 19,
+      "passed": 16,
+      "pending": 2,
+      "failed": 1
+    }
   }
 }
 ```
