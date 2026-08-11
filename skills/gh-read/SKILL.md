@@ -26,7 +26,9 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 - GitHubの定型読み取りは`gh-read`を使い、直接`gh api`を組み立てない。
 - `gh-read`にないraw endpoint、任意GraphQL、任意jq/queryで代用しない。
 - コメント取得中にreply、resolve、dismiss、editを行わない。
-- `pr overview`の`checks`はrequired checkの集計であり、`reviewThreads.unresolved`は未解決threadの総数である。
+- `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`はマージ要件であるrequired checkの集計である。`checks.all`はrequiredかどうかを問わないCI全体の活動状況を`total`、`passed`、`pending`、`failed`で表す。required checkが0件でも`checks.all`を確認する。
+- `pr overview`の`data.checks`は`{"required": 数値, "passed": 数値, "pending": 数値, "failed": 数値, "all": {"total": 数値, "passed": 数値, "pending": 数値, "failed": 数値}}`の形である。既存のrequired側のfieldは維持される。
+- `pr overview`の`reviewThreads.unresolved`は未解決threadの総数である。
 - `pr threads`の`data.threads`が空なら、未解決threadはないと報告する。
 - `pr thread`には`pr threads`が返したthread IDを渡し、取得失敗をcommentなしと解釈しない。
 - `pr thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。

@@ -258,11 +258,27 @@ jq -e '
     "reviewDecision": "APPROVED",
     "mergeStateStatus": "CLEAN"
   } and
-  .data.checks == {"required": 5, "passed": 2, "pending": 1, "failed": 2} and
+  .data.checks == {
+    "required": 5,
+    "passed": 2,
+    "pending": 1,
+    "failed": 2,
+    "all": {"total": 7, "passed": 3, "pending": 2, "failed": 2}
+  } and
   .data.reviewThreads == {"unresolved": 2} and
   ([.. | objects | keys[]] | any(. == "body" or . == "comments" or . == "reviews" or . == "bucket" or . == "name") | not)
 ' "$tmpdir/overview-default.overview.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -gt 1
+
+timing_file="$tmpdir/overview-timing"
+run_overview overview-concurrent "GH_OVERVIEW_TIMING_FILE=$timing_file" GH_OVERVIEW_SLEEP=1 -- \
+  pr overview 42 --repo riii111/dotfiles
+test "$(awk '$2 == "start" { count += 1 } END { print count + 0 }' "$timing_file")" -eq 3
+awk '
+  $2 == "start" { starts += 1 }
+  $2 == "end" && starts < 3 { invalid = 1 }
+  END { exit invalid }
+' "$timing_file"
 
 run_overview overview-compact -- pr overview https://github.com/riii111/dotfiles/pull/42 --compact
 test "$(wc -l <"$tmpdir/overview-compact.overview.stdout")" -eq 1
@@ -279,18 +295,46 @@ jq -e '
 ' "$tmpdir/overview-null-fields.overview.stdout" >/dev/null
 
 run_overview overview-no-required GH_OVERVIEW_CHECKS=empty -- pr overview 42 --repo riii111/dotfiles
-jq -e '.data.checks == {"required": 0, "passed": 0, "pending": 0, "failed": 0}' \
+jq -e '.data.checks == {
+  "required": 0,
+  "passed": 0,
+  "pending": 0,
+  "failed": 0,
+  "all": {"total": 7, "passed": 3, "pending": 2, "failed": 2}
+}' \
   "$tmpdir/overview-no-required.overview.stdout" >/dev/null
 
 run_overview overview-no-required-cli GH_OVERVIEW_CHECKS=no-required -- pr overview 42 --repo riii111/dotfiles
-jq -e '.data.checks == {"required": 0, "passed": 0, "pending": 0, "failed": 0}' \
+jq -e '.data.checks == {
+  "required": 0,
+  "passed": 0,
+  "pending": 0,
+  "failed": 0,
+  "all": {"total": 7, "passed": 3, "pending": 2, "failed": 2}
+}' \
   "$tmpdir/overview-no-required-cli.overview.stdout" >/dev/null
+
+run_overview overview-empty-all GH_OVERVIEW_ALL_CHECKS=empty -- pr overview 42 --repo riii111/dotfiles
+jq -e '.data.checks.all == {"total": 0, "passed": 0, "pending": 0, "failed": 0}' \
+  "$tmpdir/overview-empty-all.overview.stdout" >/dev/null
 
 assert_argument_error overview-abbreviated-option pr overview 42 --comp
 assert_argument_error overview-unknown-option pr overview 42 --include-resolved
 assert_argument_error overview-invalid-target pr overview nope --repo riii111/dotfiles
 assert_overview_runtime_error overview-unknown-bucket invalidResponse false \
   GH_OVERVIEW_CHECKS=unknown -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-all-unknown-bucket invalidResponse false \
+  GH_OVERVIEW_ALL_CHECKS=unknown -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-required-failure githubCli false \
+  GH_OVERVIEW_REQUIRED_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-all-failure githubCli false \
+  GH_OVERVIEW_ALL_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-required-before-all-failure githubCli false \
+  GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
+  pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-before-check-failures githubCli false \
+  GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
+  pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \
   GH_TEST_MISSING_PR=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-network network true \

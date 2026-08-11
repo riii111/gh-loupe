@@ -48,7 +48,24 @@ gh-read issue 456 --repo OWNER/REPO --compact
 `pr thread`は`pr threads`が返したGraphQL node IDを指定し、対象Pull Requestに属する単一threadのmetadataと全commentを返します。commentは作成日時、同時刻ではIDの昇順です。`diffHunk`は`--include-diff-hunk`を指定した場合だけ含めます。別のPull Requestやrepositoryのthread、存在しないnode、異なる型のnodeは`notFound`になります。
 
 Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必要になった場合だけ既存の`pr`を使います。
-`pr overview`の`checks`はrequired checkだけを`passed`、`pending`、`failed`へ排他的に集計し、`reviewThreads.unresolved`は未解決threadの総数を返します。
+`pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`は、マージ要件であるrequired checkだけを排他的に集計します。`checks.all`はCI全体の活動状況を表す追加サマリーで、`total`、`passed`、`pending`、`failed`を持ちます。例えば形は次のとおりです。
+
+```json
+"checks": {
+  "required": 4,
+  "passed": 3,
+  "pending": 1,
+  "failed": 0,
+  "all": {
+    "total": 19,
+    "passed": 16,
+    "pending": 2,
+    "failed": 1
+  }
+}
+```
+
+required checkが0件でも、`checks.all`には存在する全checkを集計します。
 成功結果は`schemaVersion`、全取得完了時刻の`observedAt`、`data`を持ちます。
 実行時エラーではstdoutを空にし、stderrへ`schemaVersion`と再試行情報を含むJSONを1行だけ出力します。
 

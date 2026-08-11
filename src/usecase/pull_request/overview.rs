@@ -1,3 +1,5 @@
+use std::thread;
+
 use serde_json::{Value, json};
 
 use crate::error::{Exit, Result, RuntimeError};
@@ -6,11 +8,33 @@ use crate::model::Target;
 use crate::output;
 
 pub fn execute(target: &Target) -> Result<Value> {
-    let (pull_request, unresolved) = graphql::pull_request_overview(target)?;
-    let checks = summarize_required_checks(&rest::required_check_buckets(target)?)?;
+    let (graphql_result, required_result, all_result) = thread::scope(|scope| {
+        let graphql = scope.spawn(|| graphql::pull_request_overview(target));
+        let required = scope.spawn(|| rest::required_check_buckets(target));
+        let all = scope.spawn(|| rest::all_check_buckets(target));
+
+        (
+            graphql
+                .join()
+                .expect("overview GraphQL worker must not panic"),
+            required
+                .join()
+                .expect("required checks worker must not panic"),
+            all.join().expect("all checks worker must not panic"),
+        )
+    });
+    let (pull_request, unresolved) = graphql_result?;
+    let required = summarize_required_checks(&required_result?)?;
+    let all = summarize_all_checks(&all_result?)?;
     Ok(output::success(json!({
         "pullRequest": pull_request,
-        "checks": checks,
+        "checks": {
+            "required": required["required"],
+            "passed": required["passed"],
+            "pending": required["pending"],
+            "failed": required["failed"],
+            "all": all,
+        },
         "reviewThreads": {
             "unresolved": unresolved,
         },
@@ -18,7 +42,23 @@ pub fn execute(target: &Target) -> Result<Value> {
 }
 
 fn summarize_required_checks(checks: &Value) -> Result<Value> {
-    let checks = checks.as_array().ok_or_else(invalid_checks_response)?;
+    let checks = summarize_buckets(checks, "required")?;
+    Ok(json!({
+        "required": checks["total"],
+        "passed": checks["passed"],
+        "pending": checks["pending"],
+        "failed": checks["failed"],
+    }))
+}
+
+fn summarize_all_checks(checks: &Value) -> Result<Value> {
+    summarize_buckets(checks, "all")
+}
+
+fn summarize_buckets(checks: &Value, kind: &str) -> Result<Value> {
+    let checks = checks
+        .as_array()
+        .ok_or_else(|| invalid_checks_response(kind))?;
     let mut passed = 0;
     let mut pending = 0;
     let mut failed = 0;
@@ -27,20 +67,22 @@ fn summarize_required_checks(checks: &Value) -> Result<Value> {
             Some("pass" | "skipping") => passed += 1,
             Some("pending") => pending += 1,
             Some("fail" | "cancel") => failed += 1,
-            _ => return Err(invalid_checks_response()),
+            _ => return Err(invalid_checks_response(kind)),
         }
     }
     Ok(json!({
-        "required": checks.len(),
+        "total": checks.len(),
         "passed": passed,
         "pending": pending,
         "failed": failed,
     }))
 }
 
-fn invalid_checks_response() -> Exit {
+fn invalid_checks_response(kind: &str) -> Exit {
     Exit::runtime(
-        &RuntimeError::invalid_response("GitHub returned an invalid required checks response"),
+        &RuntimeError::invalid_response(format!(
+            "GitHub returned an invalid {kind} checks response"
+        )),
         1,
     )
 }
@@ -66,6 +108,28 @@ mod tests {
             summary,
             json!({
                 "required": 5,
+                "passed": 2,
+                "pending": 1,
+                "failed": 2,
+            })
+        );
+    }
+
+    #[test]
+    fn all_check_buckets_are_aggregated_separately_from_required() {
+        let summary = summarize_all_checks(&json!([
+            {"bucket": "pass"},
+            {"bucket": "skipping"},
+            {"bucket": "pending"},
+            {"bucket": "fail"},
+            {"bucket": "cancel"},
+        ]))
+        .unwrap_or_else(|_| panic!("valid check buckets"));
+
+        assert_eq!(
+            summary,
+            json!({
+                "total": 5,
                 "passed": 2,
                 "pending": 1,
                 "failed": 2,

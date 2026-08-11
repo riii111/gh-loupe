@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+record_overview_timing() {
+  local operation="$1"
+  if [ -n "${GH_OVERVIEW_TIMING_FILE:-}" ]; then
+    printf '%s start\n' "$operation" >>"$GH_OVERVIEW_TIMING_FILE"
+    sleep "${GH_OVERVIEW_SLEEP:-0}"
+    printf '%s end\n' "$operation" >>"$GH_OVERVIEW_TIMING_FILE"
+  fi
+}
+
 if [ "${GH_TEST_NETWORK_FAILURE:-}" = 1 ]; then
   printf 'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n' >&2
   exit 1
@@ -37,18 +46,47 @@ fi
 
 if [ "$1 $2" = "pr checks" ]; then
   if [[ " $* " == *" --json bucket "* ]]; then
-    if [ "$*" != "pr checks 42 --repo riii111/dotfiles --required --json bucket" ]; then
+    if [ "$*" = "pr checks 42 --repo riii111/dotfiles --required --json bucket" ]; then
+      bucket_kind=required
+    elif [ "$*" = "pr checks 42 --repo riii111/dotfiles --json bucket" ]; then
+      bucket_kind=all
+    else
       printf 'unexpected overview checks invocation: %s\n' "$*" >&2
       exit 90
     fi
-    case "${GH_OVERVIEW_CHECKS:-default}" in
+
+    record_overview_timing "$bucket_kind"
+    if [ "$bucket_kind" = required ]; then
+      if [ "${GH_OVERVIEW_REQUIRED_FAILURE:-}" = 1 ]; then
+        printf 'simulated required checks failure\n' >&2
+        exit 23
+      fi
+      overview_checks="${GH_OVERVIEW_CHECKS:-${GH_OVERVIEW_REQUIRED_CHECKS:-default}}"
+    else
+      if [ "${GH_OVERVIEW_ALL_FAILURE:-}" = 1 ]; then
+        printf 'simulated all checks failure\n' >&2
+        exit 24
+      fi
+      overview_checks="${GH_OVERVIEW_ALL_CHECKS:-default}"
+    fi
+    case "$overview_checks" in
       empty) printf '[]\n' ;;
       no-required)
+        if [ "$bucket_kind" != required ]; then
+          printf '[{"bucket":"pass"}]\n'
+          exit 0
+        fi
         printf "no required checks reported on the 'test' branch\n" >&2
         exit 1
         ;;
       unknown) printf '[{"bucket":"new-state"}]\n' ;;
-      default) printf '[{"bucket":"pass"},{"bucket":"skipping"},{"bucket":"pending"},{"bucket":"fail"},{"bucket":"cancel"}]\n' ;;
+      default)
+        if [ "$bucket_kind" = required ]; then
+          printf '[{"bucket":"pass"},{"bucket":"skipping"},{"bucket":"pending"},{"bucket":"fail"},{"bucket":"cancel"}]\n'
+        else
+          printf '[{"bucket":"pass"},{"bucket":"skipping"},{"bucket":"pending"},{"bucket":"fail"},{"bucket":"cancel"},{"bucket":"pass"},{"bucket":"pending"}]\n'
+        fi
+        ;;
     esac
     case "${GH_TEST_CHECKS_STATUS:-failure}" in
       pending) exit 8 ;;
@@ -194,6 +232,17 @@ JSON
     exit 0
   fi
   if jq -e '.query | contains("reviewDecision")' <<<"$payload" >/dev/null; then
+    if [ "${GH_OVERVIEW_GRAPHQL_FAILURE:-}" = 1 ]; then
+      printf 'simulated GraphQL overview failure\n' >&2
+      exit 25
+    fi
+    record_overview_timing graphql
+    if [ -n "${GH_OVERVIEW_TIMING_FILE:-}" ]; then
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+      exit 0
+    fi
     if jq -e '.query | contains("title") or contains("body") or contains("comments") or contains("reviews")' <<<"$payload" >/dev/null; then
       printf 'overview query requested content fields\n' >&2
       exit 89
