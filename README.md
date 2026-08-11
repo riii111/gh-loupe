@@ -18,7 +18,7 @@ Agentを長時間動かしても、`gh-read`経由ではGitHubの更新操作を
 
 ## Setup
 
-GitHub CLIで認証後、installerを実行します。
+GitHub CLIで認証後、installerを実行すると、binaryとAgent向けSkillがまとめてインストールされます。
 
 ```bash
 gh auth login
@@ -26,8 +26,6 @@ git clone https://github.com/riii111/gh-read.git
 cd gh-read
 ./install.sh
 ```
-
-binaryとAgent向けSkillがまとめてインストールされます。
 
 ## Usage
 
@@ -47,10 +45,6 @@ gh-read pr checks https://github.com/OWNER/REPO/pull/123
 | `pr review-threads` | 未解決inline reviewの一覧 |
 | `pr review-thread` | inline review一件の全コメント |
 | `pr checks` | 個別checkと失敗診断 |
-installerは`cargo install --path . --locked --force`に相当するbuildを、一時`CARGO_TARGET_DIR`で行います。
-repositoryの`target`へは書き込みません。
-Skillはdirectory全体を置き換えるため、以前の版にだけ存在したfileは残りません。
-置換前のbuildまたは検証に失敗した場合、既存のbinaryとSkillは変更しません。置換時の失敗はエラーとして終了します。
 
 resolved review threadは既定で除外します。
 必要な場合だけ`--include-resolved`を指定します。
