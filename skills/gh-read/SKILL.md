@@ -9,6 +9,8 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 
 ## Version
 
+Minimum gh-read version: 0.2.0
+
 最初に`gh-read --version`を実行し、インストール済みbinaryの版を確認する。
 `--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版である。
 その場合は現在のsourceからbinaryを再インストールする。

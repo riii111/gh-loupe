@@ -17,12 +17,25 @@ GitHub CLIをインストールし、先に`gh auth login`を完了してくだ�
 ```bash
 git clone https://github.com/riii111/gh-read.git
 cd gh-read
-cargo install --path .
+./install.sh
 ```
+
+このentrypointは、現在checkoutのbinaryと同梱する`skills/gh-read`を一度にインストールします。
+既定の書込先はbinaryが`$HOME/.cargo/bin/gh-read`、Skillが`$HOME/.codex/skills/gh-read`で、実行時に両方のpathを表示します。
+別の場所へ入れる場合は、binaryの親rootとSkillの親directoryを明示します。
+
+```bash
+./install.sh --binary-root /path/to/cargo-root --skill-root /path/to/codex-skills
+```
+
+installerは`cargo install --path . --locked --force`に相当するbuildを、一時`CARGO_TARGET_DIR`で行います。
+repositoryの`target`へは書き込みません。
+Skillはdirectory全体を置き換えるため、以前の版にだけ存在したfileは残りません。
+どちらかの検証に失敗した場合は既存のbinaryとSkillを復元します。
 
 インストール後はstandalone commandの`gh-read`を直接実行します。repository名とbinary名はGitHub CLI extensionの`gh-<name>`命名規則に合いますが、現時点ではprecompiled release artifactやrepository rootのextension実行ファイルを配布していません。そのため`gh extension install`と`gh read`は導入手段・実行方法として扱わず、このrepositoryからstandalone binaryを導入してください。
 
-インストールしたbinaryの版は`gh-read --version`で確認できます。`gh-read <Cargo package version>`の形式で表示されれば対応しています。`--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版なので、現在のsourceから再インストールしてください。
+installerは、インストールしたbinaryの`gh-read --version`がCargo package versionと一致し、インストールしたSkillがcheckout内のsourceと一致することを確認します。`--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版なので、現在のsourceからinstallerを再実行してください。
 
 CLIと同梱Skillの互換性に影響する変更では、将来の変更ごとにCargo package versionを上げます。自動release processは前提にしません。
 
