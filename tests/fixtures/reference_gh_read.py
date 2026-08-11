@@ -2,9 +2,12 @@
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 from typing import Any
 
 
@@ -236,10 +239,24 @@ def fetch_issue(repo: str, number: int) -> dict[str, Any]:
     return issue
 
 
+def package_version() -> str:
+    configured_version = os.environ.get("GH_READ_PACKAGE_VERSION")
+    if configured_version is not None:
+        return configured_version
+    with (Path(__file__).parents[2] / "Cargo.toml").open("rb") as cargo_file:
+        return tomllib.load(cargo_file)["workspace"]["package"]["version"]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Read fixed GitHub PR and Issue metadata without mutations.",
         allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version()}",
+        help="show program's version and exit",
     )
     subparsers = parser.add_subparsers(dest="resource", required=True)
     pr = subparsers.add_parser("pr", help="read pull request metadata and review data")

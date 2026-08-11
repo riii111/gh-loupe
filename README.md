@@ -22,6 +22,10 @@ cargo install --path .
 
 インストール後はstandalone commandの`gh-read`を直接実行します。repository名とbinary名はGitHub CLI extensionの`gh-<name>`命名規則に合いますが、現時点ではprecompiled release artifactやrepository rootのextension実行ファイルを配布していません。そのため`gh extension install`と`gh read`は導入手段・実行方法として扱わず、このrepositoryからstandalone binaryを導入してください。
 
+インストールしたbinaryの版は`gh-read --version`で確認できます。`gh-read <Cargo package version>`の形式で表示されれば対応しています。`--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版なので、現在のsourceから再インストールしてください。
+
+CLIと同梱Skillの互換性に影響する変更では、将来の変更ごとにCargo package versionを上げます。自動release processは前提にしません。
+
 ## 使い方
 
 ```bash
