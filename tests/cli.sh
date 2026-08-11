@@ -3,14 +3,14 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cli.XXXXXX")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-cli.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
-GH_READ_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-read") | .version')"
-export GH_READ_PACKAGE_VERSION
+GH_LOUPE_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-loupe") | .version')"
+export GH_LOUPE_PACKAGE_VERSION
 mkdir -p "$tmpdir/bin" "$tmpdir/rust"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
 chmod +x "$tmpdir/bin/gh"
-ln -s "$GH_READ_BIN" "$tmpdir/rust/gh-read"
+ln -s "$GH_LOUPE_BIN" "$tmpdir/rust/gh-loupe"
 
 run_cli() {
   local name="$1"
@@ -22,7 +22,7 @@ run_cli() {
   done
   shift
 
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"
 }
 
@@ -31,7 +31,7 @@ assert_argument_error() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.argument.stdout" 2>"$tmpdir/$name.argument.stderr"
   local status=$?
   set -e
@@ -54,7 +54,7 @@ run_review_threads() {
   done
   shift
 
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.review_threads.stdout" 2>"$tmpdir/$name.review_threads.stderr"
   test ! -s "$tmpdir/$name.review_threads.stderr"
   jq -e '
@@ -74,7 +74,7 @@ run_review_thread() {
   done
   shift
 
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.review_thread.stdout" 2>"$tmpdir/$name.review_thread.stderr"
   test ! -s "$tmpdir/$name.review_thread.stderr"
   jq -e '
@@ -96,7 +96,7 @@ assert_review_thread_runtime_failure() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.runtime.stdout" 2>"$tmpdir/$name.runtime.stderr"
   local status=$?
   set -e
@@ -123,7 +123,7 @@ run_overview() {
   done
   shift
 
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
   test ! -s "$tmpdir/$name.overview.stderr"
 }
@@ -141,7 +141,7 @@ assert_overview_runtime_error() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
   local status=$?
   set -e
@@ -168,7 +168,7 @@ assert_overview_runtime_error_message() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
   local status=$?
   set -e
@@ -192,7 +192,7 @@ run_comments() {
   done
   shift
 
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.comments.stdout" 2>"$tmpdir/$name.comments.stderr"
   test ! -s "$tmpdir/$name.comments.stderr"
   jq -e '
@@ -214,7 +214,7 @@ assert_comments_runtime_failure() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.comments.stdout" 2>"$tmpdir/$name.comments.stderr"
   local status=$?
   set -e
@@ -243,7 +243,7 @@ assert_issue_runtime_failure() {
   shift
 
   set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-loupe" "$@" \
     >"$tmpdir/$name.issue.stdout" 2>"$tmpdir/$name.issue.stderr"
   local status=$?
   set -e
@@ -262,15 +262,15 @@ assert_issue_runtime_failure() {
 
 run_cli root-help -- --help
 test ! -s "$tmpdir/root-help.stderr"
-grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
+grep -F 'usage: gh-loupe [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
 
 run_cli root-version -- --version
 test ! -s "$tmpdir/root-version.stderr"
-test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
+test "$(cat "$tmpdir/root-version.stdout")" = "gh-loupe $GH_LOUPE_PACKAGE_VERSION"
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-read pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+grep -F 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
 for subcommand in overview comments reviews review-threads review-thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
@@ -280,7 +280,7 @@ fi
 
 run_cli review-threads-help -- pr review-threads --help
 test ! -s "$tmpdir/review-threads-help.stderr"
-grep -F 'usage: gh-read pr review-threads ' "$tmpdir/review-threads-help.stdout" >/dev/null
+grep -F 'usage: gh-loupe pr review-threads ' "$tmpdir/review-threads-help.stdout" >/dev/null
 if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|thread)' \
   "$tmpdir/review-threads-help.stdout"; then
   exit 1
@@ -288,7 +288,7 @@ fi
 
 run_cli review-thread-help -- pr review-thread --help
 test ! -s "$tmpdir/review-thread-help.stderr"
-grep -F 'usage: gh-read pr review-thread ' "$tmpdir/review-thread-help.stdout" >/dev/null
+grep -F 'usage: gh-loupe pr review-thread ' "$tmpdir/review-thread-help.stdout" >/dev/null
 if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|thread)' \
   "$tmpdir/review-thread-help.stdout"; then
   exit 1
@@ -296,14 +296,14 @@ fi
 
 set +e
 GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
-  "$tmpdir/rust/gh-read" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"
+  "$tmpdir/rust/gh-loupe" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"
 bare_status=$?
 set -e
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-read pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
-grep -F "gh-read pr: error: argument subcommand: invalid choice: '42'" "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -F "gh-loupe pr: error: argument subcommand: invalid choice: '42'" "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
@@ -314,7 +314,7 @@ for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"
   set +e
   GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
-    "$tmpdir/rust/gh-read" pr "$removed_subcommand" \
+    "$tmpdir/rust/gh-loupe" pr "$removed_subcommand" \
     >"$tmpdir/removed-$removed_subcommand.stdout" \
     2>"$tmpdir/removed-$removed_subcommand.stderr"
   removed_status=$?
@@ -346,7 +346,7 @@ test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
 jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
 
 set +e
-env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" \
+env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
   issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
   >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"
 issue_status=$?
@@ -373,7 +373,7 @@ assert_issue_runtime_failure issue-missing-repository-metadata invalidResponse \
   GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
 
 set +e
-env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-read" issue 42 --repo riii111/dotfiles \
+env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue 42 --repo riii111/dotfiles \
   >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"
 issue_status=$?
 set -e
@@ -521,7 +521,7 @@ assert_argument_error comments-conflicting-repo \
 huge_pr_calls="$tmpdir/huge-pr.calls"
 set +e
 GH_TEST_CALLS_FILE="$huge_pr_calls" PATH="$tmpdir/bin:$PATH" \
-  "$tmpdir/rust/gh-read" pr checks 2147483648 --repo riii111/dotfiles --failed-diagnostics \
+  "$tmpdir/rust/gh-loupe" pr checks 2147483648 --repo riii111/dotfiles --failed-diagnostics \
   >"$tmpdir/huge-pr.stdout" 2>"$tmpdir/huge-pr.stderr"
 huge_pr_status=$?
 set -e
@@ -536,7 +536,7 @@ fi
 calls_file="$tmpdir/comments-invalid.calls"
 set +e
 GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
-  "$tmpdir/rust/gh-read" pr comments nope --repo riii111/dotfiles \
+  "$tmpdir/rust/gh-loupe" pr comments nope --repo riii111/dotfiles \
   >"$tmpdir/comments-invalid.stdout" 2>"$tmpdir/comments-invalid.stderr"
 comments_status=$?
 set -e

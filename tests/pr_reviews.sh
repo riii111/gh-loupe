@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-pr-reviews.XXXXXX")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-reviews.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
@@ -36,7 +36,7 @@ assert_runtime_error() {
   ' "$tmpdir/$name.stderr" >/dev/null
 }
 
-run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_READ_BIN" \
+run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
 jq -e '
   .schemaVersion == 1 and
@@ -55,32 +55,32 @@ jq -e '
 test "$(cat "$tmpdir/calls")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/pulls/42/reviews?per_page=100'
 
-run_reviews compact "$GH_READ_BIN" pr reviews \
+run_reviews compact "$GH_LOUPE_BIN" pr reviews \
   https://github.com/riii111/dotfiles/pull/42 --compact
 test "$(wc -l <"$tmpdir/compact.stdout")" -eq 1
 
-run_reviews empty GH_TEST_REVIEWS=empty "$GH_READ_BIN" \
+run_reviews empty GH_TEST_REVIEWS=empty "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
 jq -e '.data.reviews == []' "$tmpdir/empty.stdout" >/dev/null
 
 set +e
-env PATH="$tmpdir/bin:$PATH" "$GH_READ_BIN" pr reviews 0 --repo riii111/dotfiles \
+env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 0 --repo riii111/dotfiles \
   >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"
 argument_status=$?
 set -e
 test "$argument_status" -eq 2
 test ! -s "$tmpdir/argument.stdout"
-grep -F 'gh-read pr reviews: error:' "$tmpdir/argument.stderr" >/dev/null
+grep -F 'gh-loupe pr reviews: error:' "$tmpdir/argument.stderr" >/dev/null
 
 assert_runtime_error invalid-response invalidResponse \
-  GH_TEST_REVIEWS=invalid-page "$GH_READ_BIN" pr reviews 42 --repo riii111/dotfiles
+  GH_TEST_REVIEWS=invalid-page "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 assert_runtime_error invalid-field invalidResponse \
-  GH_TEST_REVIEWS=invalid-field "$GH_READ_BIN" pr reviews 42 --repo riii111/dotfiles
+  GH_TEST_REVIEWS=invalid-field "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 assert_runtime_error missing-field invalidResponse \
-  GH_TEST_REVIEWS=missing-field "$GH_READ_BIN" pr reviews 42 --repo riii111/dotfiles
+  GH_TEST_REVIEWS=missing-field "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 assert_runtime_error page-failure network \
-  GH_TEST_REVIEWS=page-failure "$GH_READ_BIN" pr reviews 42 --repo riii111/dotfiles
+  GH_TEST_REVIEWS=page-failure "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 
-run_reviews help "$GH_READ_BIN" pr reviews --help
-grep -F 'usage: gh-read pr reviews [-h] [--repo REPO] [--compact] target' \
+run_reviews help "$GH_LOUPE_BIN" pr reviews --help
+grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--compact] target' \
   "$tmpdir/help.stdout" >/dev/null

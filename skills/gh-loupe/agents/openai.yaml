@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Loupe"
+  short_description: "PR、Issue、CI、review情報を段階取得する。"
+  default_prompt: "$gh-loupeを使い、必要なGitHub情報だけを段階取得してください。"

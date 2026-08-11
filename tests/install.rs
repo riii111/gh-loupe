@@ -13,7 +13,7 @@ impl TempDirectory {
             .expect("system time after epoch")
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "gh-read-install-test-{case}-{}-{nonce}",
+            "gh-loupe-install-test-{case}-{}-{nonce}",
             std::process::id()
         ));
         fs::create_dir(&path).expect("create test directory");
@@ -34,8 +34,8 @@ fn installs_binary_and_replaces_the_bundled_skill() {
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
     let temporary_root = temporary.0.join("temporary files");
-    let previous_binary = binary_root.join("bin/gh-read");
-    let previous_skill = skill_root.join("gh-read");
+    let previous_binary = binary_root.join("bin/gh-loupe");
+    let previous_skill = skill_root.join("gh-loupe");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
         .expect("create previous binary directory");
     fs::create_dir_all(&previous_skill).expect("create previous Skill");
@@ -60,20 +60,20 @@ fn installs_binary_and_replaces_the_bundled_skill() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("installer stdout is UTF-8");
-    let installed_binary = binary_root.join("bin/gh-read");
+    let installed_binary = binary_root.join("bin/gh-loupe");
     let displayed_binary = fs::canonicalize(&binary_root)
         .expect("canonicalize binary root")
-        .join("bin/gh-read");
+        .join("bin/gh-loupe");
     let displayed_skill = fs::canonicalize(&skill_root)
         .expect("canonicalize Skill root")
-        .join("gh-read");
+        .join("gh-loupe");
     assert!(stdout.contains(&format!(
         "Binary destination: {}",
         displayed_binary.display()
     )));
     assert!(stdout.contains(&format!("Skill destination: {}", displayed_skill.display())));
     assert!(!previous_skill.join("obsolete.md").exists());
-    assert_directories_equal(&repository.join("skills/gh-read"), &previous_skill);
+    assert_directories_equal(&repository.join("skills/gh-loupe"), &previous_skill);
     assert!(
         fs::read_dir(&temporary_root)
             .expect("read temporary root")
@@ -88,7 +88,7 @@ fn installs_binary_and_replaces_the_bundled_skill() {
     assert!(version.status.success());
     assert_eq!(
         version.stdout,
-        format!("gh-read {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
+        format!("gh-loupe {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
     );
     assert_no_installer_work(&binary_root.join("bin"));
     assert_no_installer_work(&skill_root);
@@ -100,8 +100,8 @@ fn build_failure_preserves_existing_destinations() {
     let temporary = TempDirectory::new("failure");
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
-    let previous_binary = binary_root.join("bin/gh-read");
-    let previous_skill_file = skill_root.join("gh-read/previous.md");
+    let previous_binary = binary_root.join("bin/gh-loupe");
+    let previous_skill_file = skill_root.join("gh-loupe/previous.md");
     let temporary_root = temporary.0.join("temporary files");
     let fake_cargo = temporary.0.join("fake cargo");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
@@ -159,7 +159,7 @@ fn missing_bundled_skill_fails_before_installation() {
         .expect("run installer with missing Skill");
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("bundled gh-read Skill is missing"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("bundled gh-loupe Skill is missing"));
     assert!(!binary_root.exists());
     assert!(!skill_root.exists());
 }
@@ -169,7 +169,7 @@ fn version_mismatch_fails_before_installation() {
     let source_repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temporary = TempDirectory::new("version mismatch");
     let repository = temporary.0.join("repository");
-    let skill_directory = repository.join("skills/gh-read");
+    let skill_directory = repository.join("skills/gh-loupe");
     fs::create_dir_all(&skill_directory).expect("create Skill");
     fs::copy(
         source_repository.join("install.sh"),
@@ -182,7 +182,7 @@ fn version_mismatch_fails_before_installation() {
     )
     .expect("copy Cargo manifest");
     fs::copy(
-        source_repository.join("skills/gh-read/SKILL.md"),
+        source_repository.join("skills/gh-loupe/SKILL.md"),
         skill_directory.join("SKILL.md"),
     )
     .expect("copy bundled Skill");
@@ -190,8 +190,8 @@ fn version_mismatch_fails_before_installation() {
 
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
-    let previous_binary = binary_root.join("bin/gh-read");
-    let previous_skill = skill_root.join("gh-read/previous.md");
+    let previous_binary = binary_root.join("bin/gh-loupe");
+    let previous_skill = skill_root.join("gh-loupe/previous.md");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
         .expect("create binary root");
     fs::create_dir_all(previous_skill.parent().expect("Skill destination parent"))
@@ -229,7 +229,7 @@ fn binary_directory_symlink_fails_before_replacement() {
     let temporary = TempDirectory::new("binary directory symlink");
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
-    let binary_destination = binary_root.join("bin/gh-read");
+    let binary_destination = binary_root.join("bin/gh-loupe");
     let binary_target = temporary.0.join("binary target");
     let fake_cargo = temporary.0.join("fake cargo");
     fs::create_dir_all(binary_destination.parent().expect("binary parent"))
@@ -307,8 +307,8 @@ fn staging_validation_failure_preserves_existing_destinations() {
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
     let temporary_root = temporary.0.join("temporary files");
-    let previous_binary = binary_root.join("bin/gh-read");
-    let previous_skill_file = skill_root.join("gh-read/previous.md");
+    let previous_binary = binary_root.join("bin/gh-loupe");
+    let previous_skill_file = skill_root.join("gh-loupe/previous.md");
     let fake_cargo = temporary.0.join("fake cargo");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
         .expect("create binary root");
@@ -319,7 +319,7 @@ fn staging_validation_failure_preserves_existing_destinations() {
     fs::write(&previous_skill_file, "previous Skill").expect("write previous Skill");
     write_executable(
         &fake_cargo,
-        "#!/usr/bin/env bash\nroot=\nwhile (($# > 0)); do\n  if [[ $1 == --root ]]; then\n    root=$2\n    shift 2\n  else\n    shift\n  fi\ndone\nmkdir -p \"$root/bin\"\ncat >\"$root/bin/gh-read\" <<'EOF'\n#!/usr/bin/env bash\nprintf '%s\\n' 'gh-read invalid'\nEOF\nchmod +x \"$root/bin/gh-read\"\n",
+        "#!/usr/bin/env bash\nroot=\nwhile (($# > 0)); do\n  if [[ $1 == --root ]]; then\n    root=$2\n    shift 2\n  else\n    shift\n  fi\ndone\nmkdir -p \"$root/bin\"\ncat >\"$root/bin/gh-loupe\" <<'EOF'\n#!/usr/bin/env bash\nprintf '%s\\n' 'gh-loupe invalid'\nEOF\nchmod +x \"$root/bin/gh-loupe\"\n",
     );
 
     let output = Command::new("bash")
@@ -395,7 +395,7 @@ fn assert_no_installer_work(directory: &Path) {
     assert!(
         directory_entries(directory)
             .iter()
-            .all(|entry| !entry.to_string_lossy().starts_with(".gh-read.install.")),
+            .all(|entry| !entry.to_string_lossy().starts_with(".gh-loupe.install.")),
         "installer work directory remains in {}",
         directory.display()
     );

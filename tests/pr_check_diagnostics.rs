@@ -7,7 +7,7 @@ fn public_failed_check_diagnostics_behavior() {
     let output = Command::new("bash")
         .arg(repository.join("tests/pr_check_diagnostics.sh"))
         .current_dir(&repository)
-        .env("GH_READ_BIN", env!("CARGO_BIN_EXE_gh-read"))
+        .env("GH_LOUPE_BIN", env!("CARGO_BIN_EXE_gh-loupe"))
         .output()
         .expect("run failed check diagnostics tests");
 

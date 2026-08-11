@@ -18,7 +18,7 @@ fn validates_public_cli_behavior() {
     let output = Command::new("bash")
         .arg(repository.join("tests/cli.sh"))
         .current_dir(&repository)
-        .env("GH_READ_BIN", env!("CARGO_BIN_EXE_gh-read"))
+        .env("GH_LOUPE_BIN", env!("CARGO_BIN_EXE_gh-loupe"))
         .output()
         .expect("run CLI tests");
 
@@ -35,7 +35,7 @@ fn validates_public_cli_behavior() {
 fn closed_stdout_does_not_panic_for_help_or_normal_output() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let temporary_root = std::env::temp_dir().join(format!(
-        "gh-read-closed-stdout-{}-{}",
+        "gh-loupe-closed-stdout-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -62,7 +62,7 @@ fn closed_stdout_does_not_panic_for_help_or_normal_output() {
         let (reader, writer) = UnixStream::pair().expect("create stdout socket pair");
         drop(reader);
         let writer: OwnedFd = writer.into();
-        let output = Command::new(env!("CARGO_BIN_EXE_gh-read"))
+        let output = Command::new(env!("CARGO_BIN_EXE_gh-loupe"))
             .args(arguments)
             .env("PATH", &path)
             .stdout(Stdio::from(writer))

@@ -1,5 +1,5 @@
 {
-  description = "gh-read development and build environment";
+  description = "gh-loupe development and build environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -51,7 +51,7 @@
         in
         {
           default = rustPlatform.buildRustPackage {
-            pname = "gh-read";
+            pname = "gh-loupe";
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
             src = self;
@@ -62,14 +62,14 @@
               pkgs.jq
             ];
             postInstall = ''
-              wrapProgram "$out/bin/gh-read" --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gh ]}"
+              wrapProgram "$out/bin/gh-loupe" --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gh ]}"
             '';
 
             meta = {
               description = "Read fixed GitHub pull request and issue metadata through the GitHub CLI";
-              homepage = "https://github.com/riii111/gh-read";
+              homepage = "https://github.com/riii111/gh-loupe";
               license = pkgs.lib.licenses.mit;
-              mainProgram = "gh-read";
+              mainProgram = "gh-loupe";
             };
           };
         }

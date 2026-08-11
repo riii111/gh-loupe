@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn parser_keeps_common_and_specific_options() {
         let args = parse_args(
-            "gh-read",
+            "gh-loupe",
             values(&[
                 "--repo=owner/repo",
                 "--required",
@@ -188,12 +188,12 @@ mod tests {
         assert_eq!(target, "42");
         assert_eq!(repo.as_deref(), Some("owner/repo"));
         assert!(compact);
-        assert_eq!(program, "gh-read");
+        assert_eq!(program, "gh-loupe");
     }
 
     #[test]
     fn parser_rejects_unrepresentable_timeout() {
-        let error = parse_timeout("gh-read", &u64::MAX.to_string())
+        let error = parse_timeout("gh-loupe", &u64::MAX.to_string())
             .expect_err("unrepresentable timeout must be rejected");
 
         assert_eq!(error.code, 2);
