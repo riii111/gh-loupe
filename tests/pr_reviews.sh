@@ -46,7 +46,8 @@ jq -e '
     {"id":"review-a","author":"alice","state":"CHANGES_REQUESTED","body":"change","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-a"},
     {"id":"review-b","author":"bob","state":"APPROVED","body":"approved","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-b"},
     {"id":"review-z","author":"zoe","state":"COMMENTED","body":"comment","submittedAt":"2026-01-02T00:00:00Z","commitOid":"oid-z"},
-    {"id":"review-null","author":null,"state":"DISMISSED","body":"","submittedAt":null,"commitOid":null}
+    {"id":"review-null","author":null,"state":"DISMISSED","body":"","submittedAt":null,"commitOid":null},
+    {"id":"review-null-a","author":"pending","state":"PENDING","body":"pending","submittedAt":null,"commitOid":null}
   ] and
   (.data.reviews | all(keys == ["author","body","commitOid","id","state","submittedAt"])) and
   ([.. | objects | keys[]] | any(. == "comments" or . == "diffHunk" or . == "path") | not)

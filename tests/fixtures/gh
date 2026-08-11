@@ -309,7 +309,7 @@ if [ "$1" = api ] && [[ "$*" == *pulls/42/reviews* ]]; then
       ;;
     success)
       cat <<'JSON'
-[[{"node_id":"review-z","user":{"login":"zoe"},"state":"COMMENTED","body":"comment","submitted_at":"2026-01-02T00:00:00Z","commit_id":"oid-z"},{"node_id":"review-b","user":{"login":"bob"},"state":"APPROVED","body":"approved","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-b"},{"node_id":"review-null","user":null,"state":"DISMISSED","body":"","submitted_at":null,"commit_id":null}],[{"node_id":"review-a","user":{"login":"alice"},"state":"CHANGES_REQUESTED","body":"change","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-a"},{"node_id":"review-unknown","user":{"login":"future"},"state":"FUTURE_STATE","body":"future","submitted_at":"2025-12-31T00:00:00Z","commit_id":"oid-future"}]]
+[[{"node_id":"review-z","user":{"login":"zoe"},"state":"COMMENTED","body":"comment","submitted_at":"2026-01-02T00:00:00Z","commit_id":"oid-z"},{"node_id":"review-b","user":{"login":"bob"},"state":"APPROVED","body":"approved","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-b"},{"node_id":"review-null-a","user":{"login":"pending"},"state":"PENDING","body":"pending","submitted_at":null,"commit_id":null},{"node_id":"review-null","user":null,"state":"DISMISSED","body":"","submitted_at":null,"commit_id":null}],[{"node_id":"review-a","user":{"login":"alice"},"state":"CHANGES_REQUESTED","body":"change","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-a"},{"node_id":"review-unknown","user":{"login":"future"},"state":"FUTURE_STATE","body":"future","submitted_at":"2025-12-31T00:00:00Z","commit_id":"oid-future"}]]
 JSON
       ;;
   esac
