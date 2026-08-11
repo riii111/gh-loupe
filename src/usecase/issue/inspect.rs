@@ -9,10 +9,7 @@ pub fn execute(target: &Target) -> Result<Value> {
     result.insert("issue".to_owned(), rest::issue(target)?);
     result.insert(
         "comments".to_owned(),
-        Value::Array(rest::pages(&format!(
-            "repos/{}/issues/{}/comments?per_page=100",
-            target.repository, target.number
-        ))?),
+        Value::Array(rest::issue_comments(target)?),
     );
     Ok(Value::Object(result))
 }

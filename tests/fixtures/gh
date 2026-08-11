@@ -44,6 +44,10 @@ if [ "$1 $2" = "repo view" ]; then
   if [ "${GH_TEST_REPO_AUTH_FAILURE:-}" = 1 ]; then
     exit 4
   fi
+  if [ "${GH_TEST_REPO_METADATA_MISSING:-}" = 1 ]; then
+    printf '{}\n'
+    exit 0
+  fi
   printf '{"nameWithOwner":"riii111/dotfiles"}\n'
   exit 0
 fi
@@ -359,18 +363,31 @@ JSON
   exit 0
 fi
 
-if [ "$1" = api ] && [[ "$*" == *issues/42/comments* ]]; then
-  if [ "${GH_TEST_PAGINATION_FAILURE:-}" = 1 ]; then
-    printf 'simulated pagination failure\n' >&2
+if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100" ]; then
+  if [ "${GH_TEST_ISSUE_COMMENTS_FAILURE:-}" = 1 ]; then
+    printf 'simulated issue comments failure\n' >&2
     exit 31
   fi
-  printf '[[{"id":2,"body":"conversation"}],[{"id":4,"body":"conversation page 2"}]]\n'
+  case "${GH_TEST_ISSUE_COMMENTS:-success}" in
+    empty)
+      printf '[[]]\n'
+      ;;
+    invalid-page)
+      printf '[[{"id":2}],{}]\n'
+      ;;
+    invalid-item)
+      printf '[[42]]\n'
+      ;;
+    success)
+      printf '[[{"id":2,"body":"conversation"}],[{"id":4,"body":"conversation page 2"}]]\n'
+      ;;
+  esac
   exit 0
 fi
 
 if [ "$1" = api ] && [[ "$*" == *repos/riii111/dotfiles/issues/42* ]]; then
   if [ "${GH_TEST_MISSING_ISSUE:-}" = 1 ]; then
-    printf 'missing issue\n' >&2
+    printf 'issue not found\n' >&2
     exit 44
   fi
   if [ "${GH_TEST_UTF8:-}" = 1 ]; then
