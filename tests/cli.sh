@@ -453,7 +453,7 @@ assert_overview_runtime_error_message overview-required-before-all-failure githu
   GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error_message overview-graphql-before-check-failures githubCli false \
-  '[{"message": "simulated GraphQL failure"}]' \
+  'GitHub GraphQL error: [{"message":"simulated GraphQL failure"}]' \
   GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \

@@ -24,7 +24,7 @@ fn check_buckets(target: &Target, required: bool) -> Result<Value> {
     } else {
         "no checks reported on "
     };
-    let checks = cli::json_runtime_or_empty(args, None, true, empty_error_prefix)?;
+    let checks = cli::json_runtime_or_empty(args, None, empty_error_prefix)?;
     if !checks.is_array() {
         return Err(Exit::runtime(&RuntimeError::invalid_response(
             if required {
@@ -44,7 +44,6 @@ pub fn issue(target: &Target) -> Result<Value> {
             &format!("repos/{}/issues/{}", target.repository, target.number),
         ],
         None,
-        false,
     )?;
     if !issue.is_object() {
         return Err(Exit::invalid_response(
@@ -62,7 +61,6 @@ pub fn issue_comments(target: &Target) -> Result<Vec<Value>> {
     let pages = cli::json_runtime(
         ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
         None,
-        false,
     )?;
     flatten_pages(
         pages,
@@ -80,7 +78,6 @@ pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
     let pages = cli::json_runtime(
         ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
         None,
-        false,
     )?;
     flatten_pages(
         pages,
@@ -98,7 +95,6 @@ pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
     let pages = cli::json_runtime(
         ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
         None,
-        false,
     )?;
     flatten_pages(
         pages,

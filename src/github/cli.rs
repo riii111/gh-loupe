@@ -9,35 +9,31 @@ use serde_json::Value;
 
 use crate::error::{ErrorKind, Exit, Result, RuntimeError};
 
-pub(super) fn json_runtime<I, S>(
-    args: I,
-    payload: Option<&str>,
-    allow_nonzero_json: bool,
-) -> Result<Value>
+pub(super) fn json_runtime<I, S>(args: I, payload: Option<&str>) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    json_runtime_with_empty(args, payload, allow_nonzero_json, None)
+    let output = json_output(args, payload)?;
+    parse_runtime_json(output)
 }
 
 pub(super) fn json_runtime_or_empty<I, S>(
     args: I,
     payload: Option<&str>,
-    allow_nonzero_json: bool,
     empty_error_prefix: &str,
 ) -> Result<Value>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    json_runtime_with_empty(args, payload, allow_nonzero_json, Some(empty_error_prefix))
+    let output = json_output(args, payload)?;
+    parse_runtime_json_or_empty(output, empty_error_prefix)
 }
 
 pub(super) fn json_runtime_with_deadline<I, S>(
     args: I,
     payload: Option<&str>,
-    allow_nonzero_json: bool,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<Value>
@@ -46,7 +42,7 @@ where
     S: AsRef<OsStr>,
 {
     let output = runtime_output(args, payload, deadline, timeout_message, None)?;
-    parse_runtime_json(output, allow_nonzero_json, None)
+    parse_runtime_json(output)
 }
 
 pub(super) fn bytes_runtime_with_deadline<I, S>(
@@ -81,12 +77,7 @@ where
     })
 }
 
-fn json_runtime_with_empty<I, S>(
-    args: I,
-    payload: Option<&str>,
-    allow_nonzero_json: bool,
-    empty_error_prefix: Option<&str>,
-) -> Result<Value>
+fn json_output<I, S>(args: I, payload: Option<&str>) -> Result<ProcessOutput>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -99,24 +90,35 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    let output = execute(command, payload, None, None).map_err(|error| {
+    execute(command, payload, None, None).map_err(|error| {
         runtime_exit(
             ErrorKind::GitHubCli,
             format!("failed to execute GitHub CLI: {error}"),
             false,
             None,
         )
-    })?;
-    parse_runtime_json(output, allow_nonzero_json, empty_error_prefix)
+    })
 }
 
-fn parse_runtime_json(
-    output: ProcessOutput,
-    allow_nonzero_json: bool,
-    empty_error_prefix: Option<&str>,
-) -> Result<Value> {
+fn parse_runtime_json(output: ProcessOutput) -> Result<Value> {
     let code = output.status.code().unwrap_or(1);
-    if !output.status.success() && (!allow_nonzero_json || !matches!(code, 1 | 8)) {
+    if !output.status.success() {
+        return Err(runtime_cli_failure(code, &output.stderr));
+    }
+    match serde_json::from_slice(&output.stdout) {
+        Ok(response) => Ok(response),
+        Err(error) => Err(runtime_exit(
+            ErrorKind::InvalidResponse,
+            format!("GitHub returned invalid JSON: {error}"),
+            false,
+            None,
+        )),
+    }
+}
+
+fn parse_runtime_json_or_empty(output: ProcessOutput, empty_error_prefix: &str) -> Result<Value> {
+    let code = output.status.code().unwrap_or(1);
+    if !output.status.success() && !matches!(code, 1 | 8) {
         return Err(runtime_cli_failure(code, &output.stderr));
     }
     match serde_json::from_slice(&output.stdout) {
@@ -124,11 +126,9 @@ fn parse_runtime_json(
         Err(_error)
             if code == 1
                 && output.stdout.is_empty()
-                && empty_error_prefix.is_some_and(|prefix| {
-                    String::from_utf8_lossy(&output.stderr)
-                        .trim()
-                        .starts_with(prefix)
-                }) =>
+                && String::from_utf8_lossy(&output.stderr)
+                    .trim()
+                    .starts_with(empty_error_prefix) =>
         {
             Ok(Value::Array(Vec::new()))
         }

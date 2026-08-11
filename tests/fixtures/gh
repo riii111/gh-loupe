@@ -150,6 +150,10 @@ JSON
       printf "no required checks reported on the 'feature' branch\n" >&2
       exit 1
       ;;
+    no-checks)
+      printf "no checks reported on the 'feature' branch\n" >&2
+      exit 1
+      ;;
     missing-pr)
       printf 'GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)\n' >&2
       exit 1
@@ -169,6 +173,11 @@ fi
 
 if [ "$1 $2" = "api graphql" ]; then
   payload="$(cat)"
+  if jq -e '.variables | has("number")' <<<"$payload" >/dev/null \
+    && ! jq -e '.variables.number | type == "number" and . == floor' <<<"$payload" >/dev/null; then
+    printf 'GraphQL pull request number must be an integer JSON number\n' >&2
+    exit 91
+  fi
   if [ "${GH_TEST_GRAPHQL_ERROR:-}" = 1 ]; then
     printf '{"errors":[{"message":"simulated GraphQL failure"}]}\n'
     exit 0

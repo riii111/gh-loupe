@@ -48,6 +48,9 @@ jq -e '
 run_checks no-required --required --compact >"$tmpdir/no-required.json"
 jq -e '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
 
+run_checks no-checks --compact >"$tmpdir/no-checks.json"
+jq -e '.data.checks == []' "$tmpdir/no-checks.json" >/dev/null
+
 for mode in missing wrong-type wrong-metadata-type unknown object; do
   if run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
     status=0
