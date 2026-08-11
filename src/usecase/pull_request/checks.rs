@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -29,11 +28,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         let (head_oid, contexts) =
             github::graphql::pull_request_check_contexts(target, deadline, &timeout_message)?;
         let mut checks = validate_check_contexts(&contexts, required)?;
-        checks.sort_by(|left, right| {
-            string_field(left, "name")
-                .cmp(string_field(right, "name"))
-                .then_with(|| string_field(left, "link").cmp(string_field(right, "link")))
-        });
+        checks.sort_by(compare_checks);
         collect_diagnostics(
             target,
             &mut checks,
@@ -56,11 +51,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
             .iter()
             .map(validate_check)
             .collect::<Result<Vec<_>>>()?;
-        checks.sort_by(|left, right| {
-            string_field(left, "name")
-                .cmp(string_field(right, "name"))
-                .then_with(|| string_field(left, "link").cmp(string_field(right, "link")))
-        });
+        checks.sort_by(compare_checks);
         checks
     };
 
@@ -117,7 +108,7 @@ fn collect_diagnostics(
             let log = if is_check_run {
                 collect_actions_log(
                     target,
-                    string_field(check, "link"),
+                    optional_string_field(check, "link"),
                     check_run_id,
                     head_oid,
                     deadline,
@@ -153,7 +144,7 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
         ),
         (
             "link".to_owned(),
-            Value::String(required_cli_check_string(object, "link")?.to_owned()),
+            cli_nullable_check_metadata(object, "link")?,
         ),
         (
             "workflow".to_owned(),
@@ -176,10 +167,6 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
 }
 
 fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<String, Value>>> {
-    let mut values = values.to_vec();
-    values.sort_by(|left, right| context_started_at(right).cmp(context_started_at(left)));
-    let mut status_names = HashSet::new();
-    let mut check_run_keys = HashSet::new();
     let mut checks = Vec::new();
 
     for value in values {
@@ -202,16 +189,11 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
                 let status = required_string(object, "status", "check run status")?;
                 let conclusion = nullable_string(object, "conclusion", "check run conclusion")?;
                 let state = graphql_check_run_state(status, conclusion)?;
-                let link = nullable_string(object, "detailsUrl", "check run details URL")?
-                    .unwrap_or_default();
+                let link = nullable_string(object, "detailsUrl", "check run details URL")?;
                 let started_at = nullable_string(object, "startedAt", "check run start time")?;
                 let completed_at =
                     nullable_string(object, "completedAt", "check run completion time")?;
-                let (workflow, event) = check_run_workflow(object)?;
-                let key = format!("{name}/{}/{event}", workflow.unwrap_or_default());
-                if !check_run_keys.insert(key) {
-                    continue;
-                }
+                let workflow = check_run_workflow(object)?;
                 (
                     name,
                     state,
@@ -224,12 +206,8 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
             }
             "StatusContext" => {
                 let name = required_string(object, "context", "commit status context")?;
-                if !status_names.insert(name.to_owned()) {
-                    continue;
-                }
                 let state = required_string(object, "state", "commit status state")?.to_owned();
-                let link = nullable_string(object, "targetUrl", "commit status target URL")?
-                    .unwrap_or_default();
+                let link = nullable_string(object, "targetUrl", "commit status target URL")?;
                 (name, state, link, None, None, None, None)
             }
             _ => {
@@ -243,7 +221,10 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
             ("name".to_owned(), Value::String(name.to_owned())),
             ("state".to_owned(), Value::String(state)),
             ("bucket".to_owned(), Value::String(bucket.to_owned())),
-            ("link".to_owned(), Value::String(link.to_owned())),
+            (
+                "link".to_owned(),
+                link.map_or(Value::Null, |value| Value::String(value.to_owned())),
+            ),
             (
                 "workflow".to_owned(),
                 workflow.map_or(Value::Null, |value| Value::String(value.to_owned())),
@@ -269,10 +250,6 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
     Ok(checks)
 }
 
-fn context_started_at(value: &Value) -> &str {
-    value.get("startedAt").and_then(Value::as_str).unwrap_or("")
-}
-
 fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
     if status == "COMPLETED" {
         return conclusion.map(str::to_owned).ok_or_else(|| {
@@ -287,7 +264,7 @@ fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<Str
     }
 }
 
-fn check_run_workflow(object: &Map<String, Value>) -> Result<(Option<&str>, &str)> {
+fn check_run_workflow(object: &Map<String, Value>) -> Result<Option<&str>> {
     let suite = object
         .get("checkSuite")
         .and_then(Value::as_object)
@@ -296,20 +273,16 @@ fn check_run_workflow(object: &Map<String, Value>) -> Result<(Option<&str>, &str
         return Err(invalid_response("GitHub returned an invalid workflow run"));
     };
     if run.is_null() {
-        return Ok((None, ""));
+        return Ok(None);
     }
     let run = run
         .as_object()
         .ok_or_else(|| invalid_response("GitHub returned an invalid workflow run"))?;
-    let event = required_string(run, "event", "workflow run event")?;
     let workflow = run
         .get("workflow")
         .and_then(Value::as_object)
         .ok_or_else(|| invalid_response("GitHub returned an invalid workflow"))?;
-    Ok((
-        Some(required_string(workflow, "name", "workflow name")?),
-        event,
-    ))
+    Ok(Some(required_string(workflow, "name", "workflow name")?))
 }
 
 fn check_bucket(state: &str) -> Result<&'static str> {
@@ -390,7 +363,8 @@ fn required_cli_check_string<'a>(object: &'a Map<String, Value>, field: &str) ->
 
 fn cli_nullable_check_metadata(object: &Map<String, Value>, field: &str) -> Result<Value> {
     let value = required_cli_check_string(object, field)?;
-    let absent = value.is_empty() || (field != "workflow" && value == ZERO_TIME);
+    let absent =
+        value.is_empty() || matches!(field, "startedAt" | "completedAt") && value == ZERO_TIME;
     Ok(if absent {
         Value::Null
     } else {
@@ -461,13 +435,13 @@ fn actions_job_id(target: &Target, link: &str) -> Option<u64> {
 
 fn collect_actions_log(
     target: &Target,
-    link: &str,
+    link: Option<&str>,
     check_run_id: Option<u64>,
     head_oid: &str,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<Value> {
-    let Some(job_id) = actions_job_id(target, link) else {
+    let Some(job_id) = link.and_then(|link| actions_job_id(target, link)) else {
         return Ok(Value::Null);
     };
     let job = github::pull_request::job(target, job_id, deadline, timeout_message)?;
@@ -558,6 +532,26 @@ fn string_field<'a>(object: &'a Map<String, Value>, field: &str) -> &'a str {
         .get(field)
         .and_then(Value::as_str)
         .expect("validated check fields are strings")
+}
+
+fn optional_string_field<'a>(object: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
+    object.get(field).and_then(Value::as_str)
+}
+
+fn compare_checks(left: &Map<String, Value>, right: &Map<String, Value>) -> std::cmp::Ordering {
+    string_field(left, "name")
+        .cmp(string_field(right, "name"))
+        .then_with(|| {
+            optional_string_field(left, "link").cmp(&optional_string_field(right, "link"))
+        })
+        .then_with(|| {
+            optional_string_field(right, "startedAt").cmp(&optional_string_field(left, "startedAt"))
+        })
+        .then_with(|| {
+            left.get(CHECK_RUN_ID)
+                .and_then(Value::as_u64)
+                .cmp(&right.get(CHECK_RUN_ID).and_then(Value::as_u64))
+        })
 }
 
 fn invalid_response(message: &str) -> Exit {

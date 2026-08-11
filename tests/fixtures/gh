@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -n "${GH_TEST_CALLS_FILE:-}" ]; then
+  printf '%s\n' "$*" >>"$GH_TEST_CALLS_FILE"
+fi
+
 record_overview_timing() {
   local operation="$1"
   if [ -n "${GH_OVERVIEW_TIMING_FILE:-}" ]; then
@@ -110,7 +114,7 @@ JSON
       ;;
     nullable)
       cat <<'JSON'
-[{"name":"absent","state":"PENDING","bucket":"pending","link":"https://example.test/absent","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"present","state":"SUCCESS","bucket":"pass","link":"https://example.test/present","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"}]
+[{"name":"absent","state":"PENDING","bucket":"pending","link":"","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"present","state":"SUCCESS","bucket":"pass","link":"https://example.test/present","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"}]
 JSON
       exit 0
       ;;
@@ -278,34 +282,6 @@ JSON
     fi
     exit 0
   fi
-  if jq -e '.query | contains("reviewThreads")' <<<"$payload" >/dev/null; then
-    if jq -e '.variables.cursor == "thread-cursor"' <<<"$payload" >/dev/null; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","title":"Test","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewThreads":{"nodes":[{"id":"thread-resolved","isResolved":true,"isOutdated":false,"path":"b.rs","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","resolvedBy":{"login":"author"},"comments":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":"resolved-comment-cursor"}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
-    else
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","title":"Test","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewThreads":{"nodes":[{"id":"thread-unresolved","isResolved":false,"isOutdated":false,"path":"a.rs","line":10,"originalLine":9,"startLine":null,"diffSide":"RIGHT","resolvedBy":null,"comments":{"nodes":[{"id":"comment-1","databaseId":1,"url":"https://example.test/1","body":"fix this","author":{"login":"reviewer"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","path":"a.rs","line":10,"originalLine":9,"diffHunk":"@@","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"comment-cursor"}}}],"pageInfo":{"hasNextPage":true,"endCursor":"thread-cursor"}}}}}}
-JSON
-    fi
-    exit 0
-  fi
-  if jq -e '.query | contains("PullRequestReviewThread")' <<<"$payload" >/dev/null; then
-    if jq -e '.variables.id == "thread-resolved"' <<<"$payload" >/dev/null; then
-      if [ "${GH_FAIL_RESOLVED_COMMENTS:-}" = 1 ]; then
-        printf 'resolved comments should not be fetched\n' >&2
-        exit 88
-      fi
-      cat <<'JSON'
-{"data":{"node":{"comments":{"nodes":[{"id":"comment-resolved","databaseId":6,"url":"https://example.test/6","body":"resolved follow-up","author":{"login":"author"},"createdAt":"2026-01-03T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","path":"b.rs","line":2,"originalLine":2,"diffHunk":"@@","replyTo":null}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
-JSON
-      exit 0
-    fi
-    cat <<'JSON'
-{"data":{"node":{"comments":{"nodes":[{"id":"comment-2","databaseId":2,"url":"https://example.test/2","body":"follow-up","author":{"login":"author"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","path":"a.rs","line":10,"originalLine":9,"diffHunk":"@@","replyTo":{"id":"comment-1"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
-JSON
-    exit 0
-  fi
 fi
 
 if [ "$1" = api ] && [[ "$*" == *issues/42/comments* ]]; then
@@ -327,11 +303,6 @@ if [ "$1" = api ] && [[ "$*" == *repos/riii111/dotfiles/issues/42* ]]; then
   else
     printf '{"number":42,"title":"Issue","state":"open","body":"body"}\n'
   fi
-  exit 0
-fi
-
-if [ "$1" = api ] && [[ "$*" == *pulls/42/reviews* ]]; then
-  printf '[[{"id":3,"state":"CHANGES_REQUESTED"}],[{"id":5,"state":"COMMENTED"}]]\n'
   exit 0
 fi
 

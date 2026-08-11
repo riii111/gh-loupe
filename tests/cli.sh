@@ -3,18 +3,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-reference="$repo_root/tests/fixtures/reference_gh_read.py"
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-compatibility.XXXXXX")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cli.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 export GH_READ_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-read") | .version')"
-mkdir -p "$tmpdir/bin" "$tmpdir/python" "$tmpdir/rust"
+mkdir -p "$tmpdir/bin" "$tmpdir/rust"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
 chmod +x "$tmpdir/bin/gh"
-cp "$reference" "$tmpdir/python/gh-read"
-chmod +x "$tmpdir/python/gh-read"
 ln -s "$GH_READ_BIN" "$tmpdir/rust/gh-read"
 
-compare_case() {
+run_cli() {
   local name="$1"
   shift
   local -a environment=()
@@ -24,49 +21,8 @@ compare_case() {
   done
   shift
 
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/python/gh-read" "$@" \
-    >"$tmpdir/$name.python.stdout" 2>"$tmpdir/$name.python.stderr"
-  local python_status=$?
   env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
-    >"$tmpdir/$name.rust.stdout" 2>"$tmpdir/$name.rust.stderr"
-  local rust_status=$?
-  set -e
-
-  if [ "$python_status" -ne "$rust_status" ]; then
-    printf '%s: exit status differs: Python=%s Rust=%s\n' "$name" "$python_status" "$rust_status" >&2
-    return 1
-  fi
-  cmp "$tmpdir/$name.python.stdout" "$tmpdir/$name.rust.stdout"
-  cmp "$tmpdir/$name.python.stderr" "$tmpdir/$name.rust.stderr"
-}
-
-assert_rust_failure() {
-  local name="$1"
-  local expected_status="$2"
-  local expected_stderr="$3"
-  shift 3
-  local -a environment=()
-  while [ "$1" != "--" ]; do
-    environment+=("$1")
-    shift
-  done
-  shift
-
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
-    >"$tmpdir/$name.rust.stdout" 2>"$tmpdir/$name.rust.stderr"
-  local rust_status=$?
-  set -e
-
-  if [ "$rust_status" -ne "$expected_status" ]; then
-    printf '%s: exit status differs: expected=%s Rust=%s\n' \
-      "$name" "$expected_status" "$rust_status" >&2
-    return 1
-  fi
-  test ! -s "$tmpdir/$name.rust.stdout"
-  printf '%s\n' "$expected_stderr" >"$tmpdir/$name.expected.stderr"
-  cmp "$tmpdir/$name.expected.stderr" "$tmpdir/$name.rust.stderr"
+    >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"
 }
 
 assert_argument_error() {
@@ -225,54 +181,73 @@ assert_overview_runtime_error_message() {
     "$tmpdir/$name.overview.stderr" >/dev/null
 }
 
-compare_case root-help -- --help
-compare_case root-version -- --version
-compare_case pr-help -- pr --help
-compare_case issue-help -- issue --help
-compare_case root-missing-resource --
-compare_case pr-missing-target -- pr
-compare_case issue-missing-target -- issue
-compare_case pr-missing-repo-value -- pr --repo
-compare_case pr-option-instead-of-repo-value -- pr --repo --compact 42
-compare_case pr-unrecognized-option -- pr 42 --bogus
-compare_case issue-pr-only-option -- issue 42 --include-resolved
-compare_case root-end-options -- -- pr 0
-compare_case pr-end-options -- pr -- 42
-compare_case pr-default GH_FAIL_RESOLVED_COMMENTS=1 -- pr 42
-compare_case pr-pages -- pr 42 --include-resolved
-compare_case pr-url -- pr https://github.com/riii111/dotfiles/pull/42
-compare_case repo-equals -- pr 42 --repo=riii111/dotfiles
-compare_case abbreviated-repo -- pr 42 --rep riii111/dotfiles
-compare_case abbreviated-repo-equals -- pr 42 --rep=riii111/dotfiles
-compare_case abbreviated-compact -- pr 42 --comp
-compare_case abbreviated-include-resolved -- pr 42 --incl
-compare_case abbreviated-help -- pr --hel
-assert_argument_error abbreviated-repo-status pr 42 --rep riii111/dotfiles
-assert_argument_error abbreviated-compact-status pr 42 --comp
-assert_argument_error abbreviated-include-resolved-status pr 42 --incl
-assert_argument_error unknown-option-status pr 42 --bogus
-compare_case options-before-target -- pr --compact --repo riii111/dotfiles 42
-compare_case pr-compact -- pr 42 --compact
-compare_case checks-pending GH_TEST_CHECKS_STATUS=pending -- pr 42
-compare_case checks-failure GH_TEST_CHECKS_STATUS=failure -- pr 42
-compare_case issue-default -- issue 42
-compare_case issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
-compare_case utf8 GH_TEST_UTF8=1 -- issue 42
-compare_case invalid-zero -- pr 0
-compare_case arbitrary-precision-number -- pr 18446744073709551616
-compare_case invalid-unicode-number -- pr ²
-compare_case invalid-repo -- pr 42 --repo ../..
-compare_case conflicting-pr-repo -- pr https://github.com/riii111/dotfiles/pull/42 --repo other/repo
-compare_case conflicting-issue-repo -- issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo
-compare_case missing-pr GH_TEST_MISSING_PR=1 -- pr 42
-compare_case missing-issue GH_TEST_MISSING_ISSUE=1 -- issue 42
-compare_case gh-failure GH_TEST_FAILURE=1 -- pr 42
-compare_case stdin-failure GH_TEST_STDIN_FAILURE=1 -- pr 42 --repo riii111/dotfiles
-compare_case pagination-failure GH_TEST_PAGINATION_FAILURE=1 -- pr 42
-compare_case graphql-error GH_TEST_GRAPHQL_ERROR=1 -- pr 42
-assert_rust_failure invalid-json 1 \
-  'GitHub returned invalid JSON: expected ident at line 1 column 2' \
-  GH_TEST_INVALID_JSON=1 -- pr 42
+run_cli root-help -- --help
+test ! -s "$tmpdir/root-help.stderr"
+grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
+
+run_cli root-version -- --version
+test ! -s "$tmpdir/root-version.stderr"
+test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
+
+run_cli pr-help -- pr --help
+test ! -s "$tmpdir/pr-help.stderr"
+grep -F 'usage: gh-read pr [-h] {overview,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview threads thread checks; do
+  grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
+done
+if grep -E '^    (full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
+  exit 1
+fi
+
+set +e
+GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
+  "$tmpdir/rust/gh-read" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"
+bare_status=$?
+set -e
+test "$bare_status" -eq 2
+test ! -s "$tmpdir/bare-pr.stdout"
+test ! -e "$tmpdir/bare-pr.calls"
+grep -Fx 'usage: gh-read pr [-h] {overview,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'gh-read pr: error: the following arguments are required: subcommand' "$tmpdir/bare-pr.stderr" >/dev/null
+
+assert_argument_error root-missing-resource
+assert_argument_error pr-missing-subcommand pr
+assert_argument_error issue-missing-target issue
+assert_argument_error issue-pr-only-option issue 42 --include-resolved
+
+run_cli issue-default -- issue 42
+test ! -s "$tmpdir/issue-default.stderr"
+jq -e '. == {
+  "issue":{"number":42,"title":"Issue","state":"open","body":"body"},
+  "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
+}' "$tmpdir/issue-default.stdout" >/dev/null
+
+run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
+test ! -s "$tmpdir/issue-url-compact.stderr"
+test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
+jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
+
+run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
+jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
+
+set +e
+env PATH="$tmpdir/bin:$PATH" GH_TEST_MISSING_ISSUE=1 "$tmpdir/rust/gh-read" issue 42 \
+  >"$tmpdir/issue-missing.stdout" 2>"$tmpdir/issue-missing.stderr"
+issue_status=$?
+set -e
+test "$issue_status" -eq 44
+test ! -s "$tmpdir/issue-missing.stdout"
+test "$(cat "$tmpdir/issue-missing.stderr")" = 'missing issue'
+
+set +e
+env PATH="$tmpdir/bin:$PATH" GH_TEST_INVALID_JSON=1 "$tmpdir/rust/gh-read" issue 42 \
+  >"$tmpdir/issue-invalid-json.stdout" 2>"$tmpdir/issue-invalid-json.stderr"
+issue_status=$?
+set -e
+test "$issue_status" -eq 1
+test ! -s "$tmpdir/issue-invalid-json.stdout"
+test "$(cat "$tmpdir/issue-invalid-json.stderr")" = \
+  'GitHub returned invalid JSON: expected ident at line 1 column 2'
 
 run_overview overview-default -- pr overview 42 --repo riii111/dotfiles
 jq -e '

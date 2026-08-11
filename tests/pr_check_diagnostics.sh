@@ -39,6 +39,13 @@ jq -e '
 ' "$tmpdir/status-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/collision-calls")" -eq 1
 
+run_diagnostics status-duplicate --failed-diagnostics --quiet --compact \
+  >"$tmpdir/status-duplicate.json"
+jq -e '
+  (.data.checks | length) == 2 and
+  (.data.checks | all(.name == "duplicate-status" and .annotations == []))
+' "$tmpdir/status-duplicate.json" >/dev/null
+
 GH_DIAGNOSTICS_CALLS="$tmpdir/check-run-collision-calls" run_diagnostics check-run-collision \
   --failed-diagnostics --quiet --compact >"$tmpdir/check-run-collision.json"
 jq -e '
@@ -51,7 +58,7 @@ test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls"
 run_diagnostics pending-metadata --failed-diagnostics --quiet --compact \
   >"$tmpdir/pending-metadata.json"
 jq -e '
-  .data.checks == [{"name":"pending","state":"IN_PROGRESS","bucket":"pending","link":"","workflow":null,"startedAt":"2026-08-11T11:00:00Z","completedAt":null}]
+  .data.checks == [{"name":"pending","state":"IN_PROGRESS","bucket":"pending","link":null,"workflow":null,"startedAt":"2026-08-11T11:00:00Z","completedAt":null}]
 ' "$tmpdir/pending-metadata.json" >/dev/null
 
 run_diagnostics normal --include-failed-logs --quiet --compact \

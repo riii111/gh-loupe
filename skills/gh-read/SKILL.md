@@ -1,13 +1,13 @@
 ---
 name: gh-read
-description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/checks、comments、reviews、review threadsを読み取り専用wrapperで取得する。PRやIssueの確認、CI調査、コメント取得、自律的なレビューで使う。
+description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/checks、review threadsを読み取り専用wrapperで取得する。PRやIssueの確認、CI調査、thread取得、自律的なレビューで使う。
 ---
 
 # GitHub read
 
 `gh-read`を使い、API queryをその場で組み立てずにGitHubの定型情報を取得する。
 
-## Compatibility
+## Version
 
 最初に`gh-read --version`を実行し、インストール済みbinaryの版を確認する。
 `--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版である。
@@ -25,9 +25,7 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 5. 一覧で特定したthreadのcomment本文が必要なら、`gh-read pr thread <番号またはURL> <thread ID> --compact`を実行する。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
 6. 個別checkが必要なら`gh-read pr checks <番号またはURL> --compact`を使う。required checkだけなら`--required`を加える。
 7. 失敗checkを調べるときは`--failed-diagnostics`でannotationを取得し、annotationだけで不足する場合だけ`--include-failed-logs`で制限付きlogを追加する。必要に応じて`--timeout SECONDS`を変更する。
-8. PR本文、conversation comments、review本文を含む既存形式が必要な場合だけ`gh-read pr <番号またはURL> --compact`を実行する。
-9. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
-10. 既存の`pr`で`diffHunk`が必要な場合だけ`--compact`を外す。
+8. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
 
 ## Rules
 
@@ -40,9 +38,8 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 - `pr threads`の`data.threads`が空なら、未解決threadはないと報告する。
 - `pr thread`には`pr threads`が返したthread IDを渡し、取得失敗をcommentなしと解釈しない。
 - `pr thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。
-- 既存の`pr`で`reviewThreads`が空なら、未解決threadはないと報告する。
 - `pr checks`の`checks`が空ならCI情報がない状態として扱う。
-- `pr checks`の`workflow`、`startedAt`、`completedAt`は`string | null`であり、通常経路と診断経路で同じ型である。GitHub CLIの空文字と`0001-01-01T00:00:00Z`は`null`を表す。pre-production段階のschema correctionのため、`schemaVersion`は1のままである。
+- `pr checks`の`workflow`、`startedAt`、`completedAt`、`link`は`string | null`であり、通常経路と診断経路で同じ型である。GitHub CLIの空文字と時刻の`0001-01-01T00:00:00Z`は`null`を表す。pre-production段階のschema correctionのため、`schemaVersion`は1のままである。
 - 診断の進捗はstderr、最終JSONはstdoutとして分けて扱う。`log: null`は対応するActions job logがないことを表し、取得失敗とは解釈しない。
 - `truncated: true`のlogには省略がある。省略数が`null`なら正確な量を推測しない。
 - 取得失敗を「コメントなし」と解釈しない。

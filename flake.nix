@@ -52,7 +52,7 @@
         {
           default = rustPlatform.buildRustPackage {
             pname = "gh-read";
-            version = "0.1.0";
+            version = "0.2.0";
 
             src = self;
             cargoLock.lockFile = ./Cargo.lock;
@@ -60,7 +60,6 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             nativeCheckInputs = [
               pkgs.jq
-              pkgs.python313
             ];
             postInstall = ''
               wrapProgram "$out/bin/gh-read" --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.gh ]}"
@@ -94,7 +93,6 @@
               pkgs.gh
               pkgs.jq
               pkgs.lefthook
-              pkgs.python313
             ];
           };
         }
