@@ -1,9 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::error::{Exit, Result};
+use crate::error::{Exit, Result, RuntimeError};
 use crate::model::Target;
 
-use super::super::cli;
 use super::pagination;
 
 const REVIEW_THREADS_QUERY: &str = r"
@@ -52,17 +51,26 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
         .expect("repository is validated");
     let mut cursor_tracker = pagination::CursorTracker::default();
     let mut review_threads = Vec::new();
+    let number = target
+        .number
+        .parse::<i32>()
+        .map_err(|_| super::invalid_graphql_response())?;
 
     loop {
-        let variables = variables(owner, name, &target.number, cursor_tracker.cursor())?;
-        let data = query(REVIEW_THREADS_QUERY, &variables)?;
+        let variables = json!({
+            "owner": owner,
+            "name": name,
+            "number": number,
+            "cursor": cursor_tracker.cursor(),
+        });
+        let data = super::query(REVIEW_THREADS_QUERY, &variables)?;
         let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             let message = format!(
                 "pull request not found: {}#{}",
                 target.repository, target.number
             );
-            return Err(cli::runtime_cli_failure(1, message.as_bytes()));
+            return Err(Exit::runtime(&RuntimeError::not_found(message)));
         }
         let connection = pagination::value_at(pull_request, &["reviewThreads"])?;
         review_threads.extend(pagination::nodes(connection)?.iter().cloned());
@@ -93,11 +101,8 @@ fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
     let mut cursor_tracker = pagination::CursorTracker::default();
     while let Some(cursor) = cursor_tracker.next(&comments)? {
-        let variables =
-            serde_json::to_string(&json!({"id": id, "cursor": cursor})).map_err(|error| {
-                Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-            })?;
-        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
+        let variables = json!({"id": id, "cursor": cursor});
+        let data = super::query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
         let page = pagination::value_at(&data, &["node", "comments"])?;
         let new_nodes = pagination::nodes(page)?.to_vec();
         comments
@@ -122,31 +127,4 @@ fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
         .expect("review thread was validated as an object")
         .insert("comments".to_owned(), nodes);
     Ok(())
-}
-
-fn variables(owner: &str, name: &str, number: &str, cursor: Option<&str>) -> Result<String> {
-    let owner = serde_json::to_string(owner).expect("serializing a string cannot fail");
-    let name = serde_json::to_string(name).expect("serializing a string cannot fail");
-    let cursor = serde_json::to_string(&cursor).map_err(|error| {
-        Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-    })?;
-    Ok(format!(
-        r#"{{"owner":{owner},"name":{name},"number":{number},"cursor":{cursor}}}"#
-    ))
-}
-
-fn query(document: &str, variables: &str) -> Result<Value> {
-    let document = serde_json::to_string(document).map_err(|error| {
-        Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-    })?;
-    let payload = format!(r#"{{"query":{document},"variables":{variables}}}"#);
-    let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
-    if let Some(errors) = response.get("errors") {
-        let message = format!("GitHub GraphQL error: {errors}");
-        return Err(cli::runtime_cli_failure(1, message.as_bytes()));
-    }
-    response
-        .get("data")
-        .cloned()
-        .ok_or_else(|| Exit::invalid_response("GitHub returned a GraphQL response without data"))
 }

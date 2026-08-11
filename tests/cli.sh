@@ -449,7 +449,7 @@ assert_overview_runtime_error_message overview-required-before-all-failure githu
   GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error_message overview-graphql-before-check-failures githubCli false \
-  '[{"message": "simulated GraphQL failure"}]' \
+  'GitHub GraphQL error: [{"message":"simulated GraphQL failure"}]' \
   GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \
@@ -724,7 +724,7 @@ assert_runtime_failure thread-wrong-repo notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-repo -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_runtime_failure thread-missing notFound runtime \
   GH_TEST_THREAD_DETAIL=missing -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_runtime_failure thread-unresolved-node notFound runtime \
+assert_runtime_failure thread-unresolved-node githubCli runtime \
   GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr review-thread 42 missing --repo riii111/dotfiles
 assert_runtime_failure thread-wrong-type notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr review-thread 42 thread-detail --repo riii111/dotfiles

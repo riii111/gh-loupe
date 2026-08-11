@@ -21,9 +21,13 @@ pub fn checks(target: &Target, required: bool) -> Result<Value> {
     ];
     if required {
         args.push("--required");
-        return cli::json_runtime_or_empty(args, None, true, "no required checks reported on ");
     }
-    cli::json_runtime(args, None, true)
+    let empty_error_prefix = if required {
+        "no required checks reported on "
+    } else {
+        "no checks reported on "
+    };
+    cli::json_runtime_or_empty(args, None, empty_error_prefix)
 }
 
 pub fn annotations(
@@ -45,7 +49,6 @@ pub fn annotations(
             ),
         ],
         None,
-        false,
         deadline,
         timeout_message,
     )
@@ -65,7 +68,6 @@ pub fn job(
             &format!("repos/{}/actions/jobs/{job_id}", target.repository),
         ],
         None,
-        false,
         deadline,
         timeout_message,
     )

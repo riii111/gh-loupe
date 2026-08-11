@@ -66,10 +66,6 @@ impl RuntimeError {
         }
     }
 
-    pub fn from_cli_failure(stderr: &[u8]) -> Self {
-        Self::classify_cli_failure(None, stderr)
-    }
-
     pub(crate) fn from_cli_process_failure(code: i32, stderr: &[u8]) -> Self {
         Self::classify_cli_failure(Some(code), stderr)
     }

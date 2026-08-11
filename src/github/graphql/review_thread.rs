@@ -3,7 +3,6 @@ use serde_json::{Value, json};
 use crate::error::{Exit, Result, RuntimeError};
 use crate::model::Target;
 
-use super::super::cli;
 use super::pagination;
 
 const REVIEW_THREAD_QUERY: &str = r"
@@ -66,10 +65,8 @@ query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
 ";
 
 pub fn execute(target: &Target, review_thread_id: &str) -> Result<Value> {
-    let variables = serde_json::to_string(&json!({"id": review_thread_id})).map_err(|error| {
-        Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-    })?;
-    let data = query(REVIEW_THREAD_QUERY, &variables)?;
+    let variables = json!({"id": review_thread_id});
+    let data = super::query(REVIEW_THREAD_QUERY, &variables)?;
     let mut review_thread = review_thread_node(&data, review_thread_id)?.clone();
     verify_pull_request(&review_thread, target)?;
     review_thread
@@ -109,11 +106,8 @@ fn append_review_thread_comment_pages(
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
     let mut cursor_tracker = pagination::CursorTracker::default();
     while let Some(cursor) = cursor_tracker.next(&comments)? {
-        let variables = serde_json::to_string(&json!({"id": review_thread_id, "cursor": cursor}))
-            .map_err(|error| {
-            Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-        })?;
-        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
+        let variables = json!({"id": review_thread_id, "cursor": cursor});
+        let data = super::query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
         let node = review_thread_node(&data, review_thread_id)?;
         let page = pagination::value_at(node, &["comments"])?;
         let new_nodes = pagination::nodes(page)?.to_vec();
@@ -160,28 +154,6 @@ fn review_thread_node<'a>(data: &'a Value, review_thread_id: &str) -> Result<&'a
         ));
     }
     Ok(node)
-}
-
-fn query(document: &str, variables: &str) -> Result<Value> {
-    let document = serde_json::to_string(document).map_err(|error| {
-        Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-    })?;
-    let payload = format!(r#"{{"query":{document},"variables":{variables}}}"#);
-    let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
-    if let Some(errors) = response.get("errors") {
-        let message = format!("GitHub GraphQL error: {errors}");
-        if message
-            .to_ascii_lowercase()
-            .contains("could not resolve to a node")
-        {
-            return Err(not_found(message));
-        }
-        return Err(cli::runtime_cli_failure(1, message.as_bytes()));
-    }
-    response
-        .get("data")
-        .cloned()
-        .ok_or_else(|| Exit::invalid_response("GitHub returned a GraphQL response without data"))
 }
 
 fn not_found(message: impl Into<String>) -> Exit {
