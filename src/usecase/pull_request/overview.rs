@@ -5,7 +5,6 @@ use serde_json::{Value, json};
 use crate::error::{Exit, Result};
 use crate::github::{graphql, rest};
 use crate::model::Target;
-use crate::output;
 
 pub fn execute(target: &Target) -> Result<Value> {
     let (graphql_result, required_result, all_result) = thread::scope(|scope| {
@@ -26,7 +25,7 @@ pub fn execute(target: &Target) -> Result<Value> {
     let (pull_request, unresolved) = graphql_result?;
     let required = summarize_required_checks(&required_result?)?;
     let all = summarize_all_checks(&all_result?)?;
-    Ok(output::success(json!({
+    Ok(json!({
         "pullRequest": pull_request,
         "checks": {
             "required": required["required"],
@@ -38,7 +37,7 @@ pub fn execute(target: &Target) -> Result<Value> {
         "reviewThreads": {
             "unresolved": unresolved,
         },
-    })))
+    }))
 }
 
 fn summarize_required_checks(checks: &Value) -> Result<Value> {

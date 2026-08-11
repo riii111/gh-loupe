@@ -1,13 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::error::{Exit, Result};
-use crate::model::CheckDiagnosticsOptions;
+use crate::model::{CheckDiagnosticsOptions, Target};
 use crate::usecase;
 
-pub(super) fn parse_args<I>(
-    program: &str,
-    values: std::iter::Peekable<I>,
-) -> Result<super::super::Args>
+pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Args>
 where
     I: Iterator<Item = String>,
 {
@@ -23,7 +20,7 @@ where
         argument_error,
         print_help,
         |option, values| {
-            if let Some(value) = super::exact_long_option_value(option, "--timeout") {
+            if let Some(value) = super::super::exact_long_option_value(option, "--timeout") {
                 timeout_seconds = parse_timeout(program, value)?;
                 return Ok(true);
             }
@@ -81,19 +78,11 @@ where
 }
 
 pub(super) fn execute(
-    target_value: &str,
-    repo: Option<String>,
-    program: &str,
+    target: &Target,
     required: bool,
     diagnostics: CheckDiagnosticsOptions,
 ) -> Result<serde_json::Value> {
-    let target = super::super::target::resolve_pr_subcommand_target(
-        target_value,
-        repo,
-        program,
-        argument_error,
-    )?;
-    usecase::pull_request::checks::execute(&target, required, diagnostics)
+    usecase::pull_request::checks::execute(target, required, diagnostics)
 }
 
 fn parse_timeout(program: &str, value: &str) -> Result<u64> {
@@ -122,11 +111,8 @@ fn usage(program: &str) -> String {
     )
 }
 
-fn argument_error(program: &str, message: &str) -> Exit {
-    Exit {
-        message: format!("{}\n{program} pr checks: error: {message}", usage(program)),
-        code: 2,
-    }
+pub(super) fn argument_error(program: &str, message: &str) -> Exit {
+    super::super::argument_error(program, &usage(program), "pr checks", message)
 }
 
 fn print_help(program: &str) -> Result<()> {

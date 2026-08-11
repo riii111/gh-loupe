@@ -263,6 +263,10 @@ assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
 assert_argument_error issue-missing-target issue
 assert_argument_error issue-pr-only-option issue 42 --include-resolved
+grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+  "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
+grep -F 'gh-loupe issue: error: unrecognized arguments: --include-resolved' \
+  "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
 
 for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"

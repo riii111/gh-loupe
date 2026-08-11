@@ -1,11 +1,8 @@
 use crate::error::{Exit, Result};
-use crate::output;
+use crate::model::Target;
 use crate::usecase;
 
-pub(super) fn parse_args<I>(
-    program: &str,
-    values: std::iter::Peekable<I>,
-) -> Result<super::super::Args>
+pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Args>
 where
     I: Iterator<Item = String>,
 {
@@ -51,25 +48,11 @@ where
 }
 
 pub(super) fn execute(
-    target_value: &str,
-    repo: Option<String>,
-    program: &str,
+    target: &Target,
     review_thread_id: &str,
     include_diff_hunk: bool,
 ) -> Result<serde_json::Value> {
-    let target = super::super::target::resolve_pr_subcommand_target(
-        target_value,
-        repo,
-        program,
-        argument_error,
-    )?;
-    Ok(output::success(serde_json::json!({
-        "reviewThread": usecase::pull_request::review_thread::execute(
-            &target,
-            review_thread_id,
-            include_diff_hunk,
-        )?,
-    })))
+    usecase::pull_request::review_thread::execute(target, review_thread_id, include_diff_hunk)
 }
 
 fn usage(program: &str) -> String {
@@ -78,14 +61,8 @@ fn usage(program: &str) -> String {
     )
 }
 
-fn argument_error(program: &str, message: &str) -> Exit {
-    Exit {
-        message: format!(
-            "{}\n{program} pr review-thread: error: {message}",
-            usage(program)
-        ),
-        code: 2,
-    }
+pub(super) fn argument_error(program: &str, message: &str) -> Exit {
+    super::super::argument_error(program, &usage(program), "pr review-thread", message)
 }
 
 fn print_help(program: &str) -> Result<()> {

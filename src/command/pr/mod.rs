@@ -6,7 +6,10 @@ mod review_threads;
 mod reviews;
 
 use crate::error::{Exit, Result};
+use crate::github;
 use crate::model::CheckDiagnosticsOptions;
+use crate::model::Target;
+use crate::output;
 
 pub(super) enum Action {
     Checks {
@@ -25,7 +28,7 @@ pub(super) enum Action {
     },
 }
 
-pub(super) fn parse<I>(program: &str, mut remaining: std::iter::Peekable<I>) -> Result<super::Args>
+pub(super) fn parse<I>(program: &str, mut remaining: I) -> Result<super::Args>
 where
     I: Iterator<Item = String>,
 {
@@ -57,26 +60,103 @@ where
 
 pub(super) fn execute(
     action: Action,
-    target: &str,
+    target_value: &str,
     repo: Option<String>,
     program: &str,
 ) -> Result<serde_json::Value> {
-    match action {
+    let target = resolve_target(&action, target_value, repo, program)?;
+    let data = match action {
         Action::Checks {
             required,
             diagnostics,
-        } => checks::execute(target, repo, program, required, diagnostics),
-        Action::Comments => comments::execute(target, repo, program),
-        Action::Overview => overview::execute(target, repo, program),
-        Action::Reviews => reviews::execute(target, repo, program),
+        } => checks::execute(&target, required, diagnostics)?,
+        Action::Comments => serde_json::json!({
+            "comments": comments::execute(&target)?,
+        }),
+        Action::Overview => overview::execute(&target)?,
+        Action::Reviews => serde_json::json!({
+            "reviews": reviews::execute(&target)?,
+        }),
         Action::ReviewThread {
             review_thread_id,
             include_diff_hunk,
-        } => review_thread::execute(target, repo, program, &review_thread_id, include_diff_hunk),
-        Action::ReviewThreads { include_resolved } => {
-            review_threads::execute(target, repo, program, include_resolved)
+        } => serde_json::json!({
+            "reviewThread": review_thread::execute(
+                &target,
+                &review_thread_id,
+                include_diff_hunk,
+            )?,
+        }),
+        Action::ReviewThreads { include_resolved } => serde_json::json!({
+            "reviewThreads": review_threads::execute(&target, include_resolved)?,
+        }),
+    };
+    Ok(output::success(data))
+}
+
+fn resolve_target(
+    action: &Action,
+    target_value: &str,
+    repo: Option<String>,
+    program: &str,
+) -> Result<Target> {
+    let argument_error: fn(&str, &str) -> Exit = match action {
+        Action::Checks { .. } => checks::argument_error,
+        Action::Comments => comments::argument_error,
+        Action::Overview => overview::argument_error,
+        Action::Reviews => reviews::argument_error,
+        Action::ReviewThread { .. } => review_thread::argument_error,
+        Action::ReviewThreads { .. } => review_threads::argument_error,
+    };
+    if let Some((url_repo, number)) =
+        super::target::parse_url(target_value, super::target::Resource::Pr)
+    {
+        if !super::target::is_repo(url_repo) {
+            return Err(argument_error(
+                program,
+                "pr URL must contain a valid OWNER/REPO",
+            ));
         }
+        if repo
+            .as_ref()
+            .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
+        {
+            return Err(argument_error(
+                program,
+                "--repo conflicts with the pull request URL",
+            ));
+        }
+        let Some(number) = positive_pr_number(number) else {
+            return Err(argument_error(
+                program,
+                "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
+            ));
+        };
+        return Ok(Target {
+            repository: url_repo.to_owned(),
+            number,
+        });
     }
+
+    let Some(number) = positive_pr_number(target_value) else {
+        return Err(argument_error(
+            program,
+            "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
+        ));
+    };
+    let repository = match repo {
+        Some(repo) => repo,
+        None => github::current_repository_runtime()?,
+    };
+    if !super::target::is_repo(&repository) {
+        return Err(argument_error(program, "--repo must use OWNER/REPO format"));
+    }
+    Ok(Target { repository, number })
+}
+
+fn positive_pr_number(value: &str) -> Option<String> {
+    let value = super::target::positive_number(value)?;
+    value.parse::<i32>().ok().map(|_| value)
 }
 
 struct SubcommandArgs {
@@ -117,7 +197,7 @@ where
             positional_only = true;
             continue;
         }
-        if let Some(value) = exact_long_option_value(&value, "--repo") {
+        if let Some(value) = super::exact_long_option_value(&value, "--repo") {
             repo = Some(value.to_owned());
             continue;
         }
@@ -178,11 +258,6 @@ fn unrecognized_args(
     }
 }
 
-fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
-    let (name, value) = value.split_once('=')?;
-    (name == option).then_some(value)
-}
-
 fn usage(program: &str) -> String {
     format!(
         "usage: {program} pr [-h] {{overview,comments,reviews,review-threads,review-thread,checks}} ..."
@@ -190,10 +265,7 @@ fn usage(program: &str) -> String {
 }
 
 fn pr_argument_error(program: &str, message: &str) -> Exit {
-    Exit {
-        message: format!("{}\n{program} pr: error: {message}", usage(program)),
-        code: 2,
-    }
+    super::argument_error(program, &usage(program), "pr", message)
 }
 
 fn print_help(program: &str) -> Result<()> {
