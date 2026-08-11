@@ -31,7 +31,7 @@ cd gh-read
 installerは`cargo install --path . --locked --force`に相当するbuildを、一時`CARGO_TARGET_DIR`で行います。
 repositoryの`target`へは書き込みません。
 Skillはdirectory全体を置き換えるため、以前の版にだけ存在したfileは残りません。
-どちらかの検証に失敗した場合は既存のbinaryとSkillを復元します。
+置換前のbuildまたは検証に失敗した場合、既存のbinaryとSkillは変更しません。置換時の失敗はエラーとして終了します。
 
 インストール後はstandalone commandの`gh-read`を直接実行します。repository名とbinary名はGitHub CLI extensionの`gh-<name>`命名規則に合いますが、現時点ではprecompiled release artifactやrepository rootのextension実行ファイルを配布していません。そのため`gh extension install`と`gh read`は導入手段・実行方法として扱わず、このrepositoryからstandalone binaryを導入してください。
 
