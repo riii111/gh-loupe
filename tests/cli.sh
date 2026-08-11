@@ -181,6 +181,55 @@ assert_overview_runtime_error_message() {
     "$tmpdir/$name.overview.stderr" >/dev/null
 }
 
+run_comments() {
+  local name="$1"
+  shift
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.comments.stdout" 2>"$tmpdir/$name.comments.stderr"
+  test ! -s "$tmpdir/$name.comments.stderr"
+  jq -e '
+    .schemaVersion == 1 and
+    (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+    (.data | keys == ["comments"])
+  ' "$tmpdir/$name.comments.stdout" >/dev/null
+}
+
+assert_comments_runtime_failure() {
+  local name="$1"
+  local expected_kind="$2"
+  shift 2
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.comments.stdout" 2>"$tmpdir/$name.comments.stderr"
+  local status=$?
+  set -e
+
+  test "$status" -ne 0
+  test ! -s "$tmpdir/$name.comments.stdout"
+  test "$(wc -l <"$tmpdir/$name.comments.stderr")" -eq 1
+  jq -e --arg kind "$expected_kind" '
+    .schemaVersion == 1 and
+    .error.kind == $kind and
+    (.error.message | type == "string") and
+    (.error.retryable | type == "boolean") and
+    (.error.retryAfterSeconds == null)
+  ' "$tmpdir/$name.comments.stderr" >/dev/null
+}
+
 run_cli root-help -- --help
 test ! -s "$tmpdir/root-help.stderr"
 grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
@@ -191,8 +240,8 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-read pr [-h] {overview,reviews,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview reviews threads thread checks; do
+grep -F 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview comments reviews threads thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
 if grep -E '^    (full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
@@ -207,7 +256,7 @@ set -e
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-read pr [-h] {overview,reviews,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
 grep -Fx 'gh-read pr: error: the following arguments are required: subcommand' "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource
@@ -352,6 +401,88 @@ assert_overview_runtime_error overview-gh-failure githubCli false \
   GH_TEST_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-invalid-json invalidResponse false \
   GH_TEST_INVALID_JSON=1 -- pr overview 42 --repo riii111/dotfiles
+
+assert_argument_error comments-missing-target pr comments
+assert_argument_error comments-abbreviated-repo pr comments 42 --rep riii111/dotfiles
+assert_argument_error comments-abbreviated-compact pr comments 42 --comp
+assert_argument_error comments-invalid-zero pr comments 0 --repo riii111/dotfiles
+assert_argument_error comments-invalid-repo pr comments 42 --repo ../..
+assert_argument_error comments-conflicting-repo \
+  pr comments https://github.com/riii111/dotfiles/pull/42 --repo other/repo
+
+calls_file="$tmpdir/comments-invalid.calls"
+set +e
+GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
+  "$tmpdir/rust/gh-read" pr comments nope --repo riii111/dotfiles \
+  >"$tmpdir/comments-invalid.stdout" 2>"$tmpdir/comments-invalid.stderr"
+comments_status=$?
+set -e
+test "$comments_status" -eq 2
+test ! -s "$tmpdir/comments-invalid.stdout"
+test ! -e "$calls_file"
+
+calls_file="$tmpdir/comments.calls"
+run_comments comments-default "GH_TEST_CALLS_FILE=$calls_file" -- \
+  pr comments 42 --repo riii111/dotfiles
+jq -e '
+  .data.comments == [
+    {
+      "id": "IC_a",
+      "url": "https://example.test/a",
+      "author": null,
+      "body": "first by id",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T02:00:00Z"
+    },
+    {
+      "id": "IC_b",
+      "url": "https://example.test/b",
+      "author": "author",
+      "body": "second by id",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T01:00:00Z"
+    },
+    {
+      "id": "IC_z",
+      "url": "https://example.test/z",
+      "author": "later",
+      "body": "later",
+      "createdAt": "2026-01-02T00:00:00Z",
+      "updatedAt": "2026-01-02T01:00:00Z"
+    }
+  ] and
+  (.data.comments | all(keys == ["author", "body", "createdAt", "id", "updatedAt", "url"])) and
+  ([.. | objects | keys[]] | any(. == "pull_request_review_id" or . == "diff_hunk" or . == "review" or . == "pullRequest") | not)
+' "$tmpdir/comments-default.comments.stdout" >/dev/null
+test "$(cat "$calls_file")" = \
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments'
+test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -gt 1
+
+run_comments comments-url-compact GH_PR_COMMENTS=empty -- \
+  pr comments https://github.com/riii111/dotfiles/pull/42 --compact
+jq -e '.data.comments == []' "$tmpdir/comments-url-compact.comments.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/comments-url-compact.comments.stdout")" -eq 1
+
+calls_file="$tmpdir/comments-inferred.calls"
+run_comments comments-inferred-repo "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=empty -- \
+  pr comments 42 --compact
+test "$(sed -n '1p' "$calls_file")" = 'repo view --json nameWithOwner'
+test "$(sed -n '2p' "$calls_file")" = \
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments'
+test "$(wc -l <"$calls_file")" -eq 2
+
+assert_comments_runtime_failure comments-invalid-page invalidResponse \
+  GH_PR_COMMENTS=invalid-page -- pr comments 42 --repo riii111/dotfiles
+assert_comments_runtime_failure comments-invalid-item invalidResponse \
+  GH_PR_COMMENTS=invalid-item -- pr comments 42 --repo riii111/dotfiles
+assert_comments_runtime_failure comments-missing-field invalidResponse \
+  GH_PR_COMMENTS=missing-field -- pr comments 42 --repo riii111/dotfiles
+assert_comments_runtime_failure comments-wrong-type invalidResponse \
+  GH_PR_COMMENTS=wrong-type -- pr comments 42 --repo riii111/dotfiles
+assert_comments_runtime_failure comments-page-failure network \
+  GH_PR_COMMENTS_FAILURE=1 -- pr comments 42 --repo riii111/dotfiles
+assert_comments_runtime_failure comments-repo-auth authentication \
+  GH_TEST_REPO_AUTH_FAILURE=1 -- pr comments 42
 
 assert_argument_error threads-missing-target pr threads
 assert_argument_error threads-abbreviated-repo pr threads 42 --rep riii111/dotfiles

@@ -52,7 +52,7 @@
         {
           default = rustPlatform.buildRustPackage {
             pname = "gh-read";
-            version = "0.2.0";
+            version = "0.4.0";
 
             src = self;
             cargoLock.lockFile = ./Cargo.lock;
