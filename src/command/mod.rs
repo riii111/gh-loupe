@@ -122,6 +122,10 @@ fn parse_args() -> Result<Args> {
             "the following arguments are required: resource",
         ));
     };
+    if resource_value == "--version" {
+        print_version();
+        std::process::exit(0);
+    }
     let root_positional_only = resource_value == "--";
     if root_positional_only {
         let Some(value) = values.next() else {
@@ -835,7 +839,7 @@ fn usage(program: &str, resource: Option<Resource>) -> String {
         Some(Resource::Issue) => {
             format!("usage: {program} issue [-h] [--repo REPO] [--compact] target")
         }
-        None => format!("usage: {program} [-h] {{pr,issue}} ..."),
+        None => format!("usage: {program} [-h] [--version] {{pr,issue}} ..."),
     }
 }
 
@@ -945,10 +949,17 @@ fn program_name() -> String {
 
 fn print_root_help(program: &str) {
     let text = format!(
-        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
         usage(program, None)
     );
     io::stdout().write_all(text.as_bytes()).expect("write help");
+}
+
+fn print_version() {
+    let text = format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    io::stdout()
+        .write_all(text.as_bytes())
+        .expect("write version");
 }
 
 fn print_help(program: &str, resource: Resource) {

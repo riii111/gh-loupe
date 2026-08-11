@@ -241,6 +241,11 @@ def parse_args() -> argparse.Namespace:
         description="Read fixed GitHub PR and Issue metadata without mutations.",
         allow_abbrev=False,
     )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="show program's version and exit",
+    )
     subparsers = parser.add_subparsers(dest="resource", required=True)
     pr = subparsers.add_parser("pr", help="read pull request metadata and review data")
     pr.allow_abbrev = False
