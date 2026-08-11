@@ -1,13 +1,13 @@
 use std::env;
-use std::ffi::OsStr;
 use std::io::{self, Write};
-use std::path::Path;
 
 use crate::error::{Exit, Result};
 use crate::github;
 use crate::model::{CheckDiagnosticsOptions, Target};
 use crate::output;
 use crate::usecase;
+
+const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Resource {
@@ -20,12 +20,10 @@ struct Args {
     target: String,
     repo: Option<String>,
     compact: bool,
+    program: String,
 }
 
 enum Action {
-    PrInspect {
-        include_resolved: bool,
-    },
     PrChecks {
         required: bool,
         diagnostics: CheckDiagnosticsOptions,
@@ -41,40 +39,28 @@ enum Action {
     IssueInspect,
 }
 
-impl Action {
-    const fn resource(&self) -> Resource {
-        match self {
-            Self::PrInspect { .. }
-            | Self::PrChecks { .. }
-            | Self::PrOverview
-            | Self::PrThread { .. }
-            | Self::PrThreads { .. } => Resource::Pr,
-            Self::IssueInspect => Resource::Issue,
-        }
-    }
-}
-
 pub fn run() -> Result<()> {
     let Args {
         action,
         target,
         repo,
         compact,
+        program,
     } = parse_args()?;
     let target = match &action {
         Action::PrChecks { .. } => {
-            resolve_pr_subcommand_target(&target, repo, &program_name(), checks_argument_error)?
+            resolve_pr_subcommand_target(&target, repo, &program, checks_argument_error)?
         }
         Action::PrOverview => {
-            resolve_pr_subcommand_target(&target, repo, &program_name(), overview_argument_error)?
+            resolve_pr_subcommand_target(&target, repo, &program, overview_argument_error)?
         }
         Action::PrThread { .. } => {
-            resolve_pr_subcommand_target(&target, repo, &program_name(), thread_argument_error)?
+            resolve_pr_subcommand_target(&target, repo, &program, thread_argument_error)?
         }
         Action::PrThreads { .. } => {
-            resolve_pr_subcommand_target(&target, repo, &program_name(), threads_argument_error)?
+            resolve_pr_subcommand_target(&target, repo, &program, threads_argument_error)?
         }
-        _ => resolve_target(&target, repo, action.resource())?,
+        Action::IssueInspect => resolve_target(&target, repo, Resource::Issue)?,
     };
     let result = match action {
         Action::PrChecks {
@@ -95,9 +81,6 @@ pub fn run() -> Result<()> {
         Action::PrThreads { include_resolved } => output::success(serde_json::json!({
             "threads": usecase::pull_request::threads::execute(&target, include_resolved)?,
         })),
-        Action::PrInspect { include_resolved } => {
-            usecase::pull_request::inspect::execute(&target, include_resolved, compact)?
-        }
         Action::IssueInspect => usecase::issue::inspect::execute(&target)?,
     };
     let output = if compact {
@@ -112,12 +95,7 @@ pub fn run() -> Result<()> {
 
 fn parse_args() -> Result<Args> {
     let mut values = env::args();
-    let program = values.next().unwrap_or_else(|| "gh-read".to_owned());
-    let program = Path::new(&program)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or("gh-read")
-        .to_owned();
+    let program = displayed_program_name(values.next().as_deref()).to_owned();
     let Some(mut resource_value) = values.next() else {
         return Err(argument_error(
             &program,
@@ -162,26 +140,38 @@ fn parse_args() -> Result<Args> {
     };
 
     let mut remaining = values.peekable();
-    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "checks") {
-        remaining.next();
-        return parse_checks_args(&program, remaining);
-    }
-    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "overview") {
-        remaining.next();
-        return parse_overview_args(&program, remaining);
-    }
-    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "threads") {
-        remaining.next();
-        return parse_threads_args(&program, remaining);
-    }
-    if resource == Resource::Pr && remaining.peek().is_some_and(|value| value == "thread") {
-        remaining.next();
-        return parse_thread_args(&program, remaining);
+    if resource == Resource::Pr {
+        let Some(subcommand) = remaining.next() else {
+            return Err(pr_argument_error(
+                &program,
+                "the following arguments are required: subcommand",
+            ));
+        };
+        return match subcommand.as_str() {
+            "checks" => parse_checks_args(&program, remaining),
+            "overview" => parse_overview_args(&program, remaining),
+            "threads" => parse_threads_args(&program, remaining),
+            "thread" => parse_thread_args(&program, remaining),
+            "-h" | "--help" => {
+                print_pr_help(&program);
+                std::process::exit(0);
+            }
+            _ => Err(pr_argument_error(
+                &program,
+                "the following arguments are required: subcommand",
+            )),
+        };
     }
 
+    parse_issue_args(&program, remaining)
+}
+
+fn parse_issue_args<I>(program: &str, mut remaining: std::iter::Peekable<I>) -> Result<Args>
+where
+    I: Iterator<Item = String>,
+{
     let mut target = None;
     let mut repo = None;
-    let mut include_resolved = false;
     let mut compact = false;
     let mut positional_only = false;
     let mut unrecognized = Vec::new();
@@ -202,28 +192,25 @@ fn parse_args() -> Result<Args> {
             "--repo" => {
                 let Some(value) = remaining.next() else {
                     return Err(argument_error(
-                        &program,
-                        Some(resource),
-                        Some(resource),
+                        program,
+                        Some(Resource::Issue),
+                        Some(Resource::Issue),
                         "argument --repo: expected one argument",
                     ));
                 };
                 if value != "-" && value.starts_with('-') {
                     return Err(argument_error(
-                        &program,
-                        Some(resource),
-                        Some(resource),
+                        program,
+                        Some(Resource::Issue),
+                        Some(Resource::Issue),
                         "argument --repo: expected one argument",
                     ));
                 }
                 repo = Some(value);
             }
-            "--include-resolved" if resource == Resource::Pr => {
-                include_resolved = true;
-            }
             "--compact" => compact = true,
             "-h" | "--help" => {
-                print_help(&program, resource);
+                print_issue_help(program);
                 std::process::exit(0);
             }
             option if option.starts_with('-') => unrecognized.push(option.to_owned()),
@@ -233,28 +220,26 @@ fn parse_args() -> Result<Args> {
     }
     let Some(target) = target else {
         return Err(argument_error(
-            &program,
-            Some(resource),
-            Some(resource),
+            program,
+            Some(Resource::Issue),
+            Some(Resource::Issue),
             "the following arguments are required: target",
         ));
     };
     if !unrecognized.is_empty() {
         return Err(argument_error(
-            &program,
+            program,
             None,
             None,
             &format!("unrecognized arguments: {}", unrecognized.join(" ")),
         ));
     }
     Ok(Args {
-        action: match resource {
-            Resource::Pr => Action::PrInspect { include_resolved },
-            Resource::Issue => Action::IssueInspect,
-        },
+        action: Action::IssueInspect,
         target,
         repo,
         compact,
+        program: program.to_owned(),
     })
 }
 
@@ -426,6 +411,7 @@ where
         target,
         repo: parsed.repo,
         compact: parsed.compact,
+        program: program.to_owned(),
     })
 }
 
@@ -454,6 +440,7 @@ where
         target,
         repo: parsed.repo,
         compact: parsed.compact,
+        program: program.to_owned(),
     })
 }
 
@@ -489,6 +476,7 @@ where
         target,
         repo: parsed.repo,
         compact: parsed.compact,
+        program: program.to_owned(),
     })
 }
 
@@ -533,6 +521,7 @@ where
         target,
         repo: parsed.repo,
         compact: parsed.compact,
+        program: program.to_owned(),
     })
 }
 
@@ -686,13 +675,23 @@ const fn resource_name(resource: Resource) -> &'static str {
 
 fn usage(program: &str, resource: Option<Resource>) -> String {
     match resource {
-        Some(Resource::Pr) => format!(
-            "usage: {program} pr [-h] [--repo REPO] [--include-resolved] [--compact] target"
-        ),
+        Some(Resource::Pr) => {
+            format!("usage: {program} pr [-h] {{overview,threads,thread,checks}} ...")
+        }
         Some(Resource::Issue) => {
             format!("usage: {program} issue [-h] [--repo REPO] [--compact] target")
         }
         None => format!("usage: {program} [-h] [--version] {{pr,issue}} ..."),
+    }
+}
+
+fn pr_argument_error(program: &str, message: &str) -> Exit {
+    Exit {
+        message: Some(format!(
+            "{}\n{program} pr: error: {message}",
+            usage(program, Some(Resource::Pr))
+        )),
+        code: 2,
     }
 }
 
@@ -791,13 +790,11 @@ fn overview_argument_error(program: &str, message: &str) -> Exit {
     }
 }
 
-fn program_name() -> String {
-    let value = env::args().next().unwrap_or_else(|| "gh-read".to_owned());
-    Path::new(&value)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or("gh-read")
-        .to_owned()
+fn displayed_program_name(value: Option<&str>) -> &str {
+    value
+        .and_then(|value| value.rsplit('/').next())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(PROGRAM_NAME)
 }
 
 fn print_root_help(program: &str) {
@@ -815,17 +812,19 @@ fn print_version() {
         .expect("write version");
 }
 
-fn print_help(program: &str, resource: Resource) {
-    let text = match resource {
-        Resource::Pr => format!(
-            "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-resolved  include resolved review threads\n  --compact           omit repeated diff hunks and emit compact JSON\n",
-            usage(program, Some(resource))
-        ),
-        Resource::Issue => format!(
-            "{}\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n",
-            usage(program, Some(resource))
-        ),
-    };
+fn print_pr_help(program: &str) {
+    let text = format!(
+        "{}\n\npositional arguments:\n  {{overview,threads,thread,checks}}\n    overview  read pull request state and summaries\n    threads   list review thread summaries\n    thread    read one review thread\n    checks    read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
+        usage(program, Some(Resource::Pr))
+    );
+    io::stdout().write_all(text.as_bytes()).expect("write help");
+}
+
+fn print_issue_help(program: &str) {
+    let text = format!(
+        "{}\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n",
+        usage(program, Some(Resource::Issue))
+    );
     io::stdout().write_all(text.as_bytes()).expect("write help");
 }
 
@@ -897,6 +896,7 @@ mod tests {
             target,
             repo,
             compact,
+            program,
         } = args
         else {
             panic!("unexpected action");
@@ -910,6 +910,7 @@ mod tests {
         assert_eq!(target, "42");
         assert_eq!(repo.as_deref(), Some("owner/repo"));
         assert!(compact);
+        assert_eq!(program, "gh-read");
     }
 
     #[test]

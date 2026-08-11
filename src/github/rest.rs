@@ -5,26 +5,6 @@ use crate::model::Target;
 
 use super::cli;
 
-pub fn pull_request_checks(target: &Target) -> Result<Value> {
-    let checks = cli::json(
-        [
-            "pr",
-            "checks",
-            &target.number,
-            "--repo",
-            &target.repository,
-            "--json",
-            "name,state,bucket,link,workflow,startedAt,completedAt",
-        ],
-        None,
-        true,
-    )?;
-    if !checks.is_array() {
-        return Err(Exit::message("GitHub returned an invalid checks response"));
-    }
-    Ok(checks)
-}
-
 pub fn required_check_buckets(target: &Target) -> Result<Value> {
     check_buckets(target, true)
 }
