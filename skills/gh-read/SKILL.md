@@ -32,6 +32,7 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 - `pr thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。
 - 既存の`pr`で`reviewThreads`が空なら、未解決threadはないと報告する。
 - `pr checks`の`checks`が空ならCI情報がない状態として扱う。
+- `pr checks`の`workflow`、`startedAt`、`completedAt`は`string | null`であり、通常経路と診断経路で同じ型である。GitHub CLIの空文字と`0001-01-01T00:00:00Z`は`null`を表す。pre-production段階のschema correctionのため、`schemaVersion`は1のままである。
 - 診断の進捗はstderr、最終JSONはstdoutとして分けて扱う。`log: null`は対応するActions job logがないことを表し、取得失敗とは解釈しない。
 - `truncated: true`のlogには省略がある。省略数が`null`なら正確な量を推測しない。
 - 取得失敗を「コメントなし」と解釈しない。

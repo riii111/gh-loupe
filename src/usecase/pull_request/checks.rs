@@ -12,15 +12,6 @@ use crate::github;
 use crate::model::{CheckDiagnosticsOptions, Target};
 use crate::output;
 
-const CHECK_FIELDS: [&str; 7] = [
-    "name",
-    "state",
-    "bucket",
-    "link",
-    "workflow",
-    "startedAt",
-    "completedAt",
-];
 const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
@@ -147,13 +138,36 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
     let object = value
         .as_object()
         .ok_or_else(|| invalid_response("GitHub returned an invalid check entry"))?;
-    let mut check = Map::new();
-    for field in CHECK_FIELDS {
-        let value = object.get(field).and_then(Value::as_str).ok_or_else(|| {
-            invalid_response(&format!("GitHub check field {field} is missing or invalid"))
-        })?;
-        check.insert(field.to_owned(), Value::String(value.to_owned()));
-    }
+    let check = Map::from_iter([
+        (
+            "name".to_owned(),
+            Value::String(required_cli_check_string(object, "name")?.to_owned()),
+        ),
+        (
+            "state".to_owned(),
+            Value::String(required_cli_check_string(object, "state")?.to_owned()),
+        ),
+        (
+            "bucket".to_owned(),
+            Value::String(required_cli_check_string(object, "bucket")?.to_owned()),
+        ),
+        (
+            "link".to_owned(),
+            Value::String(required_cli_check_string(object, "link")?.to_owned()),
+        ),
+        (
+            "workflow".to_owned(),
+            cli_nullable_check_metadata(object, "workflow")?,
+        ),
+        (
+            "startedAt".to_owned(),
+            cli_nullable_check_metadata(object, "startedAt")?,
+        ),
+        (
+            "completedAt".to_owned(),
+            cli_nullable_check_metadata(object, "completedAt")?,
+        ),
+    ]);
     match string_field(&check, "bucket") {
         "pass" | "fail" | "pending" | "skipping" | "cancel" => {}
         _ => return Err(invalid_response("GitHub returned an unknown check bucket")),
@@ -190,13 +204,11 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
                 let state = graphql_check_run_state(status, conclusion)?;
                 let link = nullable_string(object, "detailsUrl", "check run details URL")?
                     .unwrap_or_default();
-                let started_at = nullable_string(object, "startedAt", "check run start time")?
-                    .unwrap_or(ZERO_TIME);
+                let started_at = nullable_string(object, "startedAt", "check run start time")?;
                 let completed_at =
-                    nullable_string(object, "completedAt", "check run completion time")?
-                        .unwrap_or(ZERO_TIME);
+                    nullable_string(object, "completedAt", "check run completion time")?;
                 let (workflow, event) = check_run_workflow(object)?;
-                let key = format!("{name}/{workflow}/{event}");
+                let key = format!("{name}/{}/{event}", workflow.unwrap_or_default());
                 if !check_run_keys.insert(key) {
                     continue;
                 }
@@ -218,7 +230,7 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
                 let state = required_string(object, "state", "commit status state")?.to_owned();
                 let link = nullable_string(object, "targetUrl", "commit status target URL")?
                     .unwrap_or_default();
-                (name, state, link, "", ZERO_TIME, ZERO_TIME, None)
+                (name, state, link, None, None, None, None)
             }
             _ => {
                 return Err(invalid_response(
@@ -232,11 +244,17 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
             ("state".to_owned(), Value::String(state)),
             ("bucket".to_owned(), Value::String(bucket.to_owned())),
             ("link".to_owned(), Value::String(link.to_owned())),
-            ("workflow".to_owned(), Value::String(workflow.to_owned())),
-            ("startedAt".to_owned(), Value::String(started_at.to_owned())),
+            (
+                "workflow".to_owned(),
+                workflow.map_or(Value::Null, |value| Value::String(value.to_owned())),
+            ),
+            (
+                "startedAt".to_owned(),
+                started_at.map_or(Value::Null, |value| Value::String(value.to_owned())),
+            ),
             (
                 "completedAt".to_owned(),
-                Value::String(completed_at.to_owned()),
+                completed_at.map_or(Value::Null, |value| Value::String(value.to_owned())),
             ),
             (
                 CHECK_RUN_MARKER.to_owned(),
@@ -269,7 +287,7 @@ fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<Str
     }
 }
 
-fn check_run_workflow(object: &Map<String, Value>) -> Result<(&str, &str)> {
+fn check_run_workflow(object: &Map<String, Value>) -> Result<(Option<&str>, &str)> {
     let suite = object
         .get("checkSuite")
         .and_then(Value::as_object)
@@ -278,7 +296,7 @@ fn check_run_workflow(object: &Map<String, Value>) -> Result<(&str, &str)> {
         return Err(invalid_response("GitHub returned an invalid workflow run"));
     };
     if run.is_null() {
-        return Ok(("", ""));
+        return Ok((None, ""));
     }
     let run = run
         .as_object()
@@ -288,7 +306,10 @@ fn check_run_workflow(object: &Map<String, Value>) -> Result<(&str, &str)> {
         .get("workflow")
         .and_then(Value::as_object)
         .ok_or_else(|| invalid_response("GitHub returned an invalid workflow"))?;
-    Ok((required_string(workflow, "name", "workflow name")?, event))
+    Ok((
+        Some(required_string(workflow, "name", "workflow name")?),
+        event,
+    ))
 }
 
 fn check_bucket(state: &str) -> Result<&'static str> {
@@ -359,6 +380,22 @@ fn required_string<'a>(
         .get(field)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_response(&format!("GitHub returned an invalid {label}")))
+}
+
+fn required_cli_check_string<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str> {
+    object.get(field).and_then(Value::as_str).ok_or_else(|| {
+        invalid_response(&format!("GitHub check field {field} is missing or invalid"))
+    })
+}
+
+fn cli_nullable_check_metadata(object: &Map<String, Value>, field: &str) -> Result<Value> {
+    let value = required_cli_check_string(object, field)?;
+    let absent = value.is_empty() || (field != "workflow" && value == ZERO_TIME);
+    Ok(if absent {
+        Value::Null
+    } else {
+        Value::String(value.to_owned())
+    })
 }
 
 fn required_u64(object: &Map<String, Value>, field: &str, label: &str) -> Result<u64> {

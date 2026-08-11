@@ -62,9 +62,15 @@ if [ "$1 $2" = "pr checks" ]; then
   case "${GH_TEST_CHECKS_NEW:-}" in
     success)
       cat <<'JSON'
-[{"name":"zeta","state":"PENDING","bucket":"pending","link":"https://example.test/z","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"pass","link":"https://example.test/b","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"skipping","link":"https://example.test/a","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
+[{"name":"zeta","state":"PENDING","bucket":"pending","link":"https://example.test/z","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"alpha","state":"SUCCESS","bucket":"pass","link":"https://example.test/b","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"skipping","link":"https://example.test/a","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
 JSON
       exit 8
+      ;;
+    nullable)
+      cat <<'JSON'
+[{"name":"absent","state":"PENDING","bucket":"pending","link":"https://example.test/absent","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"present","state":"SUCCESS","bucket":"pass","link":"https://example.test/present","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"}]
+JSON
+      exit 0
       ;;
     missing)
       printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":"https://example.test/test","workflow":"CI","startedAt":"2026-08-11T10:00:00Z"}]\n'
@@ -72,6 +78,10 @@ JSON
       ;;
     wrong-type)
       printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":42,"workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
+      exit 0
+      ;;
+    wrong-metadata-type)
+      printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":"https://example.test/test","workflow":42,"startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
       exit 0
       ;;
     unknown)

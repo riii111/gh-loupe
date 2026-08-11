@@ -22,6 +22,9 @@ jq -e '
   [.data.checks[0].annotations[].path] == ["a.rs", "a.rs", "z.rs"] and
   [.data.checks[0].annotations[].startLine] == [1, 2, 9] and
   .data.checks[1].annotations == [] and
+  .data.checks[1].workflow == null and
+  .data.checks[1].startedAt == null and
+  .data.checks[1].completedAt == null and
   (.data.checks[2] | has("annotations") | not) and
   ([.data.checks[] | has("log")] | all(. == false))
 ' "$tmpdir/diagnostics.json" >/dev/null
@@ -31,7 +34,7 @@ GH_DIAGNOSTICS_CALLS="$tmpdir/collision-calls" run_diagnostics status-collision 
   --failed-diagnostics --quiet --compact >"$tmpdir/status-collision.json"
 jq -e '
   (.data.checks | length) == 2 and
-  ([.data.checks[] | select(.workflow == "")][0].annotations == []) and
+  ([.data.checks[] | select(.workflow == null)][0].annotations == []) and
   ([.data.checks[] | select(.workflow == "CI")][0].annotations[].path == "collision.rs")
 ' "$tmpdir/status-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/collision-calls")" -eq 1
@@ -44,6 +47,12 @@ jq -e '
 ' "$tmpdir/check-run-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
 test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
+
+run_diagnostics pending-metadata --failed-diagnostics --quiet --compact \
+  >"$tmpdir/pending-metadata.json"
+jq -e '
+  .data.checks == [{"name":"pending","state":"IN_PROGRESS","bucket":"pending","link":"","workflow":null,"startedAt":"2026-08-11T11:00:00Z","completedAt":null}]
+' "$tmpdir/pending-metadata.json" >/dev/null
 
 run_diagnostics normal --include-failed-logs --quiet --compact \
   >"$tmpdir/logs.json" 2>"$tmpdir/logs.stderr"
@@ -90,6 +99,17 @@ for mode in annotation-failure metadata-failure log-failure; do
   test ! -s "$tmpdir/$mode.stdout"
   tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' >/dev/null
   test "$(grep -c '"schemaVersion":1,"error"' "$tmpdir/$mode.stderr")" -eq 1
+done
+
+for mode in graphql-missing-completed graphql-wrong-completed; do
+  set +e
+  run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
+  status=$?
+  set -e
+  test "$status" -eq 1
+  test ! -s "$tmpdir/$mode.stdout"
+  tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 done
 
 set +e

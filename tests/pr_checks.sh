@@ -32,10 +32,20 @@ test "$(wc -l <"$tmpdir/compact.json" | tr -d ' ')" -eq 1
 grep -Fx -- '--required' "$tmpdir/args" >/dev/null
 jq -e '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
 
+run_checks nullable --compact >"$tmpdir/nullable.json"
+jq -e '
+  .data.checks[0].workflow == null and
+  .data.checks[0].startedAt == null and
+  .data.checks[0].completedAt == null and
+  .data.checks[1].workflow == "CI" and
+  .data.checks[1].startedAt == "2026-08-11T09:00:00Z" and
+  .data.checks[1].completedAt == "2026-08-11T09:05:00Z"
+' "$tmpdir/nullable.json" >/dev/null
+
 run_checks no-required --required --compact >"$tmpdir/no-required.json"
 jq -e '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
 
-for mode in missing wrong-type unknown object; do
+for mode in missing wrong-type wrong-metadata-type unknown object; do
   set +e
   run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
   status=$?
