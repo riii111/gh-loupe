@@ -6,8 +6,8 @@ use crate::model::Target;
 use super::super::cli;
 use super::pagination;
 
-const THREADS_QUERY: &str = r"
-query ThreadSummaries($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+const REVIEW_THREADS_QUERY: &str = r"
+query ReviewThreadSummaries($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
@@ -32,8 +32,8 @@ query ThreadSummaries($owner: String!, $name: String!, $number: Int!, $cursor: S
 }
 ";
 
-const COMMENTS_QUERY: &str = r"
-query ThreadSummaryComments($id: ID!, $cursor: String) {
+const REVIEW_THREAD_COMMENTS_QUERY: &str = r"
+query ReviewThreadSummaryComments($id: ID!, $cursor: String) {
   node(id: $id) {
     ... on PullRequestReviewThread {
       comments(first: 100, after: $cursor) {
@@ -51,11 +51,11 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
         .split_once('/')
         .expect("repository is validated");
     let mut cursor_tracker = pagination::CursorTracker::default();
-    let mut threads = Vec::new();
+    let mut review_threads = Vec::new();
 
     loop {
         let variables = variables(owner, name, &target.number, cursor_tracker.cursor())?;
-        let data = query(THREADS_QUERY, &variables)?;
+        let data = query(REVIEW_THREADS_QUERY, &variables)?;
         let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             let message = format!(
@@ -65,30 +65,31 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
             return Err(cli::runtime_cli_failure(1, message.as_bytes()));
         }
         let connection = pagination::value_at(pull_request, &["reviewThreads"])?;
-        threads.extend(pagination::nodes(connection)?.iter().cloned());
+        review_threads.extend(pagination::nodes(connection)?.iter().cloned());
         let Some(_) = cursor_tracker.next(connection)? else {
             break;
         };
     }
 
     if !include_resolved {
-        threads.retain(|thread| thread.get("isResolved") != Some(&Value::Bool(true)));
+        review_threads
+            .retain(|review_thread| review_thread.get("isResolved") != Some(&Value::Bool(true)));
     }
-    for thread in &mut threads {
-        append_comment_pages(thread)?;
+    for review_thread in &mut review_threads {
+        append_review_thread_comment_pages(review_thread)?;
     }
-    Ok(threads)
+    Ok(review_threads)
 }
 
-fn append_comment_pages(thread: &mut Value) -> Result<()> {
-    let id = thread
+fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
+    let id = review_thread
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| Exit::invalid_response("GitHub field id must be a string"))?
         .to_owned();
-    let mut comments = thread
+    let mut comments = review_thread
         .as_object_mut()
-        .and_then(|thread| thread.shift_remove("comments"))
+        .and_then(|review_thread| review_thread.shift_remove("comments"))
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
     let mut cursor_tracker = pagination::CursorTracker::default();
     while let Some(cursor) = cursor_tracker.next(&comments)? {
@@ -96,7 +97,7 @@ fn append_comment_pages(thread: &mut Value) -> Result<()> {
             serde_json::to_string(&json!({"id": id, "cursor": cursor})).map_err(|error| {
                 Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
             })?;
-        let data = query(COMMENTS_QUERY, &variables)?;
+        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
         let page = pagination::value_at(&data, &["node", "comments"])?;
         let new_nodes = pagination::nodes(page)?.to_vec();
         comments
@@ -116,9 +117,9 @@ fn append_comment_pages(thread: &mut Value) -> Result<()> {
         .as_object_mut()
         .and_then(|comments| comments.shift_remove("nodes"))
         .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?;
-    thread
+    review_thread
         .as_object_mut()
-        .expect("thread was validated as an object")
+        .expect("review thread was validated as an object")
         .insert("comments".to_owned(), nodes);
     Ok(())
 }

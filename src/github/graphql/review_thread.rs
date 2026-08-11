@@ -6,8 +6,8 @@ use crate::model::Target;
 use super::super::cli;
 use super::pagination;
 
-const THREAD_QUERY: &str = r"
-query ThreadDetail($id: ID!) {
+const REVIEW_THREAD_QUERY: &str = r"
+query ReviewThreadDetail($id: ID!) {
   node(id: $id) {
     __typename
     ... on PullRequestReviewThread {
@@ -41,8 +41,8 @@ query ThreadDetail($id: ID!) {
 }
 ";
 
-const COMMENTS_QUERY: &str = r"
-query ThreadDetailComments($id: ID!, $cursor: String!) {
+const REVIEW_THREAD_COMMENTS_QUERY: &str = r"
+query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
   node(id: $id) {
     __typename
     ... on PullRequestReviewThread {
@@ -65,23 +65,23 @@ query ThreadDetailComments($id: ID!, $cursor: String!) {
 }
 ";
 
-pub fn execute(target: &Target, thread_id: &str) -> Result<Value> {
-    let variables = serde_json::to_string(&json!({"id": thread_id})).map_err(|error| {
+pub fn execute(target: &Target, review_thread_id: &str) -> Result<Value> {
+    let variables = serde_json::to_string(&json!({"id": review_thread_id})).map_err(|error| {
         Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
     })?;
-    let data = query(THREAD_QUERY, &variables)?;
-    let mut thread = review_thread_node(&data, thread_id)?.clone();
-    verify_pull_request(&thread, target)?;
-    thread
+    let data = query(REVIEW_THREAD_QUERY, &variables)?;
+    let mut review_thread = review_thread_node(&data, review_thread_id)?.clone();
+    verify_pull_request(&review_thread, target)?;
+    review_thread
         .as_object_mut()
-        .expect("review thread is an object")
+        .expect("review thread was validated as an object")
         .shift_remove("pullRequest");
-    append_comment_pages(&mut thread, thread_id)?;
-    Ok(thread)
+    append_review_thread_comment_pages(&mut review_thread, review_thread_id)?;
+    Ok(review_thread)
 }
 
-fn verify_pull_request(thread: &Value, target: &Target) -> Result<()> {
-    let pull_request = pagination::value_at(thread, &["pullRequest"])?;
+fn verify_pull_request(review_thread: &Value, target: &Target) -> Result<()> {
+    let pull_request = pagination::value_at(review_thread, &["pullRequest"])?;
     let number = pagination::value_at(pull_request, &["number"])?
         .as_u64()
         .ok_or_else(|| Exit::invalid_response("GitHub pull request number must be an integer"))?;
@@ -99,19 +99,22 @@ fn verify_pull_request(thread: &Value, target: &Target) -> Result<()> {
     Ok(())
 }
 
-fn append_comment_pages(thread: &mut Value, thread_id: &str) -> Result<()> {
-    let mut comments = thread
+fn append_review_thread_comment_pages(
+    review_thread: &mut Value,
+    review_thread_id: &str,
+) -> Result<()> {
+    let mut comments = review_thread
         .as_object_mut()
-        .and_then(|thread| thread.shift_remove("comments"))
+        .and_then(|review_thread| review_thread.shift_remove("comments"))
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
     let mut cursor_tracker = pagination::CursorTracker::default();
     while let Some(cursor) = cursor_tracker.next(&comments)? {
-        let variables = serde_json::to_string(&json!({"id": thread_id, "cursor": cursor}))
+        let variables = serde_json::to_string(&json!({"id": review_thread_id, "cursor": cursor}))
             .map_err(|error| {
-                Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
-            })?;
-        let data = query(COMMENTS_QUERY, &variables)?;
-        let node = review_thread_node(&data, thread_id)?;
+            Exit::invalid_response(format!("failed to encode GitHub request: {error}"))
+        })?;
+        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
+        let node = review_thread_node(&data, review_thread_id)?;
         let page = pagination::value_at(node, &["comments"])?;
         let new_nodes = pagination::nodes(page)?.to_vec();
         comments
@@ -131,25 +134,27 @@ fn append_comment_pages(thread: &mut Value, thread_id: &str) -> Result<()> {
         .as_object_mut()
         .and_then(|comments| comments.shift_remove("nodes"))
         .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?;
-    thread
+    review_thread
         .as_object_mut()
-        .expect("review thread is an object")
+        .expect("review thread was validated as an object")
         .insert("comments".to_owned(), nodes);
     Ok(())
 }
 
-fn review_thread_node<'a>(data: &'a Value, thread_id: &str) -> Result<&'a Value> {
+fn review_thread_node<'a>(data: &'a Value, review_thread_id: &str) -> Result<&'a Value> {
     let node = pagination::value_at(data, &["node"])?;
     if node.is_null()
         || node.get("__typename").and_then(Value::as_str) != Some("PullRequestReviewThread")
     {
-        return Err(not_found(format!("review thread not found: {thread_id}")));
+        return Err(not_found(format!(
+            "review thread not found: {review_thread_id}"
+        )));
     }
     let id = node
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| Exit::invalid_response("GitHub review thread id must be a string"))?;
-    if id != thread_id {
+    if id != review_thread_id {
         return Err(Exit::invalid_response(
             "GitHub returned a different review thread",
         ));

@@ -33,7 +33,7 @@ where
     };
     super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
-        action: super::super::Action::Pr(super::Action::Threads { include_resolved }),
+        action: super::super::Action::Pr(super::Action::ReviewThreads { include_resolved }),
         target,
         repo: parsed.repo,
         compact: parsed.compact,
@@ -54,20 +54,20 @@ pub(super) fn execute(
         argument_error,
     )?;
     Ok(output::success(serde_json::json!({
-        "threads": usecase::pull_request::threads::execute(&target, include_resolved)?,
+        "reviewThreads": usecase::pull_request::review_threads::execute(&target, include_resolved)?,
     })))
 }
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr threads [-h] [--repo REPO] [--include-resolved] [--compact] target"
+        "usage: {program} pr review-threads [-h] [--repo REPO] [--include-resolved] [--compact] target"
     )
 }
 
 fn argument_error(program: &str, message: &str) -> Exit {
     Exit {
         message: Some(format!(
-            "{}\n{program} pr threads: error: {message}",
+            "{}\n{program} pr review-threads: error: {message}",
             usage(program)
         )),
         code: 2,

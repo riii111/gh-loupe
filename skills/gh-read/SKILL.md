@@ -9,7 +9,7 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 
 ## Version
 
-Required gh-read version: 0.5.0
+Required gh-read version: 0.6.0
 
 最初に`gh-read --version`を実行し、インストール済みbinaryが上記のversionと一致することを確認する。
 `--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版である。
@@ -24,9 +24,9 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 2. `pullRequest`のtitleと状態、required checkの集計、未解決review thread数から、review開始、CI待機、head更新への追従、追加取得のいずれが必要か判断する。
 3. Conversation tabのissue comment本文が必要な場合だけ、`gh-read pr comments <番号またはURL> --compact`を実行する。
 4. review decisionやreview本文が必要な場合だけ、`gh-read pr reviews <番号またはURL> --compact`でreview submissionを取得する。
-5. threadの位置と件数が必要なら、`gh-read pr threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
-6. resolvedを含む一覧が必要な場合だけ`pr threads`へ`--include-resolved`を加える。既定は未解決threadだけである。
-7. 一覧で特定したthreadのcomment本文が必要なら、`gh-read pr thread <番号またはURL> <thread ID> --compact`を実行する。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
+5. threadの位置と件数が必要なら、`gh-read pr review-threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
+6. resolvedを含む一覧が必要な場合だけ`pr review-threads`へ`--include-resolved`を加える。既定は未解決threadだけである。
+7. 一覧で特定したthreadのcomment本文が必要なら、`gh-read pr review-thread <番号またはURL> <review thread ID> --compact`を実行する。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
 8. 個別checkが必要なら`gh-read pr checks <番号またはURL> --compact`を使う。required checkだけなら`--required`を加える。
 9. 失敗checkを調べるときは`--failed-diagnostics`でannotationを取得し、annotationだけで不足する場合だけ`--include-failed-logs`で制限付きlogを追加する。必要に応じて`--timeout SECONDS`を変更する。
 10. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
@@ -43,13 +43,13 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 - `pr reviews`はreview submissionだけを返す。conversation commentやreview thread commentとして扱わず、取得失敗を空配列と解釈しない。
 - `pr comments`はConversation tabのissue commentsだけを返す。review submission、review thread comment、Pull Request本文と混同しない。
 - `pr comments`の取得失敗や不正応答を空配列または部分結果として扱わない。
-- `pr threads`の`data.threads`が空なら、未解決threadはないと報告する。
-- `pr thread`には`pr threads`が返したthread IDを渡し、取得失敗をcommentなしと解釈しない。
-- `pr thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。
+- `pr review-threads`の`data.reviewThreads`が空なら、未解決threadはないと報告する。
+- `pr review-thread`には`pr review-threads`が返したreview thread IDを渡し、取得失敗をcommentなしと解釈しない。
+- `pr review-thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。
 - `pr checks`の`checks`が空ならCI情報がない状態として扱う。
 - `pr checks`の`workflow`、`startedAt`、`completedAt`、`link`は`string | null`であり、通常経路と診断経路で同じ型である。GitHub CLIの空文字と時刻の`0001-01-01T00:00:00Z`は`null`を表す。pre-production段階のschema correctionのため、`schemaVersion`は1のままである。
 - 診断の進捗はstderr、最終JSONはstdoutとして分けて扱う。`log: null`は対応するActions job logがないことを表し、取得失敗とは解釈しない。
 - `truncated: true`のlogには省略がある。省略数が`null`なら正確な量を推測しない。
 - 取得失敗を「コメントなし」と解釈しない。
-- `pr threads`の構造化エラーでは`kind`と`retryable`を確認し、部分結果として扱わない。
-- `pr thread`の構造化エラーでも`kind`と`retryable`を確認し、途中まで取得したcommentがあると推測しない。
+- `pr review-threads`の構造化エラーでは`kind`と`retryable`を確認し、部分結果として扱わない。
+- `pr review-thread`の構造化エラーでも`kind`と`retryable`を確認し、途中まで取得したcommentがあると推測しない。

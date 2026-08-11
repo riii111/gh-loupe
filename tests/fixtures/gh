@@ -181,7 +181,7 @@ if [ "$1 $2" = "api graphql" ]; then
     printf '{"errors":[{"message":"Could not resolve to a node with the global id of missing"}]}\n'
     exit 0
   fi
-  if jq -e '.query | contains("ThreadDetailComments")' <<<"$payload" >/dev/null; then
+  if jq -e '.query | contains("ReviewThreadDetailComments")' <<<"$payload" >/dev/null; then
     if [ "${GH_TEST_THREAD_DETAIL_PAGE_FAILURE:-}" = 1 ]; then
       printf 'simulated thread detail pagination failure\n' >&2
       exit 34
@@ -208,7 +208,7 @@ JSON
 JSON
     exit 0
   fi
-  if jq -e '.query | contains("ThreadDetail(")' <<<"$payload" >/dev/null; then
+  if jq -e '.query | contains("ReviewThreadDetail(")' <<<"$payload" >/dev/null; then
     case "${GH_TEST_THREAD_DETAIL:-success}" in
       missing)
         printf '{"data":{"node":null}}\n'
@@ -239,7 +239,7 @@ JSON
     esac
     exit 0
   fi
-  if jq -e '.query | contains("ThreadSummaries")' <<<"$payload" >/dev/null; then
+  if jq -e '.query | contains("ReviewThreadSummaries")' <<<"$payload" >/dev/null; then
     if [ -n "${GH_THREAD_PAGINATION:-}" ]; then
       cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
       case "${GH_THREAD_PAGINATION}" in
@@ -278,7 +278,7 @@ JSON
     fi
     exit 0
   fi
-  if jq -e '.query | contains("ThreadSummaryComments")' <<<"$payload" >/dev/null; then
+  if jq -e '.query | contains("ReviewThreadSummaryComments")' <<<"$payload" >/dev/null; then
     if jq -e '.variables.id == "thread-resolved-summary"' <<<"$payload" >/dev/null; then
       if [ "${GH_FAIL_RESOLVED_COMMENTS:-}" = 1 ]; then
         printf 'resolved summary comments should not be fetched\n' >&2

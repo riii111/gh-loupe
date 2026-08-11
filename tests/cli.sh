@@ -44,7 +44,7 @@ assert_argument_error() {
   test -s "$tmpdir/$name.argument.stderr"
 }
 
-run_threads() {
+run_review_threads() {
   local name="$1"
   shift
   local -a environment=()
@@ -55,16 +55,16 @@ run_threads() {
   shift
 
   env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
-    >"$tmpdir/$name.threads.stdout" 2>"$tmpdir/$name.threads.stderr"
-  test ! -s "$tmpdir/$name.threads.stderr"
+    >"$tmpdir/$name.review_threads.stdout" 2>"$tmpdir/$name.review_threads.stderr"
+  test ! -s "$tmpdir/$name.review_threads.stderr"
   jq -e '
     .schemaVersion == 1 and
     (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
-    (.data | keys == ["threads"])
-  ' "$tmpdir/$name.threads.stdout" >/dev/null
+    (.data | keys == ["reviewThreads"])
+  ' "$tmpdir/$name.review_threads.stdout" >/dev/null
 }
 
-run_thread() {
+run_review_thread() {
   local name="$1"
   shift
   local -a environment=()
@@ -75,16 +75,16 @@ run_thread() {
   shift
 
   env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
-    >"$tmpdir/$name.thread.stdout" 2>"$tmpdir/$name.thread.stderr"
-  test ! -s "$tmpdir/$name.thread.stderr"
+    >"$tmpdir/$name.review_thread.stdout" 2>"$tmpdir/$name.review_thread.stderr"
+  test ! -s "$tmpdir/$name.review_thread.stderr"
   jq -e '
     .schemaVersion == 1 and
     (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
-    (.data | keys == ["thread"])
-  ' "$tmpdir/$name.thread.stdout" >/dev/null
+    (.data | keys == ["reviewThread"])
+  ' "$tmpdir/$name.review_thread.stdout" >/dev/null
 }
 
-assert_threads_runtime_failure() {
+assert_review_thread_runtime_failure() {
   local name="$1"
   local expected_kind="$2"
   shift 2
@@ -270,11 +270,27 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview comments reviews threads thread checks; do
+grep -F 'usage: gh-read pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview comments reviews review-threads review-thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
-if grep -E '^    (full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
+if grep -E '^    (threads|thread|full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
+  exit 1
+fi
+
+run_cli review-threads-help -- pr review-threads --help
+test ! -s "$tmpdir/review-threads-help.stderr"
+grep -F 'usage: gh-read pr review-threads ' "$tmpdir/review-threads-help.stdout" >/dev/null
+if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|thread)' \
+  "$tmpdir/review-threads-help.stdout"; then
+  exit 1
+fi
+
+run_cli review-thread-help -- pr review-thread --help
+test ! -s "$tmpdir/review-thread-help.stderr"
+grep -F 'usage: gh-read pr review-thread ' "$tmpdir/review-thread-help.stdout" >/dev/null
+if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|thread)' \
+  "$tmpdir/review-thread-help.stdout"; then
   exit 1
 fi
 
@@ -286,13 +302,29 @@ set -e
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
-grep -Fx 'gh-read pr: error: the following arguments are required: subcommand' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-read pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -F "gh-read pr: error: argument subcommand: invalid choice: '42'" "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
 assert_argument_error issue-missing-target issue
 assert_argument_error issue-pr-only-option issue 42 --include-resolved
+
+for removed_subcommand in threads thread; do
+  calls_file="$tmpdir/removed-$removed_subcommand.calls"
+  set +e
+  GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
+    "$tmpdir/rust/gh-read" pr "$removed_subcommand" \
+    >"$tmpdir/removed-$removed_subcommand.stdout" \
+    2>"$tmpdir/removed-$removed_subcommand.stderr"
+  removed_status=$?
+  set -e
+  test "$removed_status" -eq 2
+  test ! -s "$tmpdir/removed-$removed_subcommand.stdout"
+  test ! -e "$calls_file"
+  grep -F "argument subcommand: invalid choice: '$removed_subcommand'" \
+    "$tmpdir/removed-$removed_subcommand.stderr" >/dev/null
+done
 
 issue_calls_file="$tmpdir/issue.calls"
 run_cli issue-default "GH_TEST_CALLS_FILE=$issue_calls_file" -- issue 42
@@ -575,19 +607,19 @@ assert_comments_runtime_failure comments-page-failure network \
 assert_comments_runtime_failure comments-repo-auth authentication \
   GH_TEST_REPO_AUTH_FAILURE=1 -- pr comments 42
 
-assert_argument_error threads-missing-target pr threads
-assert_argument_error threads-abbreviated-repo pr threads 42 --rep riii111/dotfiles
-assert_argument_error threads-abbreviated-compact pr threads 42 --comp
-assert_argument_error threads-abbreviated-include-resolved pr threads 42 --incl
-assert_argument_error threads-invalid-zero pr threads 0 --repo riii111/dotfiles
-assert_argument_error threads-invalid-repo pr threads 42 --repo ../..
+assert_argument_error threads-missing-target pr review-threads
+assert_argument_error threads-abbreviated-repo pr review-threads 42 --rep riii111/dotfiles
+assert_argument_error threads-abbreviated-compact pr review-threads 42 --comp
+assert_argument_error threads-abbreviated-include-resolved pr review-threads 42 --incl
+assert_argument_error threads-invalid-zero pr review-threads 0 --repo riii111/dotfiles
+assert_argument_error threads-invalid-repo pr review-threads 42 --repo ../..
 assert_argument_error threads-conflicting-repo \
-  pr threads https://github.com/riii111/dotfiles/pull/42 --repo other/repo
+  pr review-threads https://github.com/riii111/dotfiles/pull/42 --repo other/repo
 
-run_threads threads-default GH_FAIL_RESOLVED_COMMENTS=1 -- \
-  pr threads 42 --repo riii111/dotfiles
+run_review_threads threads-default GH_FAIL_RESOLVED_COMMENTS=1 -- \
+  pr review-threads 42 --repo riii111/dotfiles
 jq -e '
-  .data.threads == [
+  .data.reviewThreads == [
     {
       "id": "thread-same-a",
       "isResolved": false,
@@ -626,18 +658,18 @@ jq -e '
     }
   ] and
   ([.. | objects | keys[]] | any(. == "body" or . == "author" or . == "url" or . == "diffHunk" or . == "resolvedBy") | not)
-' "$tmpdir/threads-default.threads.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/threads-default.threads.stdout")" -gt 1
+' "$tmpdir/threads-default.review_threads.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/threads-default.review_threads.stdout")" -gt 1
 
-run_threads threads-including-resolved -- \
-  pr threads 42 --repo riii111/dotfiles --include-resolved --compact
+run_review_threads threads-including-resolved -- \
+  pr review-threads 42 --repo riii111/dotfiles --include-resolved --compact
 jq -e '
-  .data.threads[0].id == "thread-resolved-summary" and
-  .data.threads[0].commentCount == 2 and
-  .data.threads[0].lastUpdatedAt == "2025-12-31T02:00:00Z" and
-  (.data.threads | length == 4)
-' "$tmpdir/threads-including-resolved.threads.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/threads-including-resolved.threads.stdout")" -eq 1
+  .data.reviewThreads[0].id == "thread-resolved-summary" and
+  .data.reviewThreads[0].commentCount == 2 and
+  .data.reviewThreads[0].lastUpdatedAt == "2025-12-31T02:00:00Z" and
+  (.data.reviewThreads | length == 4)
+' "$tmpdir/threads-including-resolved.review_threads.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/threads-including-resolved.review_threads.stdout")" -eq 1
 
 for mode in repeat cycle missing empty wrong-type; do
   case "$mode" in
@@ -646,37 +678,37 @@ for mode in repeat cycle missing empty wrong-type; do
     cycle) expected_calls=3 ;;
   esac
   calls_file="$tmpdir/threads-pagination-$mode-calls"
-  assert_threads_runtime_failure "threads-pagination-$mode" invalidResponse \
+  assert_review_thread_runtime_failure "threads-pagination-$mode" invalidResponse \
     GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_PAGINATION="$mode" -- \
-    pr threads 42 --repo riii111/dotfiles
+    pr review-threads 42 --repo riii111/dotfiles
   test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
 done
 
-assert_threads_runtime_failure threads-thread-page-failure network \
-  GH_TEST_THREAD_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
-assert_threads_runtime_failure threads-comment-page-failure githubCli \
-  GH_TEST_COMMENT_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
-assert_threads_runtime_failure threads-missing-pr notFound \
-  GH_TEST_MISSING_PR=1 -- pr threads 42 --repo riii111/dotfiles
-assert_threads_runtime_failure threads-graphql-error githubCli \
-  GH_TEST_GRAPHQL_ERROR=1 -- pr threads 42 --repo riii111/dotfiles
-assert_threads_runtime_failure threads-invalid-json invalidResponse \
-  GH_TEST_INVALID_JSON=1 -- pr threads 42 --repo riii111/dotfiles
-assert_threads_runtime_failure threads-repo-auth authentication \
-  GH_TEST_REPO_AUTH_FAILURE=1 -- pr threads 42
+assert_review_thread_runtime_failure threads-thread-page-failure network \
+  GH_TEST_THREAD_PAGE_FAILURE=1 -- pr review-threads 42 --repo riii111/dotfiles
+assert_review_thread_runtime_failure threads-comment-page-failure githubCli \
+  GH_TEST_COMMENT_PAGE_FAILURE=1 -- pr review-threads 42 --repo riii111/dotfiles
+assert_review_thread_runtime_failure threads-missing-pr notFound \
+  GH_TEST_MISSING_PR=1 -- pr review-threads 42 --repo riii111/dotfiles
+assert_review_thread_runtime_failure threads-graphql-error githubCli \
+  GH_TEST_GRAPHQL_ERROR=1 -- pr review-threads 42 --repo riii111/dotfiles
+assert_review_thread_runtime_failure threads-invalid-json invalidResponse \
+  GH_TEST_INVALID_JSON=1 -- pr review-threads 42 --repo riii111/dotfiles
+assert_review_thread_runtime_failure threads-repo-auth authentication \
+  GH_TEST_REPO_AUTH_FAILURE=1 -- pr review-threads 42
 
-assert_argument_error thread-missing-target pr thread
-assert_argument_error thread-missing-id pr thread 42 --repo riii111/dotfiles
-assert_argument_error thread-abbreviated-repo pr thread 42 thread-detail --rep riii111/dotfiles
-assert_argument_error thread-abbreviated-compact pr thread 42 thread-detail --comp
-assert_argument_error thread-abbreviated-diff-hunk pr thread 42 thread-detail --incl
-assert_argument_error thread-invalid-target pr thread nope thread-detail --repo riii111/dotfiles
+assert_argument_error thread-missing-target pr review-thread
+assert_argument_error thread-missing-id pr review-thread 42 --repo riii111/dotfiles
+assert_argument_error thread-abbreviated-repo pr review-thread 42 thread-detail --rep riii111/dotfiles
+assert_argument_error thread-abbreviated-compact pr review-thread 42 thread-detail --comp
+assert_argument_error thread-abbreviated-diff-hunk pr review-thread 42 thread-detail --incl
+assert_argument_error thread-invalid-target pr review-thread nope thread-detail --repo riii111/dotfiles
 assert_argument_error thread-conflicting-repo \
-  pr thread https://github.com/riii111/dotfiles/pull/42 thread-detail --repo other/repo
+  pr review-thread https://github.com/riii111/dotfiles/pull/42 thread-detail --repo other/repo
 
-run_thread thread-default -- pr thread 42 thread-detail --repo riii111/dotfiles
+run_review_thread thread-default -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 jq -e '
-  .data.thread == {
+  .data.reviewThread == {
     "id": "thread-detail",
     "isResolved": false,
     "isOutdated": true,
@@ -716,29 +748,29 @@ jq -e '
     ]
   } and
   ([.. | objects | keys[]] | any(. == "diffHunk" or . == "databaseId" or . == "resolvedBy" or . == "replyTo" or . == "pullRequest") | not)
-' "$tmpdir/thread-default.thread.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/thread-default.thread.stdout")" -gt 1
+' "$tmpdir/thread-default.review_thread.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/thread-default.review_thread.stdout")" -gt 1
 
-run_thread thread-diff-hunk -- \
-  pr thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk --compact
+run_review_thread thread-diff-hunk -- \
+  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk --compact
 jq -e '
-  [.data.thread.comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
-  (.data.thread.comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
-' "$tmpdir/thread-diff-hunk.thread.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/thread-diff-hunk.thread.stdout")" -eq 1
+  [.data.reviewThread.comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
+  (.data.reviewThread.comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
+' "$tmpdir/thread-diff-hunk.review_thread.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/thread-diff-hunk.review_thread.stdout")" -eq 1
 
-assert_threads_runtime_failure thread-wrong-pr notFound \
-  GH_TEST_THREAD_DETAIL=wrong-pr -- pr thread 42 thread-detail --repo riii111/dotfiles
-assert_threads_runtime_failure thread-wrong-repo notFound \
-  GH_TEST_THREAD_DETAIL=wrong-repo -- pr thread 42 thread-detail --repo riii111/dotfiles
-assert_threads_runtime_failure thread-missing notFound \
-  GH_TEST_THREAD_DETAIL=missing -- pr thread 42 thread-detail --repo riii111/dotfiles
-assert_threads_runtime_failure thread-unresolved-node notFound \
-  GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr thread 42 missing --repo riii111/dotfiles
-assert_threads_runtime_failure thread-wrong-type notFound \
-  GH_TEST_THREAD_DETAIL=wrong-type -- pr thread 42 thread-detail --repo riii111/dotfiles
-assert_threads_runtime_failure thread-comment-page-failure githubCli \
-  GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr thread 42 thread-detail --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-wrong-pr notFound \
+  GH_TEST_THREAD_DETAIL=wrong-pr -- pr review-thread 42 thread-detail --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-wrong-repo notFound \
+  GH_TEST_THREAD_DETAIL=wrong-repo -- pr review-thread 42 thread-detail --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-missing notFound \
+  GH_TEST_THREAD_DETAIL=missing -- pr review-thread 42 thread-detail --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-unresolved-node notFound \
+  GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr review-thread 42 missing --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-wrong-type notFound \
+  GH_TEST_THREAD_DETAIL=wrong-type -- pr review-thread 42 thread-detail --repo riii111/dotfiles
+assert_review_thread_runtime_failure thread-comment-page-failure githubCli \
+  GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 
 for mode in repeat cycle; do
   case "$mode" in
@@ -746,8 +778,8 @@ for mode in repeat cycle; do
     cycle) expected_calls=3 ;;
   esac
   calls_file="$tmpdir/thread-detail-pagination-$mode-calls"
-  assert_threads_runtime_failure "thread-detail-pagination-$mode" invalidResponse \
+  assert_review_thread_runtime_failure "thread-detail-pagination-$mode" invalidResponse \
     GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_DETAIL_PAGINATION="$mode" -- \
-    pr thread 42 thread-detail --repo riii111/dotfiles
+    pr review-thread 42 thread-detail --repo riii111/dotfiles
   test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
 done
