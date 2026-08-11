@@ -31,6 +31,8 @@ CLIと同梱Skillの互換性に影響する変更では、将来の変更ごと
 ```bash
 gh-read pr overview 123 --repo OWNER/REPO
 gh-read pr overview https://github.com/OWNER/REPO/pull/123 --compact
+gh-read pr comments 123 --repo OWNER/REPO
+gh-read pr comments https://github.com/OWNER/REPO/pull/123 --compact
 gh-read pr threads 123 --repo OWNER/REPO --compact
 gh-read pr threads 123 --repo OWNER/REPO --include-resolved
 gh-read pr thread 123 PRRT_kwDOExample --repo OWNER/REPO --compact
@@ -42,13 +44,15 @@ gh-read pr checks 123 --repo OWNER/REPO --include-failed-logs --timeout 120
 gh-read issue 456 --repo OWNER/REPO --compact
 ```
 
-`--repo`を省略した番号指定では、`gh repo view`が現在のrepositoryを解決します。review threadsは既定で未解決だけを返し、`--include-resolved`で解決済みも含めます。`--compact`は1行JSONにします。bare `gh-read pr TARGET`は対応せず、`overview`、`threads`、`thread`、`checks`のいずれかが必要です。
+`--repo`を省略した番号指定では、`gh repo view`が現在のrepositoryを解決します。review threadsは既定で未解決だけを返し、`--include-resolved`で解決済みも含めます。`--compact`は1行JSONにします。bare `gh-read pr TARGET`は対応せず、`overview`、`comments`、`threads`、`thread`、`checks`のいずれかが必要です。
+
+`pr comments`はConversation tabのissue commentsだけを全page取得し、作成日時、同時刻ではstable node IDの昇順で返します。review submission、review thread comment、`diffHunk`、Pull Request本文は含めません。途中のpageやitemが不正または取得に失敗した場合は、部分結果をstdoutへ出さず構造化エラーで終了します。
 
 `pr threads`はreview threadの一覧だけをschema v1で返します。comment本文、author、URL、`diffHunk`、`resolvedBy`は含めず、各threadの全comment pageから`commentCount`と`lastUpdatedAt`を算出します。成功時は全pageの取得完了後にstdoutへJSONを一度だけ出力し、実行時エラーではstdoutを空にしてstderrへ構造化エラーを出力します。
 
 `pr thread`は`pr threads`が返したGraphQL node IDを指定し、対象Pull Requestに属する単一threadのmetadataと全commentを返します。commentは作成日時、同時刻ではIDの昇順です。`diffHunk`は`--include-diff-hunk`を指定した場合だけ含めます。別のPull Requestやrepositoryのthread、存在しないnode、異なる型のnodeは`notFound`になります。
 
-Pull Requestの確認は`pr overview`から始め、threadの位置が必要なら`pr threads`、本文が必要な1件だけを`pr thread`で取得します。
+Pull Requestの確認は`pr overview`から始め、Conversation tabの本文が必要な場合だけ`pr comments`を取得します。threadの位置が必要なら`pr threads`、本文が必要な1件だけを`pr thread`で取得します。
 `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`は、マージ要件であるrequired checkだけを排他的に集計します。`checks.all`はCI全体の活動状況を表す追加サマリーで、`total`、`passed`、`pending`、`failed`を持ちます。例えば形は次のとおりです。
 
 ```json
