@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 reference="$repo_root/tests/fixtures/reference_gh_read.py"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-compatibility.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
+export GH_READ_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-read") | .version')"
 mkdir -p "$tmpdir/bin" "$tmpdir/python" "$tmpdir/rust"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
 chmod +x "$tmpdir/bin/gh"
@@ -225,6 +226,7 @@ assert_overview_runtime_error_message() {
 }
 
 compare_case root-help -- --help
+compare_case root-version -- --version
 compare_case pr-help -- pr --help
 compare_case issue-help -- issue --help
 compare_case root-missing-resource --

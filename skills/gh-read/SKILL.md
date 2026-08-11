@@ -7,6 +7,14 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 
 `gh-read`を使い、API queryをその場で組み立てずにGitHubの定型情報を取得する。
 
+## Compatibility
+
+最初に`gh-read --version`を実行し、インストール済みbinaryの版を確認する。
+`--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版である。
+その場合は現在のsourceからbinaryを再インストールする。
+CLIとこのSkillの互換性に影響する変更では、将来の変更ごとにCargo package versionを上げる。
+自動release processは前提にしない。
+
 ## Workflow
 
 1. PR番号またはPR URLを確定し、`gh-read pr overview <番号またはURL> --compact`を実行する。
