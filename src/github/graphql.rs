@@ -15,6 +15,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       number
+      title
       url
       state
       isDraft
@@ -281,8 +282,9 @@ fn query_runtime_with_deadline(
 }
 
 fn validate_overview_fields(pull_request: &Value) -> Result<()> {
-    let fields: [(&str, FieldValidator); 8] = [
+    let fields: [(&str, FieldValidator); 9] = [
         ("number", Value::is_u64),
+        ("title", Value::is_string),
         ("url", Value::is_string),
         ("state", string_or_null),
         ("isDraft", bool_or_null),
