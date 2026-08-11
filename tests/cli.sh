@@ -331,6 +331,10 @@ assert_runtime_failure issue-invalid-item invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-missing-repository-metadata invalidResponse issue \
   GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
+assert_runtime_failure issue-stdin-failure githubCli issue \
+  GH_TEST_STDIN_FAILURE=1 -- issue 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-page-failure githubCli issue \
+  GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- issue 42 --repo riii111/dotfiles
 
 if env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue 42 --repo riii111/dotfiles \
   >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"; then
@@ -456,6 +460,8 @@ assert_overview_runtime_error_message overview-graphql-before-check-failures git
   'GitHub GraphQL error: [{"message":"simulated GraphQL failure"}]' \
   GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-process-failure githubCli false \
+  GH_OVERVIEW_GRAPHQL_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \
   GH_TEST_MISSING_PR=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-network network true \
@@ -732,6 +738,8 @@ assert_runtime_failure thread-unresolved-node notFound runtime \
   GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr review-thread 42 missing --repo riii111/dotfiles
 assert_runtime_failure thread-wrong-type notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr review-thread 42 thread-detail --repo riii111/dotfiles
+assert_runtime_failure thread-wrong-id invalidResponse runtime \
+  GH_TEST_THREAD_DETAIL=wrong-id -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_runtime_failure thread-comment-page-failure githubCli runtime \
   GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 

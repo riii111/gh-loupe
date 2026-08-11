@@ -270,6 +270,13 @@ mod tests {
             ),
             (
                 1,
+                b"secondary rate limit; retry after 45 seconds".as_slice(),
+                ErrorKind::RateLimited,
+                true,
+                Some(45),
+            ),
+            (
+                1,
                 b"resource not accessible by integration".as_slice(),
                 ErrorKind::Authorization,
                 false,

@@ -100,6 +100,48 @@ jq -e '
   .data.checks[0].log != null
 ' "$tmpdir/mixed-case.json" >/dev/null
 
+run_diagnostics required-filter --required --failed-diagnostics --quiet --compact \
+  >"$tmpdir/required-filter.json"
+jq -e '
+  (.data.checks | length) == 1 and
+  .data.checks[0].name == "required-failure" and
+  (.data.checks[0].annotations | length) == 3
+' "$tmpdir/required-filter.json" >/dev/null
+
+for mode in graphql-error missing-pr; do
+  case "$mode" in
+    graphql-error) expected_kind=githubCli ;;
+    missing-pr) expected_kind=notFound ;;
+  esac
+  if run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
+  test "$status" -eq 1
+  test ! -s "$tmpdir/$mode.stdout"
+  test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
+  jq -e --arg kind "$expected_kind" \
+    '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == false' \
+    "$tmpdir/$mode.stderr" >/dev/null
+done
+
+if run_diagnostics non-utf8 --include-failed-logs --quiet --compact \
+  >"$tmpdir/non-utf8.stdout" 2>"$tmpdir/non-utf8.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/non-utf8.stdout"
+test "$(wc -l <"$tmpdir/non-utf8.stderr" | tr -d ' ')" -eq 1
+jq -e '
+  .schemaVersion == 1 and
+  .error.kind == "invalidResponse" and
+  .error.message == "GitHub returned a non-UTF-8 job log"
+' "$tmpdir/non-utf8.stderr" >/dev/null
+
 for mode in job-mismatch job-head-mismatch job-link-repository-mismatch job-metadata-repository-mismatch; do
   GH_DIAGNOSTICS_CALLS="$tmpdir/$mode-calls" run_diagnostics "$mode" \
     --include-failed-logs --quiet --compact >"$tmpdir/$mode.json"
