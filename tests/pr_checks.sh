@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-pr-checks.XXXXXX")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-checks.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
@@ -11,7 +11,7 @@ chmod +x "$tmpdir/bin/gh"
 
 run_checks() {
   env PATH="$tmpdir/bin:$PATH" GH_TEST_CHECKS_NEW="$1" \
-    "$GH_READ_BIN" pr checks 42 --repo riii111/dotfiles "${@:2}"
+    "$GH_LOUPE_BIN" pr checks 42 --repo riii111/dotfiles "${@:2}"
 }
 
 GH_TEST_ARGS_FILE="$tmpdir/default-args" run_checks success >"$tmpdir/pretty.json"

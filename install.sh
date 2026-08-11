@@ -6,8 +6,8 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [--binary-root DIR] [--skill-root DIR]
 
-  --binary-root DIR  Install gh-read to DIR/bin/gh-read (default: $HOME/.cargo)
-  --skill-root DIR   Install the Skill to DIR/gh-read (default: $HOME/.codex/skills)
+  --binary-root DIR  Install gh-loupe to DIR/bin/gh-loupe (default: $HOME/.cargo)
+  --skill-root DIR   Install the Skill to DIR/gh-loupe (default: $HOME/.codex/skills)
 EOF
 }
 
@@ -39,9 +39,9 @@ while (($# > 0)); do
 done
 
 repository=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
-skill_source="$repository/skills/gh-read"
-[[ -f "$skill_source/SKILL.md" ]] || { printf '%s\n' 'error: bundled gh-read Skill is missing' >&2; exit 1; }
-[[ -f "$skill_source/VERSION" ]] || { printf '%s\n' 'error: bundled gh-read Skill version is missing' >&2; exit 1; }
+skill_source="$repository/skills/gh-loupe"
+[[ -f "$skill_source/SKILL.md" ]] || { printf '%s\n' 'error: bundled gh-loupe Skill is missing' >&2; exit 1; }
+[[ -f "$skill_source/VERSION" ]] || { printf '%s\n' 'error: bundled gh-loupe Skill version is missing' >&2; exit 1; }
 
 package_version=$(awk '
   /^\[workspace\.package\]$/ { in_workspace_package = 1; next }
@@ -66,8 +66,8 @@ skill_version=$(sed -n '1p' "$skill_source/VERSION")
 mkdir -p "$binary_root/bin" "$skill_root"
 binary_root=$(CDPATH='' cd -- "$binary_root" && pwd -P)
 skill_root=$(CDPATH='' cd -- "$skill_root" && pwd -P)
-binary_destination="$binary_root/bin/gh-read"
-skill_destination="$skill_root/gh-read"
+binary_destination="$binary_root/bin/gh-loupe"
+skill_destination="$skill_root/gh-loupe"
 
 if [[ -d "$binary_destination" ]]; then
   printf 'error: binary destination is a directory: %s\n' "$binary_destination" >&2
@@ -106,9 +106,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cargo_work=$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cargo.XXXXXX")
-binary_work=$(mktemp -d "$binary_root/bin/.gh-read.install.XXXXXX")
-skill_work=$(mktemp -d "$skill_root/.gh-read.install.XXXXXX")
+cargo_work=$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-cargo.XXXXXX")
+binary_work=$(mktemp -d "$binary_root/bin/.gh-loupe.install.XXXXXX")
+skill_work=$(mktemp -d "$skill_root/.gh-loupe.install.XXXXXX")
 
 cargo_command=${CARGO:-cargo}
 CARGO_TARGET_DIR="$cargo_work/target" "$cargo_command" install \
@@ -118,18 +118,18 @@ CARGO_TARGET_DIR="$cargo_work/target" "$cargo_command" install \
   --root "$cargo_work/root" \
   --quiet
 
-install -m 755 "$cargo_work/root/bin/gh-read" "$binary_work/gh-read"
-mkdir "$skill_work/gh-read"
-cp -R "$skill_source/." "$skill_work/gh-read/"
+install -m 755 "$cargo_work/root/bin/gh-loupe" "$binary_work/gh-loupe"
+mkdir "$skill_work/gh-loupe"
+cp -R "$skill_source/." "$skill_work/gh-loupe/"
 
-staged_version=$("$binary_work/gh-read" --version)
-[[ "$staged_version" == "gh-read $package_version" ]] || {
-  printf 'error: staged binary version is %s, expected gh-read %s\n' "$staged_version" "$package_version" >&2
+staged_version=$("$binary_work/gh-loupe" --version)
+[[ "$staged_version" == "gh-loupe $package_version" ]] || {
+  printf 'error: staged binary version is %s, expected gh-loupe %s\n' "$staged_version" "$package_version" >&2
   exit 1
 }
-diff -qr "$skill_source" "$skill_work/gh-read" >/dev/null
+diff -qr "$skill_source" "$skill_work/gh-loupe" >/dev/null
 
-mv -- "$binary_work/gh-read" "$binary_destination"
+mv -- "$binary_work/gh-loupe" "$binary_destination"
 rm -rf -- "$skill_destination"
-mv -- "$skill_work/gh-read" "$skill_destination"
-printf 'Installed gh-read %s and its bundled Skill.\n' "$package_version"
+mv -- "$skill_work/gh-loupe" "$skill_destination"
+printf 'Installed gh-loupe %s and its bundled Skill.\n' "$package_version"

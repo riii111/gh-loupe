@@ -202,7 +202,7 @@ mod tests {
             let result = resolve_pr_subcommand_target(
                 "0",
                 Some("owner/repo".to_owned()),
-                "gh-read",
+                "gh-loupe",
                 argument_error,
             );
             let Err(error) = result else {
@@ -210,7 +210,7 @@ mod tests {
             };
             assert_eq!(error.code, 2);
             assert!(error.stderr_line().is_some_and(|message| {
-                message.contains(&format!("gh-read pr {subcommand}: error:"))
+                message.contains(&format!("gh-loupe pr {subcommand}: error:"))
             }));
         }
     }

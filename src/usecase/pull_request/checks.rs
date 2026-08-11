@@ -697,7 +697,7 @@ impl Progress {
 
         writeln!(
             io::stderr(),
-            "gh-read: collecting diagnostics for {total} failed checks"
+            "gh-loupe: collecting diagnostics for {total} failed checks"
         )
         .ok();
         let thread_completed = Arc::clone(&completed);
@@ -719,7 +719,7 @@ impl Progress {
                     let elapsed = started.elapsed().as_secs();
                     writeln!(
                         io::stderr(),
-                        "gh-read: diagnostics {done}/{total} complete; {elapsed}s elapsed"
+                        "gh-loupe: diagnostics {done}/{total} complete; {elapsed}s elapsed"
                     )
                     .ok();
                 }

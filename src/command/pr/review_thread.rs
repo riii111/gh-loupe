@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn parser_preserves_end_of_options_and_missing_value_boundaries() {
         let result = parse_args(
-            "gh-read",
+            "gh-loupe",
             values(&["--", "42", "review-thread-id", "--repo"]),
         );
         let Err(error) = result else {
@@ -121,7 +121,7 @@ mod tests {
                 .is_some_and(|message| message.contains("unrecognized arguments: --repo"))
         );
 
-        let result = parse_args("gh-read", values(&["42", "review-thread-id", "--repo"]));
+        let result = parse_args("gh-loupe", values(&["42", "review-thread-id", "--repo"]));
         let Err(error) = result else {
             panic!("expected a missing-value error")
         };

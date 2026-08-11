@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-diagnostics.XXXXXX")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-diagnostics.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
 cp "$repo_root/tests/fixtures/gh-diagnostics" "$tmpdir/bin/gh"
@@ -11,12 +11,12 @@ chmod +x "$tmpdir/bin/gh"
 run_diagnostics() {
   local repository="${GH_DIAGNOSTICS_REPOSITORY:-owner/repo}"
   env PATH="$tmpdir/bin:$PATH" GH_DIAGNOSTICS_MODE="${1:-normal}" \
-    "$GH_READ_BIN" pr checks 42 --repo "$repository" "${@:2}"
+    "$GH_LOUPE_BIN" pr checks 42 --repo "$repository" "${@:2}"
 }
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/calls" run_diagnostics normal --failed-diagnostics --compact \
   >"$tmpdir/diagnostics.json" 2>"$tmpdir/diagnostics.stderr"
-grep -Fx 'gh-read: collecting diagnostics for 2 failed checks' "$tmpdir/diagnostics.stderr" >/dev/null
+grep -Fx 'gh-loupe: collecting diagnostics for 2 failed checks' "$tmpdir/diagnostics.stderr" >/dev/null
 jq -e '
   [.data.checks[].name] == ["actions-failure", "external-cancel", "pass"] and
   [.data.checks[0].annotations[].path] == ["a.rs", "a.rs", "z.rs"] and
@@ -206,7 +206,7 @@ grep -F 'argument --timeout: value cannot be represented as a diagnostic deadlin
 
 run_diagnostics progress --include-failed-logs --timeout 30 --compact \
   >"$tmpdir/progress.json" 2>"$tmpdir/progress.stderr"
-grep -E '^gh-read: diagnostics 0/2 complete; (15|16)s elapsed$' "$tmpdir/progress.stderr" >/dev/null
+grep -E '^gh-loupe: diagnostics 0/2 complete; (15|16)s elapsed$' "$tmpdir/progress.stderr" >/dev/null
 jq -e '.data.checks | length == 3' "$tmpdir/progress.json" >/dev/null
 
 run_diagnostics normal --failed-diagnostics --compact 2>&- >"$tmpdir/closed-progress.json"

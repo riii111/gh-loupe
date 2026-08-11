@@ -7,7 +7,7 @@ fn public_pr_reviews_behavior() {
     let output = Command::new("bash")
         .arg(repository.join("tests/pr_reviews.sh"))
         .current_dir(&repository)
-        .env("GH_READ_BIN", env!("CARGO_BIN_EXE_gh-read"))
+        .env("GH_LOUPE_BIN", env!("CARGO_BIN_EXE_gh-loupe"))
         .output()
         .expect("run pr reviews tests");
 
