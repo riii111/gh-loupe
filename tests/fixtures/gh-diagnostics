@@ -62,19 +62,46 @@ parallel_barrier() {
   fi
   parallel_lock
   local started=0
+  local expected="${GH_DIAGNOSTICS_BARRIER_COUNT:-${GH_DIAGNOSTICS_FAILURES}}"
   if [ -f "$GH_DIAGNOSTICS_STARTED_FILE" ]; then
     started="$(cat "$GH_DIAGNOSTICS_STARTED_FILE")"
   fi
   printf '%s\n' "$((started + 1))" >"$GH_DIAGNOSTICS_STARTED_FILE"
   parallel_unlock
   for _ in $(seq 1 5000); do
-    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "${GH_DIAGNOSTICS_FAILURES}" ]; then
+    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "$expected" ]; then
       return
     fi
     sleep 0.001
   done
   printf 'parallel fixture barrier timed out\n' >&2
   exit 98
+}
+
+parallel_timing_barrier() {
+  local started
+  started="$(cat "$GH_DIAGNOSTICS_ROUNDS_FILE")"
+  local batch=$(((started - 1) / 4 + 1))
+  local expected=$((GH_DIAGNOSTICS_FAILURES - (batch - 1) * 4))
+  if [ "$expected" -gt 4 ]; then
+    expected=4
+  fi
+  local batch_file="$GH_DIAGNOSTICS_BATCH_DIR/$batch"
+  parallel_lock
+  local count=0
+  if [ -f "$batch_file" ]; then
+    count="$(cat "$batch_file")"
+  fi
+  printf '%s\n' "$((count + 1))" >"$batch_file"
+  parallel_unlock
+  for _ in $(seq 1 5000); do
+    if [ "$(cat "$batch_file")" -ge "$expected" ]; then
+      return
+    fi
+    sleep 0.001
+  done
+  printf 'parallel timing fixture barrier timed out\n' >&2
+  exit 97
 }
 
 if [ "$1 $2" = "api graphql" ]; then
@@ -92,7 +119,12 @@ if [ "$1 $2" = "api graphql" ]; then
 {"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":100,"name":"required-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/required","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":101,"name":"optional-failure","isRequired":false,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z","detailsUrl":"https://ci.example.test/optional","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
 JSON
       ;;
-    parallel|parallel-error|parallel-rate-limit)
+    parallel-status-progress)
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"aaa-status","isRequired":true,"state":"FAILURE","targetUrl":"https://ci.example.test/status"},{"__typename":"CheckRun","databaseId":1101,"name":"bbb-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/parallel/1","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":1102,"name":"ccc-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/parallel/2","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+JSON
+      ;;
+    parallel|parallel-error|parallel-rate-limit|parallel-timing|parallel-staggered-error)
       failures="${GH_DIAGNOSTICS_FAILURES:-0}"
       printf '%s' '{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":['
       if [ "$failures" -gt 0 ]; then
@@ -241,6 +273,17 @@ if [ "$1" = api ] && [[ "$*" == *check-runs/*/annotations* ]] && [[ "${GH_DIAGNO
     parallel_leave
     printf 'secondary rate limit; retry-after: 45\n' >&2
     exit 1
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-staggered-error ]; then
+    parallel_barrier
+    if [ "$check_run_id" -eq 1002 ]; then
+      parallel_leave
+      printf 'simulated staggered failure 2\n' >&2
+      exit 41
+    fi
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-timing ]; then
+    parallel_timing_barrier
   fi
   sleep "${GH_DIAGNOSTICS_DELAY_SECONDS:-0.04}"
   parallel_leave

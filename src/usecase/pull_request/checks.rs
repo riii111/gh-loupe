@@ -183,20 +183,28 @@ fn collect_diagnostics(
         );
         let mut results = results.lock().expect("lock diagnostic results");
         for job in &diagnostic_jobs {
-            if results[job.index]
-                .as_ref()
-                .unwrap_or_else(|| panic!("diagnostic worker must return a result"))
-                .is_err()
-            {
-                let Some(Err(error)) = results[job.index].take() else {
-                    panic!("diagnostic result must be an error");
-                };
-                return Err(error);
+            match results[job.index].as_ref() {
+                Some(Ok(_)) => {}
+                Some(Err(_)) => {
+                    let Some(Err(error)) = results[job.index].take() else {
+                        return Err(Exit::invalid_response(
+                            "diagnostic worker result changed unexpectedly",
+                        ));
+                    };
+                    return Err(error);
+                }
+                None => {
+                    return Err(Exit::invalid_response(
+                        "diagnostic worker did not return a result",
+                    ));
+                }
             }
         }
         for job in diagnostic_jobs {
             let Some(Ok(result)) = results[job.index].take() else {
-                panic!("diagnostic worker must succeed");
+                return Err(Exit::invalid_response(
+                    "diagnostic worker did not return a successful result",
+                ));
             };
             apply_diagnostic_result(&mut checks[job.index], result, options.include_failed_logs);
         }
@@ -280,7 +288,7 @@ fn collect_diagnostics_parallel(
     total_progress: usize,
     progress: &Progress,
 ) -> SharedDiagnosticResults {
-    let next_job = Arc::new(AtomicUsize::new(0));
+    let next_job = Arc::new(Mutex::new(0usize));
     let stop = Arc::new(AtomicBool::new(false));
     let results = Arc::new(Mutex::new(
         (0..checks.len())
@@ -299,6 +307,7 @@ fn collect_diagnostics_parallel(
     );
     let next_completed = Arc::new(AtomicUsize::new(0));
     let worker_count = jobs.len().min(MAX_DIAGNOSTIC_WORKERS);
+    mark_ordered_completion(&completed, &next_completed, total_progress, progress);
 
     thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -309,16 +318,16 @@ fn collect_diagnostics_parallel(
             let next_completed = Arc::clone(&next_completed);
             scope.spawn(move || {
                 loop {
+                    let mut next_job = next_job.lock().expect("lock next diagnostic job");
                     if stop.load(Ordering::Acquire) {
                         break;
                     }
-                    let job_position = next_job.fetch_add(1, Ordering::Relaxed);
+                    let job_position = *next_job;
+                    *next_job += 1;
+                    drop(next_job);
                     let Some(job) = jobs.get(job_position) else {
                         break;
                     };
-                    if stop.load(Ordering::Acquire) {
-                        break;
-                    }
                     let result = ensure_before_deadline(context.deadline, context.timeout_message)
                         .and_then(|()| {
                             collect_one_diagnostic(
