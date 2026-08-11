@@ -75,6 +75,22 @@ jq -e '
   (.data.checks[2] | has("log") | not)
 ' "$tmpdir/logs.json" >/dev/null
 
+run_diagnostics large-log --include-failed-logs --quiet --compact >"$tmpdir/large-log.json"
+jq -e '
+  .data.checks[0].log.omittedLines == 10000 and
+  .data.checks[0].log.omittedBytes == 2044475 and
+  (.data.checks[0].log.text | utf8bytelength) == 65536 and
+  (.data.checks[0].log.text | endswith("final-tail\n"))
+' "$tmpdir/large-log.json" >/dev/null
+
+run_diagnostics utf8-boundary --include-failed-logs --quiet --compact >"$tmpdir/utf8-boundary.json"
+jq -e '
+  .data.checks[0].log.omittedLines == 0 and
+  .data.checks[0].log.omittedBytes == 65538 and
+  (.data.checks[0].log.text | utf8bytelength) == 65534 and
+  (.data.checks[0].log.text | endswith("tail\n"))
+' "$tmpdir/utf8-boundary.json" >/dev/null
+
 GH_DIAGNOSTICS_REPOSITORY=Owner/Repo run_diagnostics normal \
   --include-failed-logs --quiet --compact >"$tmpdir/mixed-case.json"
 jq -e '
@@ -82,13 +98,23 @@ jq -e '
   .data.checks[0].log != null
 ' "$tmpdir/mixed-case.json" >/dev/null
 
-GH_DIAGNOSTICS_CALLS="$tmpdir/mismatch-calls" run_diagnostics job-mismatch \
-  --include-failed-logs --quiet --compact >"$tmpdir/job-mismatch.json"
-jq -e '.data.checks[0].log == null' "$tmpdir/job-mismatch.json" >/dev/null
-grep -F -- 'actions/jobs/20' "$tmpdir/mismatch-calls" >/dev/null
-if grep -F -- 'actions/jobs/20/logs' "$tmpdir/mismatch-calls" >/dev/null; then
-  exit 1
-fi
+for mode in job-mismatch job-head-mismatch job-link-repository-mismatch job-metadata-repository-mismatch; do
+  GH_DIAGNOSTICS_CALLS="$tmpdir/$mode-calls" run_diagnostics "$mode" \
+    --include-failed-logs --quiet --compact >"$tmpdir/$mode.json"
+  jq -e '.data.checks[0].log == null' "$tmpdir/$mode.json" >/dev/null
+  if grep -F -- 'actions/jobs/20/logs' "$tmpdir/$mode-calls" >/dev/null; then
+    exit 1
+  fi
+done
+
+set +e
+run_diagnostics job-id-mismatch --include-failed-logs --quiet --compact \
+  >"$tmpdir/job-id-mismatch.stdout" 2>"$tmpdir/job-id-mismatch.stderr"
+status=$?
+set -e
+test "$status" -eq 1
+test ! -s "$tmpdir/job-id-mismatch.stdout"
+tail -n 1 "$tmpdir/job-id-mismatch.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
 run_diagnostics no-failures --failed-diagnostics --compact \
   >"$tmpdir/no-failures.json" 2>"$tmpdir/no-failures.stderr"
@@ -130,6 +156,15 @@ for mode in annotation-failure metadata-failure log-failure; do
   test "$(grep -c '"schemaVersion":1,"error"' "$tmpdir/$mode.stderr")" -eq 1
 done
 
+set +e
+run_diagnostics annotation-malformed --failed-diagnostics --quiet --compact \
+  >"$tmpdir/annotation-malformed.stdout" 2>"$tmpdir/annotation-malformed.stderr"
+status=$?
+set -e
+test "$status" -eq 1
+test ! -s "$tmpdir/annotation-malformed.stdout"
+tail -n 1 "$tmpdir/annotation-malformed.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
+
 for mode in graphql-missing-completed graphql-wrong-completed; do
   set +e
   run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
@@ -159,10 +194,23 @@ if kill -0 "$(cat "$tmpdir/pid")" 2>/dev/null; then
   exit 1
 fi
 
+set +e
+run_diagnostics normal --failed-diagnostics --timeout 18446744073709551615 --compact \
+  >"$tmpdir/unrepresentable-timeout.stdout" 2>"$tmpdir/unrepresentable-timeout.stderr"
+status=$?
+set -e
+test "$status" -eq 2
+test ! -s "$tmpdir/unrepresentable-timeout.stdout"
+grep -F 'argument --timeout: value cannot be represented as a diagnostic deadline' \
+  "$tmpdir/unrepresentable-timeout.stderr" >/dev/null
+
 run_diagnostics progress --include-failed-logs --timeout 30 --compact \
   >"$tmpdir/progress.json" 2>"$tmpdir/progress.stderr"
 grep -E '^gh-read: diagnostics 0/2 complete; (15|16)s elapsed$' "$tmpdir/progress.stderr" >/dev/null
 jq -e '.data.checks | length == 3' "$tmpdir/progress.json" >/dev/null
+
+run_diagnostics normal --failed-diagnostics --compact 2>&- >"$tmpdir/closed-progress.json"
+jq -e '.data.checks | length == 3' "$tmpdir/closed-progress.json" >/dev/null
 
 for args in '--timeout 0' '--timeout nope' '--timeout' '--time 1' '--failed' '--include-failed' '--qui'; do
   set +e

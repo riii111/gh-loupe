@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crate::error::{Exit, Result};
 use crate::model::CheckDiagnosticsOptions;
 use crate::usecase;
@@ -95,11 +97,23 @@ pub(super) fn execute(
 }
 
 fn parse_timeout(program: &str, value: &str) -> Result<u64> {
-    value
+    let seconds = value
         .parse::<u64>()
         .ok()
         .filter(|seconds| *seconds > 0)
-        .ok_or_else(|| argument_error(program, "argument --timeout: expected a positive integer"))
+        .ok_or_else(|| {
+            argument_error(program, "argument --timeout: expected a positive integer")
+        })?;
+    if Instant::now()
+        .checked_add(Duration::from_secs(seconds))
+        .is_none()
+    {
+        return Err(argument_error(
+            program,
+            "argument --timeout: value cannot be represented as a diagnostic deadline",
+        ));
+    }
+    Ok(seconds)
 }
 
 fn usage(program: &str) -> String {
@@ -175,5 +189,16 @@ mod tests {
         assert_eq!(repo.as_deref(), Some("owner/repo"));
         assert!(compact);
         assert_eq!(program, "gh-read");
+    }
+
+    #[test]
+    fn parser_rejects_unrepresentable_timeout() {
+        let error = parse_timeout("gh-read", &u64::MAX.to_string())
+            .expect_err("unrepresentable timeout must be rejected");
+
+        assert_eq!(error.code, 2);
+        assert!(error
+            .stderr_line()
+            .is_some_and(|line| line.contains("cannot be represented as a diagnostic deadline")));
     }
 }

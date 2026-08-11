@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -44,27 +45,40 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = runtime_output(args, payload, deadline, timeout_message)?;
+    let output = runtime_output(args, payload, deadline, timeout_message, None)?;
     parse_runtime_json(output, allow_nonzero_json, None)
 }
 
 pub(super) fn bytes_runtime_with_deadline<I, S>(
     args: I,
+    max_bytes: usize,
+    max_lines: usize,
     deadline: Instant,
     timeout_message: &str,
-) -> Result<Vec<u8>>
+) -> Result<BoundedBytes>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = runtime_output(args, None, deadline, timeout_message)?;
+    let output = runtime_output(
+        args,
+        None,
+        deadline,
+        timeout_message,
+        Some((max_bytes, max_lines)),
+    )?;
     if !output.status.success() {
         return Err(runtime_cli_failure(
             output.status.code().unwrap_or(1),
             &output.stderr,
         ));
     }
-    Ok(output.stdout)
+    Ok(BoundedBytes {
+        bytes: output.stdout,
+        total_bytes: output.stdout_total_bytes,
+        total_newlines: output.stdout_total_newlines,
+        valid_utf8: output.stdout_valid_utf8,
+    })
 }
 
 fn json_runtime_with_empty<I, S>(
@@ -85,7 +99,7 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    let output = execute(command, payload, None).map_err(|error| {
+    let output = execute(command, payload, None, None).map_err(|error| {
         runtime_exit(
             ErrorKind::GitHubCli,
             format!("failed to execute GitHub CLI: {error}"),
@@ -133,6 +147,7 @@ fn runtime_output<I, S>(
     payload: Option<&str>,
     deadline: Instant,
     timeout_message: &str,
+    stdout_limit: Option<(usize, usize)>,
 ) -> Result<ProcessOutput>
 where
     I: IntoIterator<Item = S>,
@@ -146,7 +161,7 @@ where
     if payload.is_some() {
         command.stdin(Stdio::piped());
     }
-    match execute(command, payload, Some(deadline)) {
+    match execute(command, payload, Some(deadline), stdout_limit) {
         Ok(output) => Ok(output),
         Err(ProcessError::TimedOut) => Err(runtime_exit(
             ErrorKind::Timeout,
@@ -187,7 +202,24 @@ fn runtime_exit(
 struct ProcessOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
+    stdout_total_bytes: u64,
+    stdout_total_newlines: u64,
+    stdout_valid_utf8: bool,
     stderr: Vec<u8>,
+}
+
+pub struct BoundedBytes {
+    pub bytes: Vec<u8>,
+    pub total_bytes: u64,
+    pub total_newlines: u64,
+    pub valid_utf8: bool,
+}
+
+struct PipeOutput {
+    bytes: Vec<u8>,
+    total_bytes: u64,
+    total_newlines: u64,
+    valid_utf8: bool,
 }
 
 #[derive(Debug)]
@@ -211,6 +243,7 @@ fn execute(
     mut command: Command,
     payload: Option<&str>,
     deadline: Option<Instant>,
+    stdout_limit: Option<(usize, usize)>,
 ) -> std::result::Result<ProcessOutput, ProcessError> {
     #[cfg(unix)]
     {
@@ -219,16 +252,17 @@ fn execute(
         command.process_group(0);
     }
     let child = command.spawn().map_err(ProcessError::Io)?;
-    collect_output(child, payload, deadline)
+    collect_output(child, payload, deadline, stdout_limit)
 }
 
 fn collect_output(
     mut child: Child,
     payload: Option<&str>,
     deadline: Option<Instant>,
+    stdout_limit: Option<(usize, usize)>,
 ) -> std::result::Result<ProcessOutput, ProcessError> {
-    let stdout = collect_pipe(child.stdout.take().expect("stdout is piped"));
-    let stderr = collect_pipe(child.stderr.take().expect("stderr is piped"));
+    let stdout = collect_pipe(child.stdout.take().expect("stdout is piped"), stdout_limit);
+    let stderr = collect_pipe(child.stderr.take().expect("stderr is piped"), None);
     if let Some(payload) = payload
         && let Err(error) = write_child_stdin(&mut child, payload)
     {
@@ -247,20 +281,121 @@ fn collect_output(
     let status = status?;
     Ok(ProcessOutput {
         status,
-        stdout,
-        stderr,
+        stdout: stdout.bytes,
+        stdout_total_bytes: stdout.total_bytes,
+        stdout_total_newlines: stdout.total_newlines,
+        stdout_valid_utf8: stdout.valid_utf8,
+        stderr: stderr.bytes,
     })
 }
 
-fn collect_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
+fn collect_pipe<R>(
+    mut pipe: R,
+    max_bytes: Option<(usize, usize)>,
+) -> thread::JoinHandle<io::Result<PipeOutput>>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
+        if let Some((max_bytes, max_lines)) = max_bytes {
+            return collect_bounded_pipe(pipe, max_bytes, max_lines);
+        }
         let mut bytes = Vec::new();
         pipe.read_to_end(&mut bytes)?;
-        Ok(bytes)
+        let total_bytes = bytes.len() as u64;
+        let total_newlines = newline_count(&bytes);
+        Ok(PipeOutput {
+            bytes,
+            total_bytes,
+            total_newlines,
+            valid_utf8: true,
+        })
     })
+}
+
+fn collect_bounded_pipe<R>(
+    mut pipe: R,
+    max_bytes: usize,
+    max_lines: usize,
+) -> io::Result<PipeOutput>
+where
+    R: Read,
+{
+    const UTF8_BOUNDARY_BYTES: usize = 4;
+
+    let capacity = max_bytes.saturating_add(UTF8_BOUNDARY_BYTES);
+    let mut bytes = VecDeque::with_capacity(capacity);
+    let mut total_bytes = 0_u64;
+    let mut total_newlines = 0_u64;
+    let mut retained_newlines = 0_u64;
+    let mut valid_utf8 = true;
+    let mut utf8_pending = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = pipe.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(read as u64);
+        let chunk_newlines = newline_count(&buffer[..read]);
+        total_newlines = total_newlines.saturating_add(chunk_newlines);
+        retained_newlines = retained_newlines.saturating_add(chunk_newlines);
+        validate_utf8_chunk(&mut valid_utf8, &mut utf8_pending, &buffer[..read]);
+        bytes.extend(&buffer[..read]);
+        while bytes.len() > capacity {
+            pop_front(&mut bytes, &mut retained_newlines);
+        }
+        while retained_line_count(&bytes, retained_newlines) > max_lines as u64 {
+            while let Some(byte) = bytes.pop_front() {
+                if byte == b'\n' {
+                    retained_newlines = retained_newlines.saturating_sub(1);
+                    break;
+                }
+            }
+        }
+    }
+    if !utf8_pending.is_empty() {
+        valid_utf8 = false;
+    }
+    Ok(PipeOutput {
+        bytes: bytes.into_iter().collect(),
+        total_bytes,
+        total_newlines,
+        valid_utf8,
+    })
+}
+
+fn pop_front(bytes: &mut VecDeque<u8>, retained_newlines: &mut u64) {
+    if bytes.pop_front() == Some(b'\n') {
+        *retained_newlines = retained_newlines.saturating_sub(1);
+    }
+}
+
+fn retained_line_count(bytes: &VecDeque<u8>, retained_newlines: u64) -> u64 {
+    retained_newlines.saturating_add(u64::from(bytes.back().is_some_and(|byte| *byte != b'\n')))
+}
+
+fn validate_utf8_chunk(valid: &mut bool, pending: &mut Vec<u8>, bytes: &[u8]) {
+    if !*valid {
+        return;
+    }
+    let mut chunk = Vec::with_capacity(pending.len() + bytes.len());
+    chunk.extend_from_slice(pending);
+    chunk.extend_from_slice(bytes);
+    pending.clear();
+    if let Err(error) = std::str::from_utf8(&chunk) {
+        if error.error_len().is_some() {
+            *valid = false;
+        } else {
+            pending.extend_from_slice(&chunk[error.valid_up_to()..]);
+        }
+    }
+}
+
+fn newline_count(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'))
 }
 
 fn wait_until(
@@ -342,9 +477,41 @@ fn write_child_stdin(child: &mut std::process::Child, payload: &str) -> io::Resu
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader};
+    use std::fmt::Write as _;
+    use std::io::{BufRead, BufReader, Cursor};
 
     use super::*;
+
+    #[test]
+    fn bounded_pipe_rejects_invalid_utf8_in_discarded_prefix() {
+        let mut input = vec![0xff];
+        input.extend(std::iter::repeat_n(b'x', 100_000));
+        input.extend_from_slice(b"\nlast\n");
+
+        let output = collect_bounded_pipe(Cursor::new(input), 64 * 1024, 200)
+            .expect("collect bounded output");
+
+        assert!(!output.valid_utf8);
+        assert!(output.bytes.len() <= 64 * 1024 + 4);
+    }
+
+    #[test]
+    fn bounded_pipe_applies_line_limit_while_reading() {
+        let mut input = String::new();
+        for line in 0..10_000 {
+            writeln!(input, "line-{line}").expect("write synthetic log");
+        }
+
+        let output = collect_bounded_pipe(Cursor::new(input), 64 * 1024, 200)
+            .expect("collect bounded output");
+
+        assert_eq!(newline_count(&output.bytes), 200);
+        assert!(
+            String::from_utf8(output.bytes)
+                .expect("valid UTF-8 output")
+                .starts_with("line-9800\n")
+        );
+    }
 
     #[cfg(unix)]
     #[test]
@@ -386,6 +553,7 @@ mod tests {
             child,
             None,
             Some(Instant::now() + Duration::from_millis(50)),
+            None,
         );
 
         assert!(matches!(result, Err(ProcessError::TimedOut)));

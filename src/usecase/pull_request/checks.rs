@@ -13,6 +13,7 @@ use crate::output;
 
 const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
+const UTF8_BOUNDARY_BYTES: usize = 4;
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
 const CHECK_RUN_MARKER: &str = "__checkRun";
 const CHECK_RUN_ID: &str = "__checkRunId";
@@ -23,7 +24,13 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         "failed check diagnostics timed out after {} seconds",
         options.timeout_seconds
     );
-    let deadline = diagnostic_deadline(options.timeout_seconds);
+    let deadline = diagnostic_deadline(options.timeout_seconds).ok_or_else(|| Exit {
+        message: Some(format!(
+            "argument --timeout: {} seconds cannot be represented as a diagnostic deadline",
+            options.timeout_seconds
+        )),
+        code: 2,
+    })?;
     let checks = if diagnostics_requested {
         let (head_oid, contexts) =
             github::graphql::pull_request_check_contexts(target, deadline, &timeout_message)?;
@@ -111,6 +118,8 @@ fn collect_diagnostics(
                     optional_string_field(check, "link"),
                     check_run_id,
                     head_oid,
+                    LOG_BYTE_LIMIT,
+                    LOG_LINE_LIMIT,
                     deadline,
                     timeout_message,
                 )?
@@ -251,10 +260,24 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
 }
 
 fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
+    let conclusion = match conclusion {
+        None => None,
+        Some(value) if is_known_check_run_conclusion(value) => Some(value),
+        Some(_) => {
+            return Err(invalid_response(
+                "GitHub returned an unknown check run conclusion",
+            ));
+        }
+    };
     if status == "COMPLETED" {
         return conclusion.map(str::to_owned).ok_or_else(|| {
             invalid_response("GitHub returned a completed check run without a conclusion")
         });
+    }
+    if conclusion.is_some() {
+        return Err(invalid_response(
+            "GitHub returned a non-completed check run with a conclusion",
+        ));
     }
     match status {
         "IN_PROGRESS" | "PENDING" | "QUEUED" | "REQUESTED" | "WAITING" => Ok(status.to_owned()),
@@ -262,6 +285,21 @@ fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<Str
             "GitHub returned an unknown check run status",
         )),
     }
+}
+
+fn is_known_check_run_conclusion(conclusion: &str) -> bool {
+    matches!(
+        conclusion,
+        "ACTION_REQUIRED"
+            | "CANCELLED"
+            | "FAILURE"
+            | "NEUTRAL"
+            | "SKIPPED"
+            | "STALE"
+            | "STARTUP_FAILURE"
+            | "SUCCESS"
+            | "TIMED_OUT"
+    )
 }
 
 fn check_run_workflow(object: &Map<String, Value>) -> Result<Option<&str>> {
@@ -438,6 +476,8 @@ fn collect_actions_log(
     link: Option<&str>,
     check_run_id: Option<u64>,
     head_oid: &str,
+    max_bytes: usize,
+    max_lines: usize,
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<Value> {
@@ -461,7 +501,14 @@ fn collect_actions_log(
         return Ok(Value::Null);
     }
 
-    let bytes = github::pull_request::job_log(target, job_id, deadline, timeout_message)?;
+    let bytes = github::pull_request::job_log(
+        target,
+        job_id,
+        max_bytes,
+        max_lines,
+        deadline,
+        timeout_message,
+    )?;
     truncate_log(bytes)
 }
 
@@ -498,33 +545,78 @@ fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> 
         .then(|| &value[prefix.len()..])
 }
 
-fn truncate_log(bytes: Vec<u8>) -> Result<Value> {
-    let text = String::from_utf8(bytes)
-        .map_err(|_| invalid_response("GitHub returned a non-UTF-8 job log"))?;
-    let lines = text.split_inclusive('\n').collect::<Vec<_>>();
-    let first_line = lines.len().saturating_sub(LOG_LINE_LIMIT);
-    let omitted_line_bytes = lines[..first_line]
-        .iter()
-        .map(|line| line.len())
-        .sum::<usize>();
-    let mut omitted_lines = first_line;
-    let line_limited = &text[omitted_line_bytes..];
-
-    let mut byte_start = line_limited.len().saturating_sub(LOG_BYTE_LIMIT);
-    while !line_limited.is_char_boundary(byte_start) {
-        byte_start += 1;
+fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
+    let github::pull_request::BoundedBytes {
+        bytes,
+        total_bytes,
+        total_newlines,
+        valid_utf8,
+    } = log;
+    if !valid_utf8 {
+        return Err(invalid_response("GitHub returned a non-UTF-8 job log"));
     }
-    omitted_lines += line_limited[..byte_start]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count();
-    let omitted_bytes = omitted_line_bytes + byte_start;
+    let byte_start = bytes.len().saturating_sub(LOG_BYTE_LIMIT);
+    let line_start = line_start(&bytes, total_newlines);
+    let mut start = byte_start.max(line_start);
+    let mut text = std::str::from_utf8(&bytes[start..]);
+    while let Err(error) = text {
+        if line_start >= byte_start
+            || error.valid_up_to() != 0
+            || start >= byte_start.saturating_add(UTF8_BOUNDARY_BYTES)
+            || start >= bytes.len()
+        {
+            return Err(invalid_response("GitHub returned a non-UTF-8 job log"));
+        }
+        start += 1;
+        text = std::str::from_utf8(&bytes[start..]);
+    }
+    let text = text.expect("valid UTF-8 log after boundary adjustment");
+    let omitted_bytes = total_bytes.saturating_sub(bytes.len() as u64) + start as u64;
+    let omitted_lines = total_newlines.saturating_sub(newline_count(&bytes[start..]));
     Ok(json!({
-        "text": &line_limited[byte_start..],
+        "text": text,
         "truncated": omitted_bytes > 0,
         "omittedLines": omitted_lines,
         "omittedBytes": omitted_bytes,
     }))
+}
+
+fn line_start(bytes: &[u8], total_newlines: u64) -> usize {
+    let Some(last_byte) = bytes.last() else {
+        return 0;
+    };
+    let total_lines = if *last_byte == b'\n' {
+        total_newlines
+    } else {
+        total_newlines.saturating_add(1)
+    };
+    let omitted_lines = total_lines.saturating_sub(LOG_LINE_LIMIT as u64);
+    if omitted_lines == 0 {
+        return 0;
+    }
+
+    let retained_newlines = newline_count(bytes);
+    let newlines_before = total_newlines.saturating_sub(retained_newlines);
+    if omitted_lines <= newlines_before {
+        return 0;
+    }
+    let target = omitted_lines - newlines_before;
+    let mut seen = 0_u64;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            seen += 1;
+            if seen == target {
+                return index + 1;
+            }
+        }
+    }
+    bytes.len()
+}
+
+fn newline_count(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'))
 }
 
 fn string_field<'a>(object: &'a Map<String, Value>, field: &str) -> &'a str {
@@ -581,15 +673,8 @@ fn ensure_before_deadline(deadline: Instant, timeout_message: &str) -> Result<()
     ))
 }
 
-fn diagnostic_deadline(timeout_seconds: u64) -> Instant {
-    let now = Instant::now();
-    let mut seconds = timeout_seconds;
-    loop {
-        if let Some(deadline) = now.checked_add(Duration::from_secs(seconds)) {
-            return deadline;
-        }
-        seconds /= 2;
-    }
+fn diagnostic_deadline(timeout_seconds: u64) -> Option<Instant> {
+    Instant::now().checked_add(Duration::from_secs(timeout_seconds))
 }
 
 struct Progress {
@@ -614,7 +699,7 @@ impl Progress {
             io::stderr(),
             "gh-read: collecting diagnostics for {total} failed checks"
         )
-        .expect("write diagnostic progress");
+        .ok();
         let thread_completed = Arc::clone(&completed);
         let thread_state = Arc::clone(&state);
         let progress_thread = thread::spawn(move || {
@@ -636,7 +721,7 @@ impl Progress {
                         io::stderr(),
                         "gh-read: diagnostics {done}/{total} complete; {elapsed}s elapsed"
                     )
-                    .expect("write diagnostic progress");
+                    .ok();
                 }
             }
         });
@@ -673,8 +758,16 @@ mod tests {
         let mut input = (0..201).map(|_| "old\n").collect::<String>();
         input.push_str(&long_line);
         input.push_str("tail");
+        let total_bytes = input.len() as u64;
+        let total_newlines = newline_count(input.as_bytes());
 
-        let log = truncate_log(input.into_bytes()).unwrap_or_else(|_| panic!("truncate log"));
+        let log = truncate_log(github::pull_request::BoundedBytes {
+            bytes: input.into_bytes(),
+            total_bytes,
+            total_newlines,
+            valid_utf8: true,
+        })
+        .unwrap_or_else(|_| panic!("truncate log"));
 
         assert_eq!(
             log["text"].as_str().expect("log text").len(),
@@ -687,13 +780,47 @@ mod tests {
 
     #[test]
     fn log_within_both_limits_reports_no_omissions() {
-        let log =
-            truncate_log(b"first\nsecond\n".to_vec()).unwrap_or_else(|_| panic!("retain log"));
+        let bytes = b"first\nsecond\n".to_vec();
+        let log = truncate_log(github::pull_request::BoundedBytes {
+            total_bytes: bytes.len() as u64,
+            total_newlines: newline_count(&bytes),
+            bytes,
+            valid_utf8: true,
+        })
+        .unwrap_or_else(|_| panic!("retain log"));
 
         assert_eq!(log["text"], "first\nsecond\n");
         assert_eq!(log["truncated"], false);
         assert_eq!(log["omittedLines"], 0);
         assert_eq!(log["omittedBytes"], 0);
+    }
+
+    #[test]
+    fn multibyte_character_crossing_byte_limit_is_not_split() {
+        let mut input = vec![b'x'; LOG_BYTE_LIMIT - 1];
+        input.extend_from_slice("あ".as_bytes());
+        input.extend(std::iter::repeat_n(b'x', LOG_BYTE_LIMIT - 7));
+        input.extend_from_slice(b"tail\n");
+        let total_bytes = input.len() as u64;
+        let total_newlines = newline_count(&input);
+        let retained_start = input.len() - (LOG_BYTE_LIMIT + UTF8_BOUNDARY_BYTES);
+        let bytes = input[retained_start..].to_vec();
+
+        let log = truncate_log(github::pull_request::BoundedBytes {
+            bytes,
+            total_bytes,
+            total_newlines,
+            valid_utf8: true,
+        })
+        .unwrap_or_else(|_| panic!("truncate UTF-8 log"));
+
+        assert!(
+            log["text"]
+                .as_str()
+                .is_some_and(|text| text.ends_with("tail\n"))
+        );
+        assert_eq!(log["omittedBytes"], 65_538);
+        assert_eq!(log["omittedLines"], 0);
     }
 
     #[test]
@@ -736,6 +863,134 @@ mod tests {
                 "https://api.github.com/repos/owner/repo/check-runs/100"
             ),
             Some(100)
+        );
+    }
+
+    fn valid_check_run_context() -> Value {
+        json!({
+            "__typename": "CheckRun",
+            "databaseId": 100,
+            "name": "build",
+            "isRequired": true,
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "startedAt": "2026-08-11T10:00:00Z",
+            "completedAt": "2026-08-11T10:05:00Z",
+            "detailsUrl": "https://example.test/build",
+            "checkSuite": {
+                "workflowRun": {
+                    "workflow": {"name": "CI"}
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn unknown_check_run_status_fails_closed() {
+        let mut context = valid_check_run_context();
+        context["status"] = json!("BROKEN");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("unknown status must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn missing_check_run_status_fails_closed() {
+        let mut context = valid_check_run_context();
+        context
+            .as_object_mut()
+            .expect("context object")
+            .remove("status");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("missing status must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn missing_completed_check_run_conclusion_fails_closed() {
+        let mut context = valid_check_run_context();
+        context
+            .as_object_mut()
+            .expect("context object")
+            .remove("conclusion");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("missing conclusion must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn unknown_check_run_conclusion_fails_closed() {
+        let mut context = valid_check_run_context();
+        context["conclusion"] = json!("UNKNOWN");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("unknown conclusion must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn unknown_non_completed_check_run_conclusion_fails_closed() {
+        let mut context = valid_check_run_context();
+        context["status"] = json!("IN_PROGRESS");
+        context["conclusion"] = json!("UNKNOWN");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("unknown pending conclusion must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn malformed_workflow_shape_fails_closed() {
+        let mut context = valid_check_run_context();
+        context["checkSuite"] = json!({"workflowRun": {"workflow": null}});
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("malformed workflow must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn malformed_annotation_fails_closed() {
+        let error = validate_annotations(&json!([[{"path": "partial.rs"}]]))
+            .expect_err("malformed annotation must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
         );
     }
 }
