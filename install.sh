@@ -76,9 +76,9 @@ fi
 printf 'Binary destination: %s\n' "$binary_destination"
 printf 'Skill destination: %s\n' "$skill_destination"
 
-cargo_work=$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cargo.XXXXXX")
-binary_work=$(mktemp -d "$binary_root/bin/.gh-read.install.XXXXXX")
-skill_work=$(mktemp -d "$skill_root/.gh-read.install.XXXXXX")
+cargo_work=
+binary_work=
+skill_work=
 binary_replaced=0
 binary_had_previous=0
 skill_replaced=0
@@ -89,26 +89,81 @@ cleanup() {
   status=$?
   trap - EXIT
   set +e
+  binary_keep_work=0
+  skill_keep_work=0
+  cleanup_failed=0
 
   if ((committed == 0)); then
     if ((skill_replaced == 1)); then
-      mv -- "$skill_destination" "$skill_work/failed"
-      if ((skill_had_previous == 1)); then
-        mv -- "$skill_work/previous" "$skill_destination"
+      if [[ -e "$skill_destination" || -L "$skill_destination" ]] &&
+        ! mv -- "$skill_destination" "$skill_work/failed"; then
+        if ((skill_had_previous == 1)); then
+          printf 'error: could not move the failed Skill; previous Skill retained at %s\n' \
+            "$skill_work/previous" >&2
+        else
+          printf 'error: could not remove the failed Skill at %s\n' "$skill_destination" >&2
+        fi
+        skill_keep_work=1
+        cleanup_failed=1
+      elif ((skill_had_previous == 1)); then
+        if mv -- "$skill_work/previous" "$skill_destination"; then
+          skill_had_previous=0
+        else
+          printf 'error: could not restore the previous Skill; recover it from %s\n' \
+            "$skill_work/previous" >&2
+          skill_keep_work=1
+          cleanup_failed=1
+        fi
       fi
     fi
     if ((binary_replaced == 1)); then
-      mv -- "$binary_destination" "$binary_work/failed"
-      if ((binary_had_previous == 1)); then
-        mv -- "$binary_work/previous" "$binary_destination"
+      if [[ -e "$binary_destination" || -L "$binary_destination" ]] &&
+        ! mv -- "$binary_destination" "$binary_work/failed"; then
+        if ((binary_had_previous == 1)); then
+          printf 'error: could not move the failed binary; previous binary retained at %s\n' \
+            "$binary_work/previous" >&2
+        else
+          printf 'error: could not remove the failed binary at %s\n' "$binary_destination" >&2
+        fi
+        binary_keep_work=1
+        cleanup_failed=1
+      elif ((binary_had_previous == 1)); then
+        if mv -- "$binary_work/previous" "$binary_destination"; then
+          binary_had_previous=0
+        else
+          printf 'error: could not restore the previous binary; recover it from %s\n' \
+            "$binary_work/previous" >&2
+          binary_keep_work=1
+          cleanup_failed=1
+        fi
       fi
     fi
   fi
 
-  rm -rf -- "$cargo_work" "$binary_work" "$skill_work"
+  if [[ -n "$cargo_work" ]] && ! rm -rf -- "$cargo_work"; then
+    printf 'error: could not remove temporary directory %s\n' "$cargo_work" >&2
+    cleanup_failed=1
+  fi
+  if [[ -n "$binary_work" ]] && ((binary_keep_work == 0)) &&
+    ! rm -rf -- "$binary_work"; then
+    printf 'error: could not remove temporary directory %s\n' "$binary_work" >&2
+    cleanup_failed=1
+  fi
+  if [[ -n "$skill_work" ]] && ((skill_keep_work == 0)) &&
+    ! rm -rf -- "$skill_work"; then
+    printf 'error: could not remove temporary directory %s\n' "$skill_work" >&2
+    cleanup_failed=1
+  fi
+  if ((cleanup_failed == 1 && status == 0)); then
+    status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
+
+cargo_work=$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cargo.XXXXXX")
+binary_work=$(mktemp -d "$binary_root/bin/.gh-read.install.XXXXXX")
+skill_work=$(mktemp -d "$skill_root/.gh-read.install.XXXXXX")
 
 cargo_command=${CARGO:-cargo}
 CARGO_TARGET_DIR="$cargo_work/target" "$cargo_command" install \

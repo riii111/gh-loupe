@@ -34,9 +34,13 @@ fn installs_binary_and_replaces_the_bundled_skill() {
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
     let temporary_root = temporary.0.join("temporary files");
+    let previous_binary = binary_root.join("bin/gh-read");
     let previous_skill = skill_root.join("gh-read");
+    fs::create_dir_all(previous_binary.parent().expect("binary parent"))
+        .expect("create previous binary directory");
     fs::create_dir_all(&previous_skill).expect("create previous Skill");
     fs::create_dir(&temporary_root).expect("create temporary root");
+    fs::write(&previous_binary, "obsolete binary").expect("write obsolete binary");
     fs::write(previous_skill.join("obsolete.md"), "obsolete").expect("write obsolete file");
 
     let output = Command::new("bash")
@@ -86,6 +90,8 @@ fn installs_binary_and_replaces_the_bundled_skill() {
         version.stdout,
         format!("gh-read {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
     );
+    assert_no_installer_work(&binary_root.join("bin"));
+    assert_no_installer_work(&skill_root);
 }
 
 #[test]
@@ -96,6 +102,7 @@ fn build_failure_preserves_existing_destinations() {
     let skill_root = temporary.0.join("skill root");
     let previous_binary = binary_root.join("bin/gh-read");
     let previous_skill_file = skill_root.join("gh-read/previous.md");
+    let temporary_root = temporary.0.join("temporary files");
     let fake_cargo = temporary.0.join("fake cargo");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
         .expect("create binary root");
@@ -103,12 +110,8 @@ fn build_failure_preserves_existing_destinations() {
         .expect("create Skill root");
     fs::write(&previous_binary, "previous binary").expect("write previous binary");
     fs::write(&previous_skill_file, "previous Skill").expect("write previous Skill");
-    fs::write(&fake_cargo, "#!/usr/bin/env bash\nexit 42\n").expect("write fake cargo");
-    let mut permissions = fs::metadata(&fake_cargo)
-        .expect("read fake cargo metadata")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&fake_cargo, permissions).expect("make fake cargo executable");
+    fs::create_dir(&temporary_root).expect("create temporary root");
+    write_executable(&fake_cargo, "#!/usr/bin/env bash\nexit 42\n");
 
     let output = Command::new("bash")
         .arg(repository.join("install.sh"))
@@ -117,6 +120,7 @@ fn build_failure_preserves_existing_destinations() {
         .arg("--skill-root")
         .arg(&skill_root)
         .env("CARGO", &fake_cargo)
+        .env("TMPDIR", &temporary_root)
         .output()
         .expect("run installer with failing cargo");
 
@@ -129,6 +133,99 @@ fn build_failure_preserves_existing_destinations() {
         fs::read_to_string(previous_skill_file).unwrap(),
         "previous Skill"
     );
+    assert_no_installer_work(&binary_root.join("bin"));
+    assert_no_installer_work(&skill_root);
+    assert!(directory_entries(&temporary_root).is_empty());
+}
+
+#[test]
+fn later_temporary_directory_failure_removes_earlier_one() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temporary = TempDirectory::new("temporary failure");
+    let binary_root = temporary.0.join("binary root");
+    let skill_root = temporary.0.join("skill root");
+    let temporary_root = temporary.0.join("temporary files");
+    let fake_tools = temporary.0.join("fake tools");
+    let fake_mktemp = fake_tools.join("mktemp");
+    let count_file = temporary.0.join("mktemp count");
+    fs::create_dir(&temporary_root).expect("create temporary root");
+    fs::create_dir(&fake_tools).expect("create fake tools directory");
+    write_executable(
+        &fake_mktemp,
+        "#!/usr/bin/env bash\ncount=$(cat \"$MKTEMP_COUNT_FILE\" 2>/dev/null || echo 0)\nprintf '%s' \"$((count + 1))\" >\"$MKTEMP_COUNT_FILE\"\nif ((count == 0)); then\n  path=\"$TMPDIR/observed-cargo-work\"\n  mkdir \"$path\"\n  printf '%s\\n' \"$path\"\n  exit 0\nfi\nexit 43\n",
+    );
+
+    let mut search_paths = vec![fake_tools];
+    search_paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").expect("PATH is set"),
+    ));
+    let search_path = std::env::join_paths(search_paths).expect("join PATH");
+    let output = Command::new("bash")
+        .arg(repository.join("install.sh"))
+        .arg("--binary-root")
+        .arg(&binary_root)
+        .arg("--skill-root")
+        .arg(&skill_root)
+        .env("PATH", search_path)
+        .env("TMPDIR", &temporary_root)
+        .env("MKTEMP_COUNT_FILE", count_file)
+        .output()
+        .expect("run installer with failing mktemp");
+
+    assert_eq!(output.status.code(), Some(43));
+    assert!(!temporary_root.join("observed-cargo-work").exists());
+    assert_no_installer_work(&binary_root.join("bin"));
+    assert_no_installer_work(&skill_root);
+}
+
+#[test]
+fn post_install_verification_failure_restores_existing_destinations() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temporary = TempDirectory::new("rollback");
+    let binary_root = temporary.0.join("binary root");
+    let skill_root = temporary.0.join("skill root");
+    let temporary_root = temporary.0.join("temporary files");
+    let previous_binary = binary_root.join("bin/gh-read");
+    let previous_skill_file = skill_root.join("gh-read/previous.md");
+    let fake_cargo = temporary.0.join("fake cargo");
+    let version_counter = temporary.0.join("version counter");
+    fs::create_dir_all(previous_binary.parent().expect("binary parent"))
+        .expect("create binary root");
+    fs::create_dir_all(previous_skill_file.parent().expect("Skill parent"))
+        .expect("create Skill root");
+    fs::create_dir(&temporary_root).expect("create temporary root");
+    fs::write(&previous_binary, "previous binary").expect("write previous binary");
+    fs::write(&previous_skill_file, "previous Skill").expect("write previous Skill");
+    write_executable(
+        &fake_cargo,
+        "#!/usr/bin/env bash\nroot=\nwhile (($# > 0)); do\n  if [[ $1 == --root ]]; then\n    root=$2\n    shift 2\n  else\n    shift\n  fi\ndone\nmkdir -p \"$root/bin\"\ncat >\"$root/bin/gh-read\" <<'EOF'\n#!/usr/bin/env bash\ncount=$(cat \"$GH_READ_TEST_COUNTER\" 2>/dev/null || echo 0)\nprintf '%s' \"$((count + 1))\" >\"$GH_READ_TEST_COUNTER\"\nif ((count == 0)); then\n  printf 'gh-read %s\\n' \"$GH_READ_TEST_VERSION\"\nelse\n  printf '%s\\n' 'gh-read invalid'\nfi\nEOF\nchmod +x \"$root/bin/gh-read\"\n",
+    );
+
+    let output = Command::new("bash")
+        .arg(repository.join("install.sh"))
+        .arg("--binary-root")
+        .arg(&binary_root)
+        .arg("--skill-root")
+        .arg(&skill_root)
+        .env("CARGO", &fake_cargo)
+        .env("TMPDIR", &temporary_root)
+        .env("GH_READ_TEST_COUNTER", version_counter)
+        .env("GH_READ_TEST_VERSION", env!("CARGO_PKG_VERSION"))
+        .output()
+        .expect("run installer with invalid installed version");
+
+    assert!(!output.status.success());
+    assert_eq!(
+        fs::read_to_string(&previous_binary).unwrap(),
+        "previous binary"
+    );
+    assert_eq!(
+        fs::read_to_string(&previous_skill_file).unwrap(),
+        "previous Skill"
+    );
+    assert_no_installer_work(&binary_root.join("bin"));
+    assert_no_installer_work(&skill_root);
+    assert!(directory_entries(&temporary_root).is_empty());
 }
 
 #[test]
@@ -173,4 +270,23 @@ fn directory_entries(directory: &Path) -> Vec<PathBuf> {
         .expect("read directory")
         .map(|entry| PathBuf::from(entry.expect("read directory entry").file_name()))
         .collect()
+}
+
+fn write_executable(path: &Path, contents: &str) {
+    fs::write(path, contents).expect("write executable");
+    let mut permissions = fs::metadata(path)
+        .expect("read executable metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("make file executable");
+}
+
+fn assert_no_installer_work(directory: &Path) {
+    assert!(
+        directory_entries(directory)
+            .iter()
+            .all(|entry| !entry.to_string_lossy().starts_with(".gh-read.install.")),
+        "installer work directory remains in {}",
+        directory.display()
+    );
 }
