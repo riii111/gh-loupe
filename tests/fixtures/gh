@@ -284,6 +284,37 @@ JSON
   fi
 fi
 
+if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments" ]; then
+  if [ "${GH_PR_COMMENTS_FAILURE:-}" = 1 ]; then
+    printf '[[{"node_id":"partial"}]]\n'
+    printf 'dial tcp: lookup api.github.com: no such host\n' >&2
+    exit 31
+  fi
+  case "${GH_PR_COMMENTS:-success}" in
+    empty)
+      printf '[[]]\n'
+      ;;
+    invalid-page)
+      printf '[{"node_id":"not-a-page"}]\n'
+      ;;
+    invalid-item)
+      printf '[[42]]\n'
+      ;;
+    missing-field)
+      printf '[[{"node_id":"IC_missing","html_url":"https://example.test/missing","user":{"login":"author"},"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]]\n'
+      ;;
+    wrong-type)
+      printf '[[{"node_id":"IC_wrong","html_url":42,"user":{"login":"author"},"body":"body","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]]\n'
+      ;;
+    success)
+      cat <<'JSON'
+[[{"node_id":"IC_z","html_url":"https://example.test/z","user":{"login":"later"},"body":"later","created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T01:00:00Z","pull_request_review_id":99,"diff_hunk":"not a conversation field"},{"node_id":"IC_b","html_url":"https://example.test/b","user":{"login":"author"},"body":"second by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T01:00:00Z"}],[{"node_id":"IC_a","html_url":"https://example.test/a","user":null,"body":"first by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T02:00:00Z"}]]
+JSON
+      ;;
+  esac
+  exit 0
+fi
+
 if [ "$1" = api ] && [[ "$*" == *issues/42/comments* ]]; then
   if [ "${GH_TEST_PAGINATION_FAILURE:-}" = 1 ]; then
     printf 'simulated pagination failure\n' >&2

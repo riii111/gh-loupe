@@ -53,6 +53,36 @@ pub fn issue(target: &Target) -> Result<Value> {
     Ok(issue)
 }
 
+pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
+    let endpoint = format!(
+        "repos/{}/issues/{}/comments",
+        target.repository, target.number
+    );
+    let pages = cli::json_runtime(
+        ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
+        None,
+        false,
+    )?;
+    let pages = pages.as_array().ok_or_else(|| {
+        Exit::invalid_response("GitHub returned an invalid paginated comments response")
+    })?;
+    let mut comments = Vec::new();
+    for page in pages {
+        let page = page
+            .as_array()
+            .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid comments page"))?;
+        for comment in page {
+            if !comment.is_object() {
+                return Err(Exit::invalid_response(
+                    "GitHub returned an invalid conversation comment",
+                ));
+            }
+            comments.push(comment.clone());
+        }
+    }
+    Ok(comments)
+}
+
 pub fn pages(endpoint: &str) -> Result<Vec<Value>> {
     let pages = cli::json(
         ["api", "--method", "GET", "--paginate", "--slurp", endpoint],
