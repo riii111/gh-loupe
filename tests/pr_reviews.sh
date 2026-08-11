@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-reviews.XXXXXX")"
@@ -20,10 +22,12 @@ assert_runtime_error() {
   local name="$1"
   local kind="$2"
   shift 2
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "$@" >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"
-  local status=$?
-  set -e
+  local status
+  if env PATH="$tmpdir/bin:$PATH" "$@" >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$name.stdout"
   test "$(wc -l <"$tmpdir/$name.stderr")" -eq 1
@@ -63,11 +67,12 @@ run_reviews empty GH_TEST_REVIEWS=empty "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
 jq -e '.data.reviews == []' "$tmpdir/empty.stdout" >/dev/null
 
-set +e
-env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 0 --repo riii111/dotfiles \
-  >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"
-argument_status=$?
-set -e
+if env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 0 --repo riii111/dotfiles \
+  >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"; then
+  argument_status=0
+else
+  argument_status=$?
+fi
 test "$argument_status" -eq 2
 test ! -s "$tmpdir/argument.stdout"
 grep -F 'gh-loupe pr reviews: error:' "$tmpdir/argument.stderr" >/dev/null
