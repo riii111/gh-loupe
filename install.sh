@@ -38,7 +38,7 @@ while (($# > 0)); do
   esac
 done
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 skill_source="$repository/skills/gh-read"
 [[ -f "$skill_source/SKILL.md" ]] || { printf '%s\n' 'error: bundled gh-read Skill is missing' >&2; exit 1; }
 
@@ -53,18 +53,18 @@ package_version=$(awk '
     exit
   }
 ' "$repository/Cargo.toml")
-minimum_version=$(sed -n 's/^Minimum gh-read version: //p' "$skill_source/SKILL.md")
+required_version=$(sed -n 's/^Required gh-read version: //p' "$skill_source/SKILL.md")
 
 [[ -n "$package_version" ]] || { printf '%s\n' 'error: Cargo package version could not be read' >&2; exit 1; }
-[[ "$minimum_version" == "$package_version" ]] || {
-  printf 'error: Skill minimum version %s does not match Cargo package version %s\n' \
-    "${minimum_version:-<missing>}" "$package_version" >&2
+[[ "$required_version" == "$package_version" ]] || {
+  printf 'error: Skill required version %s does not match Cargo package version %s\n' \
+    "${required_version:-<missing>}" "$package_version" >&2
   exit 1
 }
 
 mkdir -p "$binary_root/bin" "$skill_root"
-binary_root=$(CDPATH= cd -- "$binary_root" && pwd -P)
-skill_root=$(CDPATH= cd -- "$skill_root" && pwd -P)
+binary_root=$(CDPATH='' cd -- "$binary_root" && pwd -P)
+skill_root=$(CDPATH='' cd -- "$skill_root" && pwd -P)
 binary_destination="$binary_root/bin/gh-read"
 skill_destination="$skill_root/gh-read"
 
@@ -79,78 +79,22 @@ printf 'Skill destination: %s\n' "$skill_destination"
 cargo_work=
 binary_work=
 skill_work=
-binary_replaced=0
-binary_had_previous=0
-skill_replaced=0
-skill_had_previous=0
-committed=0
 
 cleanup() {
   status=$?
   trap - EXIT
   set +e
-  binary_keep_work=0
-  skill_keep_work=0
   cleanup_failed=0
-
-  if ((committed == 0)); then
-    if ((skill_replaced == 1)); then
-      if [[ -e "$skill_destination" || -L "$skill_destination" ]] &&
-        ! mv -- "$skill_destination" "$skill_work/failed"; then
-        if ((skill_had_previous == 1)); then
-          printf 'error: could not move the failed Skill; previous Skill retained at %s\n' \
-            "$skill_work/previous" >&2
-        else
-          printf 'error: could not remove the failed Skill at %s\n' "$skill_destination" >&2
-        fi
-        skill_keep_work=1
-        cleanup_failed=1
-      elif ((skill_had_previous == 1)); then
-        if mv -- "$skill_work/previous" "$skill_destination"; then
-          skill_had_previous=0
-        else
-          printf 'error: could not restore the previous Skill; recover it from %s\n' \
-            "$skill_work/previous" >&2
-          skill_keep_work=1
-          cleanup_failed=1
-        fi
-      fi
-    fi
-    if ((binary_replaced == 1)); then
-      if [[ -e "$binary_destination" || -L "$binary_destination" ]] &&
-        ! mv -- "$binary_destination" "$binary_work/failed"; then
-        if ((binary_had_previous == 1)); then
-          printf 'error: could not move the failed binary; previous binary retained at %s\n' \
-            "$binary_work/previous" >&2
-        else
-          printf 'error: could not remove the failed binary at %s\n' "$binary_destination" >&2
-        fi
-        binary_keep_work=1
-        cleanup_failed=1
-      elif ((binary_had_previous == 1)); then
-        if mv -- "$binary_work/previous" "$binary_destination"; then
-          binary_had_previous=0
-        else
-          printf 'error: could not restore the previous binary; recover it from %s\n' \
-            "$binary_work/previous" >&2
-          binary_keep_work=1
-          cleanup_failed=1
-        fi
-      fi
-    fi
-  fi
 
   if [[ -n "$cargo_work" ]] && ! rm -rf -- "$cargo_work"; then
     printf 'error: could not remove temporary directory %s\n' "$cargo_work" >&2
     cleanup_failed=1
   fi
-  if [[ -n "$binary_work" ]] && ((binary_keep_work == 0)) &&
-    ! rm -rf -- "$binary_work"; then
+  if [[ -n "$binary_work" ]] && ! rm -rf -- "$binary_work"; then
     printf 'error: could not remove temporary directory %s\n' "$binary_work" >&2
     cleanup_failed=1
   fi
-  if [[ -n "$skill_work" ]] && ((skill_keep_work == 0)) &&
-    ! rm -rf -- "$skill_work"; then
+  if [[ -n "$skill_work" ]] && ! rm -rf -- "$skill_work"; then
     printf 'error: could not remove temporary directory %s\n' "$skill_work" >&2
     cleanup_failed=1
   fi
@@ -173,42 +117,18 @@ CARGO_TARGET_DIR="$cargo_work/target" "$cargo_command" install \
   --root "$cargo_work/root" \
   --quiet
 
-install -m 755 "$cargo_work/root/bin/gh-read" "$binary_work/new"
-mkdir "$skill_work/new"
-cp -R "$skill_source/." "$skill_work/new/"
+install -m 755 "$cargo_work/root/bin/gh-read" "$binary_work/gh-read"
+mkdir "$skill_work/gh-read"
+cp -R "$skill_source/." "$skill_work/gh-read/"
 
-staged_version=$("$binary_work/new" --version)
+staged_version=$("$binary_work/gh-read" --version)
 [[ "$staged_version" == "gh-read $package_version" ]] || {
   printf 'error: staged binary version is %s, expected gh-read %s\n' "$staged_version" "$package_version" >&2
   exit 1
 }
-diff -qr "$skill_source" "$skill_work/new" >/dev/null
+diff -qr "$skill_source" "$skill_work/gh-read" >/dev/null
 
-if [[ -e "$binary_destination" || -L "$binary_destination" ]]; then
-  mv -- "$binary_destination" "$binary_work/previous"
-  binary_had_previous=1
-  binary_replaced=1
-fi
-mv -- "$binary_work/new" "$binary_destination"
-binary_replaced=1
-
-if [[ -e "$skill_destination" || -L "$skill_destination" ]]; then
-  mv -- "$skill_destination" "$skill_work/previous"
-  skill_had_previous=1
-  skill_replaced=1
-fi
-mv -- "$skill_work/new" "$skill_destination"
-skill_replaced=1
-
-installed_version=$("$binary_destination" --version)
-[[ "$installed_version" == "gh-read $package_version" ]] || {
-  printf 'error: installed binary version is %s, expected gh-read %s\n' "$installed_version" "$package_version" >&2
-  exit 1
-}
-diff -qr "$skill_source" "$skill_destination" >/dev/null || {
-  printf '%s\n' 'error: installed Skill does not match the bundled Skill' >&2
-  exit 1
-}
-
-committed=1
+mv -- "$binary_work/gh-read" "$binary_destination"
+rm -rf -- "$skill_destination"
+mv -- "$skill_work/gh-read" "$skill_destination"
 printf 'Installed gh-read %s and its bundled Skill.\n' "$package_version"

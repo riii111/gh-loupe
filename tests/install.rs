@@ -139,6 +139,92 @@ fn build_failure_preserves_existing_destinations() {
 }
 
 #[test]
+fn missing_bundled_skill_fails_before_installation() {
+    let source_repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temporary = TempDirectory::new("missing Skill");
+    let repository = temporary.0.join("repository");
+    let script = repository.join("install.sh");
+    fs::create_dir_all(&repository).expect("create repository");
+    fs::copy(source_repository.join("install.sh"), &script).expect("copy installer");
+
+    let binary_root = temporary.0.join("binary root");
+    let skill_root = temporary.0.join("skill root");
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--binary-root")
+        .arg(&binary_root)
+        .arg("--skill-root")
+        .arg(&skill_root)
+        .output()
+        .expect("run installer with missing Skill");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("bundled gh-read Skill is missing"));
+    assert!(!binary_root.exists());
+    assert!(!skill_root.exists());
+}
+
+#[test]
+fn version_mismatch_fails_before_installation() {
+    let source_repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temporary = TempDirectory::new("version mismatch");
+    let repository = temporary.0.join("repository");
+    let skill_path = repository.join("skills/gh-read/SKILL.md");
+    fs::create_dir_all(skill_path.parent().expect("Skill parent")).expect("create Skill");
+    fs::copy(
+        source_repository.join("install.sh"),
+        repository.join("install.sh"),
+    )
+    .expect("copy installer");
+    fs::copy(
+        source_repository.join("Cargo.toml"),
+        repository.join("Cargo.toml"),
+    )
+    .expect("copy Cargo manifest");
+    let skill = fs::read_to_string(source_repository.join("skills/gh-read/SKILL.md"))
+        .expect("read bundled Skill");
+    let skill = skill.replace(
+        &format!("Required gh-read version: {}", env!("CARGO_PKG_VERSION")),
+        "Required gh-read version: 9.9.9",
+    );
+    fs::write(&skill_path, skill).expect("write mismatched Skill");
+
+    let binary_root = temporary.0.join("binary root");
+    let skill_root = temporary.0.join("skill root");
+    let previous_binary = binary_root.join("bin/gh-read");
+    let previous_skill = skill_root.join("gh-read/previous.md");
+    fs::create_dir_all(previous_binary.parent().expect("binary parent"))
+        .expect("create binary root");
+    fs::create_dir_all(previous_skill.parent().expect("Skill destination parent"))
+        .expect("create Skill root");
+    fs::write(&previous_binary, "previous binary").expect("write previous binary");
+    fs::write(&previous_skill, "previous Skill").expect("write previous Skill");
+
+    let output = Command::new("bash")
+        .arg(repository.join("install.sh"))
+        .arg("--binary-root")
+        .arg(&binary_root)
+        .arg("--skill-root")
+        .arg(&skill_root)
+        .output()
+        .expect("run installer with mismatched version");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Skill required version 9.9.9 does not match Cargo package version")
+    );
+    assert_eq!(
+        fs::read_to_string(previous_binary).unwrap(),
+        "previous binary"
+    );
+    assert_eq!(
+        fs::read_to_string(previous_skill).unwrap(),
+        "previous Skill"
+    );
+}
+
+#[test]
 fn later_temporary_directory_failure_removes_earlier_one() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temporary = TempDirectory::new("temporary failure");
@@ -179,16 +265,15 @@ fn later_temporary_directory_failure_removes_earlier_one() {
 }
 
 #[test]
-fn post_install_verification_failure_restores_existing_destinations() {
+fn staging_validation_failure_preserves_existing_destinations() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let temporary = TempDirectory::new("rollback");
+    let temporary = TempDirectory::new("staging failure");
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
     let temporary_root = temporary.0.join("temporary files");
     let previous_binary = binary_root.join("bin/gh-read");
     let previous_skill_file = skill_root.join("gh-read/previous.md");
     let fake_cargo = temporary.0.join("fake cargo");
-    let version_counter = temporary.0.join("version counter");
     fs::create_dir_all(previous_binary.parent().expect("binary parent"))
         .expect("create binary root");
     fs::create_dir_all(previous_skill_file.parent().expect("Skill parent"))
@@ -198,7 +283,7 @@ fn post_install_verification_failure_restores_existing_destinations() {
     fs::write(&previous_skill_file, "previous Skill").expect("write previous Skill");
     write_executable(
         &fake_cargo,
-        "#!/usr/bin/env bash\nroot=\nwhile (($# > 0)); do\n  if [[ $1 == --root ]]; then\n    root=$2\n    shift 2\n  else\n    shift\n  fi\ndone\nmkdir -p \"$root/bin\"\ncat >\"$root/bin/gh-read\" <<'EOF'\n#!/usr/bin/env bash\ncount=$(cat \"$GH_READ_TEST_COUNTER\" 2>/dev/null || echo 0)\nprintf '%s' \"$((count + 1))\" >\"$GH_READ_TEST_COUNTER\"\nif ((count == 0)); then\n  printf 'gh-read %s\\n' \"$GH_READ_TEST_VERSION\"\nelse\n  printf '%s\\n' 'gh-read invalid'\nfi\nEOF\nchmod +x \"$root/bin/gh-read\"\n",
+        "#!/usr/bin/env bash\nroot=\nwhile (($# > 0)); do\n  if [[ $1 == --root ]]; then\n    root=$2\n    shift 2\n  else\n    shift\n  fi\ndone\nmkdir -p \"$root/bin\"\ncat >\"$root/bin/gh-read\" <<'EOF'\n#!/usr/bin/env bash\nprintf '%s\\n' 'gh-read invalid'\nEOF\nchmod +x \"$root/bin/gh-read\"\n",
     );
 
     let output = Command::new("bash")
@@ -209,10 +294,8 @@ fn post_install_verification_failure_restores_existing_destinations() {
         .arg(&skill_root)
         .env("CARGO", &fake_cargo)
         .env("TMPDIR", &temporary_root)
-        .env("GH_READ_TEST_COUNTER", version_counter)
-        .env("GH_READ_TEST_VERSION", env!("CARGO_PKG_VERSION"))
         .output()
-        .expect("run installer with invalid installed version");
+        .expect("run installer with invalid staged version");
 
     assert!(!output.status.success());
     assert_eq!(
@@ -226,15 +309,6 @@ fn post_install_verification_failure_restores_existing_destinations() {
     assert_no_installer_work(&binary_root.join("bin"));
     assert_no_installer_work(&skill_root);
     assert!(directory_entries(&temporary_root).is_empty());
-}
-
-#[test]
-fn skill_minimum_version_matches_the_cargo_package_version() {
-    let skill =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/gh-read/SKILL.md"))
-            .expect("read bundled Skill");
-    let marker = format!("Minimum gh-read version: {}", env!("CARGO_PKG_VERSION"));
-    assert!(skill.lines().any(|line| line == marker));
 }
 
 fn assert_directories_equal(expected: &Path, actual: &Path) {
