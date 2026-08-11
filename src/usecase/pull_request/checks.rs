@@ -260,10 +260,24 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
 }
 
 fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
+    let conclusion = match conclusion {
+        None => None,
+        Some(value) if is_known_check_run_conclusion(value) => Some(value),
+        Some(_) => {
+            return Err(invalid_response(
+                "GitHub returned an unknown check run conclusion",
+            ));
+        }
+    };
     if status == "COMPLETED" {
         return conclusion.map(str::to_owned).ok_or_else(|| {
             invalid_response("GitHub returned a completed check run without a conclusion")
         });
+    }
+    if conclusion.is_some() {
+        return Err(invalid_response(
+            "GitHub returned a non-completed check run with a conclusion",
+        ));
     }
     match status {
         "IN_PROGRESS" | "PENDING" | "QUEUED" | "REQUESTED" | "WAITING" => Ok(status.to_owned()),
@@ -271,6 +285,21 @@ fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<Str
             "GitHub returned an unknown check run status",
         )),
     }
+}
+
+fn is_known_check_run_conclusion(conclusion: &str) -> bool {
+    matches!(
+        conclusion,
+        "ACTION_REQUIRED"
+            | "CANCELLED"
+            | "FAILURE"
+            | "NEUTRAL"
+            | "SKIPPED"
+            | "STALE"
+            | "STARTUP_FAILURE"
+            | "SUCCESS"
+            | "TIMED_OUT"
+    )
 }
 
 fn check_run_workflow(object: &Map<String, Value>) -> Result<Option<&str>> {
@@ -914,6 +943,22 @@ mod tests {
 
         let error = validate_check_contexts(&[context], false)
             .expect_err("unknown conclusion must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
+        );
+    }
+
+    #[test]
+    fn unknown_non_completed_check_run_conclusion_fails_closed() {
+        let mut context = valid_check_run_context();
+        context["status"] = json!("IN_PROGRESS");
+        context["conclusion"] = json!("UNKNOWN");
+
+        let error = validate_check_contexts(&[context], false)
+            .expect_err("unknown pending conclusion must fail closed");
 
         assert!(
             error
