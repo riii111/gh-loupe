@@ -81,6 +81,11 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 
 type FieldValidator = fn(&Value) -> bool;
 
+pub(super) enum QueryResponse {
+    Data(Value),
+    Errors(Value),
+}
+
 pub fn pull_request_check_contexts(
     target: &Target,
     deadline: Instant,
@@ -190,6 +195,13 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
 }
 
 pub(super) fn query(document: &str, variables: &Value) -> Result<Value> {
+    match execute_query(document, variables, None)? {
+        QueryResponse::Data(data) => Ok(data),
+        QueryResponse::Errors(errors) => Err(graphql_error(&errors)),
+    }
+}
+
+pub(super) fn query_with_errors(document: &str, variables: &Value) -> Result<QueryResponse> {
     execute_query(document, variables, None)
 }
 
@@ -199,14 +211,17 @@ pub(super) fn query_with_deadline(
     deadline: Instant,
     timeout_message: &str,
 ) -> Result<Value> {
-    execute_query(document, variables, Some((deadline, timeout_message)))
+    match execute_query(document, variables, Some((deadline, timeout_message)))? {
+        QueryResponse::Data(data) => Ok(data),
+        QueryResponse::Errors(errors) => Err(graphql_error(&errors)),
+    }
 }
 
 fn execute_query(
     document: &str,
     variables: &Value,
     deadline: Option<(Instant, &str)>,
-) -> Result<Value> {
+) -> Result<QueryResponse> {
     let payload = serde_json::to_string(&json!({
         "query": document,
         "variables": variables,
@@ -221,27 +236,38 @@ fn execute_query(
         )?,
         None => cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload))?,
     };
-    graphql_data(&response)
+    graphql_response(&response)
 }
 
-fn graphql_data(response: &Value) -> Result<Value> {
+fn graphql_response(response: &Value) -> Result<QueryResponse> {
     if let Some(errors) = response.get("errors") {
-        let message = format!(
-            "GitHub GraphQL error: {}",
-            serde_json::to_string(errors).expect("GraphQL error values are always serializable")
-        );
-        return Err(Exit::runtime(&RuntimeError {
-            kind: ErrorKind::GitHubCli,
-            message,
-            retryable: false,
-            retry_after_seconds: None,
-        }));
+        return Ok(QueryResponse::Errors(errors.clone()));
     }
-    response.get("data").cloned().ok_or_else(|| {
-        Exit::runtime(&RuntimeError::invalid_response(
-            "GitHub returned a GraphQL response without data",
-        ))
+    response
+        .get("data")
+        .cloned()
+        .map(QueryResponse::Data)
+        .ok_or_else(|| {
+            Exit::runtime(&RuntimeError::invalid_response(
+                "GitHub returned a GraphQL response without data",
+            ))
+        })
+}
+
+pub(super) fn graphql_error(errors: &Value) -> Exit {
+    Exit::runtime(&RuntimeError {
+        kind: ErrorKind::GitHubCli,
+        message: graphql_error_message(errors),
+        retryable: false,
+        retry_after_seconds: None,
     })
+}
+
+pub(super) fn graphql_error_message(errors: &Value) -> String {
+    format!(
+        "GitHub GraphQL error: {}",
+        serde_json::to_string(errors).expect("GraphQL error values are always serializable")
+    )
 }
 
 fn validate_overview_fields(pull_request: &Value) -> Result<()> {

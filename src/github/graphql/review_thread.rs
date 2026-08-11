@@ -66,7 +66,7 @@ query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
 
 pub fn execute(target: &Target, review_thread_id: &str) -> Result<Value> {
     let variables = json!({"id": review_thread_id});
-    let data = super::query(REVIEW_THREAD_QUERY, &variables)?;
+    let data = query(REVIEW_THREAD_QUERY, &variables)?;
     let mut review_thread = review_thread_node(&data, review_thread_id)?.clone();
     verify_pull_request(&review_thread, target)?;
     review_thread
@@ -107,7 +107,7 @@ fn append_review_thread_comment_pages(
     let mut cursor_tracker = pagination::CursorTracker::default();
     while let Some(cursor) = cursor_tracker.next(&comments)? {
         let variables = json!({"id": review_thread_id, "cursor": cursor});
-        let data = super::query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
+        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
         let node = review_thread_node(&data, review_thread_id)?;
         let page = pagination::value_at(node, &["comments"])?;
         let new_nodes = pagination::nodes(page)?.to_vec();
@@ -158,4 +158,20 @@ fn review_thread_node<'a>(data: &'a Value, review_thread_id: &str) -> Result<&'a
 
 fn not_found(message: impl Into<String>) -> Exit {
     Exit::runtime(&RuntimeError::not_found(message))
+}
+
+fn query(document: &str, variables: &Value) -> Result<Value> {
+    match super::query_with_errors(document, variables)? {
+        super::QueryResponse::Data(data) => Ok(data),
+        super::QueryResponse::Errors(errors) => {
+            let message = super::graphql_error_message(&errors);
+            if message
+                .to_ascii_lowercase()
+                .contains("could not resolve to a node")
+            {
+                return Err(not_found(message));
+            }
+            Err(super::graphql_error(&errors))
+        }
+    }
 }

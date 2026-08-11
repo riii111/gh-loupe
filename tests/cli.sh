@@ -724,7 +724,7 @@ assert_runtime_failure thread-wrong-repo notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-repo -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_runtime_failure thread-missing notFound runtime \
   GH_TEST_THREAD_DETAIL=missing -- pr review-thread 42 thread-detail --repo riii111/dotfiles
-assert_runtime_failure thread-unresolved-node githubCli runtime \
+assert_runtime_failure thread-unresolved-node notFound runtime \
   GH_TEST_THREAD_DETAIL_NODE_ERROR=1 -- pr review-thread 42 missing --repo riii111/dotfiles
 assert_runtime_failure thread-wrong-type notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr review-thread 42 thread-detail --repo riii111/dotfiles
