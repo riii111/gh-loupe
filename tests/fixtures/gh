@@ -296,6 +296,38 @@ JSON
   fi
 fi
 
+if [ "$1" = api ] && [[ "$*" == *pulls/42/reviews* ]]; then
+  if [ "$*" != 'api --method GET --paginate --slurp repos/riii111/dotfiles/pulls/42/reviews?per_page=100' ]; then
+    printf 'unexpected reviews invocation: %s\n' "$*" >&2
+    exit 90
+  fi
+  case "${GH_TEST_REVIEWS:-success}" in
+    empty)
+      printf '[[]]\n'
+      ;;
+    invalid-page)
+      printf '[[{"node_id":"review-a"}],{}]\n'
+      ;;
+    invalid-field)
+      printf '[[{"node_id":"review-a","user":{"login":"alice"},"state":"APPROVED","body":null,"submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-a"}]]\n'
+      ;;
+    missing-field)
+      printf '[[{"node_id":"review-a","user":{"login":"alice"},"state":"APPROVED","body":"approved","submitted_at":"2026-01-01T00:00:00Z"}]]\n'
+      ;;
+    page-failure)
+      printf '[[{"node_id":"partial"}]]\n'
+      printf 'dial tcp: lookup api.github.com: no such host\n' >&2
+      exit 32
+      ;;
+    success)
+      cat <<'JSON'
+[[{"node_id":"review-z","user":{"login":"zoe"},"state":"COMMENTED","body":"comment","submitted_at":"2026-01-02T00:00:00Z","commit_id":"oid-z"},{"node_id":"review-b","user":{"login":"bob"},"state":"APPROVED","body":"approved","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-b"},{"node_id":"review-null-a","user":{"login":"pending"},"state":"PENDING","body":"pending","submitted_at":null,"commit_id":null},{"node_id":"review-null","user":null,"state":"DISMISSED","body":"","submitted_at":null,"commit_id":null}],[{"node_id":"review-a","user":{"login":"alice"},"state":"CHANGES_REQUESTED","body":"change","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-a"},{"node_id":"review-unknown","user":{"login":"future"},"state":"FUTURE_STATE","body":"future","submitted_at":"2025-12-31T00:00:00Z","commit_id":"oid-future"}]]
+JSON
+      ;;
+  esac
+  exit 0
+fi
+
 if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments" ]; then
   if [ "${GH_PR_COMMENTS_FAILURE:-}" = 1 ]; then
     printf '[[{"node_id":"partial"}]]\n'
