@@ -94,8 +94,8 @@ pub fn pull_request_check_contexts(
     let mut head_oid = None;
     let number = target
         .number
-        .parse::<u64>()
-        .expect("pull request number is validated");
+        .parse::<i32>()
+        .map_err(|_| invalid_graphql_response())?;
 
     loop {
         let variables = json!({

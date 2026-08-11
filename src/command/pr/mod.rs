@@ -5,8 +5,6 @@ mod reviews;
 mod thread;
 mod threads;
 
-use std::io::{self, Write};
-
 use crate::error::{Exit, Result};
 use crate::model::CheckDiagnosticsOptions;
 
@@ -45,7 +43,7 @@ where
         "threads" => threads::parse_args(program, remaining),
         "thread" => thread::parse_args(program, remaining),
         "-h" | "--help" => {
-            print_help(program);
+            print_help(program)?;
             std::process::exit(0);
         }
         _ => Err(pr_argument_error(
@@ -91,7 +89,7 @@ fn parse_subcommand_args<I, F>(
     mut values: I,
     positional_count: usize,
     argument_error: fn(&str, &str) -> Exit,
-    print_help: fn(&str),
+    print_help: fn(&str) -> Result<()>,
     mut parse_option: F,
 ) -> Result<SubcommandArgs>
 where
@@ -139,7 +137,7 @@ where
             }
             "--compact" => compact = true,
             "-h" | "--help" => {
-                print_help(program);
+                print_help(program)?;
                 std::process::exit(0);
             }
             option => {
@@ -197,10 +195,10 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
     }
 }
 
-fn print_help(program: &str) {
+fn print_help(program: &str) -> Result<()> {
     let text = format!(
         "{}\n\npositional arguments:\n  {{overview,comments,reviews,threads,thread,checks}}\n    overview  read pull request state and summaries\n    comments  read pull request conversation comments\n    reviews   list pull request review submissions\n    threads   list review thread summaries\n    thread    read one review thread\n    checks    read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
-    io::stdout().write_all(text.as_bytes()).expect("write help");
+    super::write_stdout(&text)
 }

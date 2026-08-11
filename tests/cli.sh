@@ -312,6 +312,17 @@ test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
 jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
 
+set +e
+env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" \
+  issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
+  >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"
+issue_status=$?
+set -e
+test "$issue_status" -eq 1
+test ! -s "$tmpdir/issue-conflicting-repo.stdout"
+test "$(cat "$tmpdir/issue-conflicting-repo.stderr")" = \
+  '--repo conflicts with the issue URL'
+
 run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
 jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
 
@@ -460,6 +471,21 @@ assert_argument_error comments-invalid-zero pr comments 0 --repo riii111/dotfile
 assert_argument_error comments-invalid-repo pr comments 42 --repo ../..
 assert_argument_error comments-conflicting-repo \
   pr comments https://github.com/riii111/dotfiles/pull/42 --repo other/repo
+
+huge_pr_calls="$tmpdir/huge-pr.calls"
+set +e
+GH_TEST_CALLS_FILE="$huge_pr_calls" PATH="$tmpdir/bin:$PATH" \
+  "$tmpdir/rust/gh-read" pr checks 2147483648 --repo riii111/dotfiles --failed-diagnostics \
+  >"$tmpdir/huge-pr.stdout" 2>"$tmpdir/huge-pr.stderr"
+huge_pr_status=$?
+set -e
+test "$huge_pr_status" -eq 2
+test ! -s "$tmpdir/huge-pr.stdout"
+test ! -e "$huge_pr_calls"
+grep -F 'GitHub GraphQL Int range' "$tmpdir/huge-pr.stderr" >/dev/null
+if grep -Eiq 'panicked|stack backtrace' "$tmpdir/huge-pr.stderr"; then
+  exit 1
+fi
 
 calls_file="$tmpdir/comments-invalid.calls"
 set +e
