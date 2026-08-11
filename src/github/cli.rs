@@ -510,6 +510,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn bounded_pipe_enforces_line_limit_for_unterminated_last_line() {
+        let mut input = String::new();
+        for line in 0..10_000 {
+            writeln!(input, "line-{line}").expect("write synthetic log");
+        }
+        input.pop();
+
+        let output = collect_bounded_pipe(Cursor::new(input), 64 * 1024, 200)
+            .expect("collect bounded output");
+        let retained_lines = newline_count(&output.bytes)
+            + u64::from(output.bytes.last().is_some_and(|byte| *byte != b'\n'));
+
+        assert_eq!(retained_lines, 200);
+    }
+
     #[cfg(unix)]
     #[test]
     fn broken_stdin_still_allows_child_status_and_stderr_to_be_collected() {

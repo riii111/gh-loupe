@@ -14,8 +14,52 @@ const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
 const UTF8_BOUNDARY_BYTES: usize = 4;
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
-const CHECK_RUN_MARKER: &str = "__checkRun";
-const CHECK_RUN_ID: &str = "__checkRunId";
+
+struct Check {
+    name: String,
+    state: String,
+    bucket: String,
+    link: Option<String>,
+    workflow: Option<String>,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+    check_run_id: Option<u64>,
+    annotations: Option<Vec<Value>>,
+    log: Option<Value>,
+}
+
+impl Check {
+    fn into_value(self) -> Value {
+        let mut value = Map::from_iter([
+            ("name".to_owned(), Value::String(self.name)),
+            ("state".to_owned(), Value::String(self.state)),
+            ("bucket".to_owned(), Value::String(self.bucket)),
+            (
+                "link".to_owned(),
+                self.link.map_or(Value::Null, Value::String),
+            ),
+            (
+                "workflow".to_owned(),
+                self.workflow.map_or(Value::Null, Value::String),
+            ),
+            (
+                "startedAt".to_owned(),
+                self.started_at.map_or(Value::Null, Value::String),
+            ),
+            (
+                "completedAt".to_owned(),
+                self.completed_at.map_or(Value::Null, Value::String),
+            ),
+        ]);
+        if let Some(annotations) = self.annotations {
+            value.insert("annotations".to_owned(), Value::Array(annotations));
+        }
+        if let Some(log) = self.log {
+            value.insert("log".to_owned(), log);
+        }
+        Value::Object(value)
+    }
+}
 
 pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions) -> Result<Value> {
     let diagnostics_requested = options.failed_diagnostics || options.include_failed_logs;
@@ -43,10 +87,6 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
             deadline,
             &timeout_message,
         )?;
-        for check in &mut checks {
-            check.remove(CHECK_RUN_MARKER);
-            check.remove(CHECK_RUN_ID);
-        }
         checks
     } else {
         let response = github::pull_request::checks(target, required)?;
@@ -61,12 +101,14 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         checks
     };
 
-    Ok(json!({ "checks": checks }))
+    Ok(json!({
+        "checks": checks.into_iter().map(Check::into_value).collect::<Vec<_>>()
+    }))
 }
 
 fn collect_diagnostics(
     target: &Target,
-    checks: &mut [Map<String, Value>],
+    checks: &mut [Check],
     options: CheckDiagnosticsOptions,
     head_oid: &str,
     deadline: Instant,
@@ -76,7 +118,7 @@ fn collect_diagnostics(
         .iter()
         .enumerate()
         .filter_map(|(index, check)| {
-            matches!(string_field(check, "bucket"), "fail" | "cancel").then_some(index)
+            matches!(check.bucket.as_str(), "fail" | "cancel").then_some(index)
         })
         .collect::<Vec<_>>();
     if failed.is_empty() {
@@ -88,19 +130,7 @@ fn collect_diagnostics(
     for index in failed {
         ensure_before_deadline(deadline, timeout_message)?;
         let check = &mut checks[index];
-        let is_check_run = check.get(CHECK_RUN_MARKER) == Some(&Value::Bool(true));
-        let check_run_id = if is_check_run {
-            Some(
-                check
-                    .get(CHECK_RUN_ID)
-                    .and_then(Value::as_u64)
-                    .ok_or_else(|| {
-                        Exit::invalid_response("GitHub returned an invalid Check Run ID")
-                    })?,
-            )
-        } else {
-            None
-        };
+        let check_run_id = check.check_run_id;
         let annotations = match check_run_id {
             Some(id) => validate_annotations(&github::pull_request::annotations(
                 target,
@@ -110,13 +140,13 @@ fn collect_diagnostics(
             )?)?,
             None => Vec::new(),
         };
-        check.insert("annotations".to_owned(), Value::Array(annotations));
+        check.annotations = Some(annotations);
 
         if options.include_failed_logs {
-            let log = if is_check_run {
+            let log = if check_run_id.is_some() {
                 collect_actions_log(
                     target,
-                    optional_string_field(check, "link"),
+                    check.link.as_deref(),
                     check_run_id,
                     head_oid,
                     LOG_BYTE_LIMIT,
@@ -127,7 +157,7 @@ fn collect_diagnostics(
             } else {
                 Value::Null
             };
-            check.insert("log".to_owned(), log);
+            check.log = Some(log);
         }
         progress.complete_one();
     }
@@ -135,41 +165,12 @@ fn collect_diagnostics(
     Ok(())
 }
 
-fn validate_check(value: &Value) -> Result<Map<String, Value>> {
+fn validate_check(value: &Value) -> Result<Check> {
     let object = value
         .as_object()
         .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid check entry"))?;
-    let check = Map::from_iter([
-        (
-            "name".to_owned(),
-            Value::String(required_cli_check_string(object, "name")?.to_owned()),
-        ),
-        (
-            "state".to_owned(),
-            Value::String(required_cli_check_string(object, "state")?.to_owned()),
-        ),
-        (
-            "bucket".to_owned(),
-            Value::String(required_cli_check_string(object, "bucket")?.to_owned()),
-        ),
-        (
-            "link".to_owned(),
-            cli_nullable_check_metadata(object, "link")?,
-        ),
-        (
-            "workflow".to_owned(),
-            cli_nullable_check_metadata(object, "workflow")?,
-        ),
-        (
-            "startedAt".to_owned(),
-            cli_nullable_check_metadata(object, "startedAt")?,
-        ),
-        (
-            "completedAt".to_owned(),
-            cli_nullable_check_metadata(object, "completedAt")?,
-        ),
-    ]);
-    match string_field(&check, "bucket") {
+    let bucket = required_cli_check_string(object, "bucket")?;
+    match bucket {
         "pass" | "fail" | "pending" | "skipping" | "cancel" => {}
         _ => {
             return Err(Exit::invalid_response(
@@ -177,10 +178,21 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
             ));
         }
     }
-    Ok(check)
+    Ok(Check {
+        name: required_cli_check_string(object, "name")?.to_owned(),
+        state: required_cli_check_string(object, "state")?.to_owned(),
+        bucket: bucket.to_owned(),
+        link: cli_check_metadata(object, "link")?,
+        workflow: cli_check_metadata(object, "workflow")?,
+        started_at: cli_check_metadata(object, "startedAt")?,
+        completed_at: cli_check_metadata(object, "completedAt")?,
+        check_run_id: None,
+        annotations: None,
+        log: None,
+    })
 }
 
-fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<String, Value>>> {
+fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Check>> {
     let mut checks = Vec::new();
 
     for value in values {
@@ -233,35 +245,18 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
             }
         };
         let bucket = check_bucket(&state)?;
-        checks.push(Map::from_iter([
-            ("name".to_owned(), Value::String(name.to_owned())),
-            ("state".to_owned(), Value::String(state)),
-            ("bucket".to_owned(), Value::String(bucket.to_owned())),
-            (
-                "link".to_owned(),
-                link.map_or(Value::Null, |value| Value::String(value.to_owned())),
-            ),
-            (
-                "workflow".to_owned(),
-                workflow.map_or(Value::Null, |value| Value::String(value.to_owned())),
-            ),
-            (
-                "startedAt".to_owned(),
-                started_at.map_or(Value::Null, |value| Value::String(value.to_owned())),
-            ),
-            (
-                "completedAt".to_owned(),
-                completed_at.map_or(Value::Null, |value| Value::String(value.to_owned())),
-            ),
-            (
-                CHECK_RUN_MARKER.to_owned(),
-                Value::Bool(check_run_id.is_some()),
-            ),
-            (
-                CHECK_RUN_ID.to_owned(),
-                check_run_id.map_or(Value::Null, Value::from),
-            ),
-        ]));
+        checks.push(Check {
+            name: name.to_owned(),
+            state,
+            bucket: bucket.to_owned(),
+            link: link.map(str::to_owned),
+            workflow: workflow.map(str::to_owned),
+            started_at: started_at.map(str::to_owned),
+            completed_at: completed_at.map(str::to_owned),
+            check_run_id,
+            annotations: None,
+            log: None,
+        });
     }
     Ok(checks)
 }
@@ -410,15 +405,11 @@ fn required_cli_check_string<'a>(object: &'a Map<String, Value>, field: &str) ->
     })
 }
 
-fn cli_nullable_check_metadata(object: &Map<String, Value>, field: &str) -> Result<Value> {
+fn cli_check_metadata(object: &Map<String, Value>, field: &str) -> Result<Option<String>> {
     let value = required_cli_check_string(object, field)?;
     let absent =
         value.is_empty() || matches!(field, "startedAt" | "completedAt") && value == ZERO_TIME;
-    Ok(if absent {
-        Value::Null
-    } else {
-        Value::String(value.to_owned())
-    })
+    Ok(if absent { None } else { Some(value.to_owned()) })
 }
 
 fn required_u64(object: &Map<String, Value>, field: &str, label: &str) -> Result<u64> {
@@ -569,12 +560,10 @@ fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
         ));
     }
     let byte_start = bytes.len().saturating_sub(LOG_BYTE_LIMIT);
-    let line_start = line_start(&bytes, total_newlines);
-    let mut start = byte_start.max(line_start);
+    let mut start = byte_start;
     let mut text = std::str::from_utf8(&bytes[start..]);
     while let Err(error) = text {
-        if line_start >= byte_start
-            || error.valid_up_to() != 0
+        if error.valid_up_to() != 0
             || start >= byte_start.saturating_add(UTF8_BOUNDARY_BYTES)
             || start >= bytes.len()
         {
@@ -596,69 +585,18 @@ fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
     }))
 }
 
-fn line_start(bytes: &[u8], total_newlines: u64) -> usize {
-    let Some(last_byte) = bytes.last() else {
-        return 0;
-    };
-    let total_lines = if *last_byte == b'\n' {
-        total_newlines
-    } else {
-        total_newlines.saturating_add(1)
-    };
-    let omitted_lines = total_lines.saturating_sub(LOG_LINE_LIMIT as u64);
-    if omitted_lines == 0 {
-        return 0;
-    }
-
-    let retained_newlines = newline_count(bytes);
-    let newlines_before = total_newlines.saturating_sub(retained_newlines);
-    if omitted_lines <= newlines_before {
-        return 0;
-    }
-    let target = omitted_lines - newlines_before;
-    let mut seen = 0_u64;
-    for (index, byte) in bytes.iter().enumerate() {
-        if *byte == b'\n' {
-            seen += 1;
-            if seen == target {
-                return index + 1;
-            }
-        }
-    }
-    bytes.len()
-}
-
 fn newline_count(bytes: &[u8]) -> u64 {
     bytes
         .iter()
         .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'))
 }
 
-fn string_field<'a>(object: &'a Map<String, Value>, field: &str) -> &'a str {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .expect("validated check fields are strings")
-}
-
-fn optional_string_field<'a>(object: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
-    object.get(field).and_then(Value::as_str)
-}
-
-fn compare_checks(left: &Map<String, Value>, right: &Map<String, Value>) -> std::cmp::Ordering {
-    string_field(left, "name")
-        .cmp(string_field(right, "name"))
-        .then_with(|| {
-            optional_string_field(left, "link").cmp(&optional_string_field(right, "link"))
-        })
-        .then_with(|| {
-            optional_string_field(right, "startedAt").cmp(&optional_string_field(left, "startedAt"))
-        })
-        .then_with(|| {
-            left.get(CHECK_RUN_ID)
-                .and_then(Value::as_u64)
-                .cmp(&right.get(CHECK_RUN_ID).and_then(Value::as_u64))
-        })
+fn compare_checks(left: &Check, right: &Check) -> std::cmp::Ordering {
+    left.name
+        .cmp(&right.name)
+        .then_with(|| left.link.cmp(&right.link))
+        .then_with(|| right.started_at.cmp(&left.started_at))
+        .then_with(|| left.check_run_id.cmp(&right.check_run_id))
 }
 
 fn ensure_before_deadline(deadline: Instant, timeout_message: &str) -> Result<()> {
@@ -866,6 +804,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn check_bucket_maps_all_known_states() {
+        assert_eq!(bucket("SUCCESS"), "pass");
+        assert_eq!(bucket("SKIPPED"), "skipping");
+        assert_eq!(bucket("NEUTRAL"), "skipping");
+        assert_eq!(bucket("ERROR"), "fail");
+        assert_eq!(bucket("FAILURE"), "fail");
+        assert_eq!(bucket("TIMED_OUT"), "fail");
+        assert_eq!(bucket("ACTION_REQUIRED"), "fail");
+        assert_eq!(bucket("CANCELLED"), "cancel");
+        assert_eq!(bucket("EXPECTED"), "pending");
+        assert_eq!(bucket("REQUESTED"), "pending");
+        assert_eq!(bucket("WAITING"), "pending");
+        assert_eq!(bucket("QUEUED"), "pending");
+        assert_eq!(bucket("PENDING"), "pending");
+        assert_eq!(bucket("IN_PROGRESS"), "pending");
+        assert_eq!(bucket("STALE"), "pending");
+        assert_eq!(bucket("STARTUP_FAILURE"), "pending");
+        assert!(check_bucket("UNKNOWN").is_err());
+    }
+
+    fn bucket(state: &str) -> &str {
+        check_bucket(state).unwrap_or_else(|_| panic!("known check state: {state}"))
+    }
+
+    #[test]
+    fn checks_with_the_same_name_are_ordered_by_latest_started_at() {
+        let mut older = valid_check_run_context();
+        older["databaseId"] = json!(100);
+        older["startedAt"] = json!("2026-08-11T10:00:00Z");
+        let mut newer = valid_check_run_context();
+        newer["databaseId"] = json!(101);
+        newer["startedAt"] = json!("2026-08-11T11:00:00Z");
+
+        let mut checks = validate_check_contexts(&[older, newer], false)
+            .unwrap_or_else(|_| panic!("valid check run contexts"));
+        checks.sort_by(compare_checks);
+
+        assert_eq!(
+            checks[0].started_at.as_deref(),
+            Some("2026-08-11T11:00:00Z")
+        );
+        assert_eq!(checks[0].check_run_id, Some(101));
+        assert_eq!(checks[1].check_run_id, Some(100));
+    }
+
+    #[test]
+    fn check_run_ids_are_preserved_for_duplicate_check_runs() {
+        let mut first = valid_check_run_context();
+        first["databaseId"] = json!(100);
+        let mut second = valid_check_run_context();
+        second["databaseId"] = json!(101);
+
+        let checks = validate_check_contexts(&[first, second], false)
+            .unwrap_or_else(|_| panic!("valid duplicate check run contexts"));
+
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0].check_run_id, Some(100));
+        assert_eq!(checks[1].check_run_id, Some(101));
+        assert!(checks.iter().all(|check| check.check_run_id.is_some()));
+    }
+
     fn valid_check_run_context() -> Value {
         json!({
             "__typename": "CheckRun",
@@ -890,8 +890,9 @@ mod tests {
         let mut context = valid_check_run_context();
         context["status"] = json!("BROKEN");
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("unknown status must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("unknown status must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
@@ -904,8 +905,9 @@ mod tests {
             .expect("context object")
             .remove("status");
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("missing status must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("missing status must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
@@ -918,8 +920,9 @@ mod tests {
             .expect("context object")
             .remove("conclusion");
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("missing conclusion must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("missing conclusion must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
@@ -929,8 +932,9 @@ mod tests {
         let mut context = valid_check_run_context();
         context["conclusion"] = json!("UNKNOWN");
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("unknown conclusion must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("unknown conclusion must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
@@ -941,8 +945,9 @@ mod tests {
         context["status"] = json!("IN_PROGRESS");
         context["conclusion"] = json!("UNKNOWN");
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("unknown pending conclusion must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("unknown pending conclusion must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
@@ -952,8 +957,9 @@ mod tests {
         let mut context = valid_check_run_context();
         context["checkSuite"] = json!({"workflowRun": {"workflow": null}});
 
-        let error = validate_check_contexts(&[context], false)
-            .expect_err("malformed workflow must fail closed");
+        let Err(error) = validate_check_contexts(&[context], false) else {
+            panic!("malformed workflow must fail closed");
+        };
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
