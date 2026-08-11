@@ -169,8 +169,8 @@ fn version_mismatch_fails_before_installation() {
     let source_repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temporary = TempDirectory::new("version mismatch");
     let repository = temporary.0.join("repository");
-    let skill_path = repository.join("skills/gh-read/SKILL.md");
-    fs::create_dir_all(skill_path.parent().expect("Skill parent")).expect("create Skill");
+    let skill_directory = repository.join("skills/gh-read");
+    fs::create_dir_all(&skill_directory).expect("create Skill");
     fs::copy(
         source_repository.join("install.sh"),
         repository.join("install.sh"),
@@ -181,13 +181,12 @@ fn version_mismatch_fails_before_installation() {
         repository.join("Cargo.toml"),
     )
     .expect("copy Cargo manifest");
-    let skill = fs::read_to_string(source_repository.join("skills/gh-read/SKILL.md"))
-        .expect("read bundled Skill");
-    let skill = skill.replace(
-        &format!("Required gh-read version: {}", env!("CARGO_PKG_VERSION")),
-        "Required gh-read version: 9.9.9",
-    );
-    fs::write(&skill_path, skill).expect("write mismatched Skill");
+    fs::copy(
+        source_repository.join("skills/gh-read/SKILL.md"),
+        skill_directory.join("SKILL.md"),
+    )
+    .expect("copy bundled Skill");
+    fs::write(skill_directory.join("VERSION"), "9.9.9\n").expect("write mismatched Skill version");
 
     let binary_root = temporary.0.join("binary root");
     let skill_root = temporary.0.join("skill root");
@@ -212,7 +211,7 @@ fn version_mismatch_fails_before_installation() {
     assert_eq!(output.status.code(), Some(1));
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("Skill required version 9.9.9 does not match Cargo package version")
+            .contains("Skill version 9.9.9 does not match Cargo package version")
     );
     assert_eq!(
         fs::read_to_string(previous_binary).unwrap(),

@@ -41,6 +41,7 @@ done
 repository=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 skill_source="$repository/skills/gh-read"
 [[ -f "$skill_source/SKILL.md" ]] || { printf '%s\n' 'error: bundled gh-read Skill is missing' >&2; exit 1; }
+[[ -f "$skill_source/VERSION" ]] || { printf '%s\n' 'error: bundled gh-read Skill version is missing' >&2; exit 1; }
 
 package_version=$(awk '
   /^\[workspace\.package\]$/ { in_workspace_package = 1; next }
@@ -53,12 +54,12 @@ package_version=$(awk '
     exit
   }
 ' "$repository/Cargo.toml")
-required_version=$(sed -n 's/^Required gh-read version: //p' "$skill_source/SKILL.md")
+skill_version=$(sed -n '1p' "$skill_source/VERSION")
 
 [[ -n "$package_version" ]] || { printf '%s\n' 'error: Cargo package version could not be read' >&2; exit 1; }
-[[ "$required_version" == "$package_version" ]] || {
-  printf 'error: Skill required version %s does not match Cargo package version %s\n' \
-    "${required_version:-<missing>}" "$package_version" >&2
+[[ "$skill_version" == "$package_version" ]] || {
+  printf 'error: Skill version %s does not match Cargo package version %s\n' \
+    "${skill_version:-<missing>}" "$package_version" >&2
   exit 1
 }
 

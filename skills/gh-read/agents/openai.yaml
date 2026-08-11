@@ -1,4 +1,4 @@
 interface:
   display_name: "GitHub Read"
-  short_description: "PR、Issue、CI、コメントを安全に読み取る。"
-  default_prompt: "$gh-readを使って、このPRまたはIssueのmetadata、CI、コメントを確認してください。"
+  short_description: "PR、Issue、CI、review情報を段階取得する。"
+  default_prompt: "$gh-readを使い、必要なGitHub情報だけを段階取得してください。"
