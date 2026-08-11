@@ -5,7 +5,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-read-cli.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
-export GH_READ_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-read") | .version')"
+GH_READ_PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "gh-read") | .version')"
+export GH_READ_PACKAGE_VERSION
 mkdir -p "$tmpdir/bin" "$tmpdir/rust"
 cp "$repo_root/tests/fixtures/gh" "$tmpdir/bin/gh"
 chmod +x "$tmpdir/bin/gh"
