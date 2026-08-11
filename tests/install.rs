@@ -225,6 +225,43 @@ fn version_mismatch_fails_before_installation() {
 }
 
 #[test]
+fn binary_directory_symlink_fails_before_replacement() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temporary = TempDirectory::new("binary directory symlink");
+    let binary_root = temporary.0.join("binary root");
+    let skill_root = temporary.0.join("skill root");
+    let binary_destination = binary_root.join("bin/gh-read");
+    let binary_target = temporary.0.join("binary target");
+    let fake_cargo = temporary.0.join("fake cargo");
+    fs::create_dir_all(binary_destination.parent().expect("binary parent"))
+        .expect("create binary root");
+    fs::create_dir(&binary_target).expect("create binary target");
+    std::os::unix::fs::symlink(&binary_target, &binary_destination)
+        .expect("create binary destination symlink");
+    write_executable(&fake_cargo, "#!/usr/bin/env bash\nexit 42\n");
+
+    let output = Command::new("bash")
+        .arg(repository.join("install.sh"))
+        .arg("--binary-root")
+        .arg(&binary_root)
+        .arg("--skill-root")
+        .arg(&skill_root)
+        .env("CARGO", &fake_cargo)
+        .output()
+        .expect("run installer with binary directory symlink");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("binary destination is a directory"));
+    assert!(
+        fs::symlink_metadata(&binary_destination)
+            .expect("read binary destination metadata")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(directory_entries(&binary_target).is_empty());
+}
+
+#[test]
 fn later_temporary_directory_failure_removes_earlier_one() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let temporary = TempDirectory::new("temporary failure");

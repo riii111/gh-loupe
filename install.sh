@@ -68,7 +68,7 @@ skill_root=$(CDPATH='' cd -- "$skill_root" && pwd -P)
 binary_destination="$binary_root/bin/gh-read"
 skill_destination="$skill_root/gh-read"
 
-if [[ -d "$binary_destination" && ! -L "$binary_destination" ]]; then
+if [[ -d "$binary_destination" ]]; then
   printf 'error: binary destination is a directory: %s\n' "$binary_destination" >&2
   exit 1
 fi
