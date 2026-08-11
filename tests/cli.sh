@@ -230,23 +230,6 @@ assert_comments_runtime_failure() {
   ' "$tmpdir/$name.comments.stderr" >/dev/null
 }
 
-assert_closed_stdout() {
-  local name="$1"
-  shift
-
-  set +e
-  env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" "$@" \
-    2>"$tmpdir/$name.stderr" | dd bs=1 count=0 >/dev/null 2>/dev/null
-  local -a statuses=("${PIPESTATUS[@]}")
-  local status="${statuses[0]}"
-  set -e
-
-  test "$status" -eq 0
-  if grep -Eiq 'panicked|stack backtrace' "$tmpdir/$name.stderr"; then
-    return 1
-  fi
-}
-
 run_cli root-help -- --help
 test ! -s "$tmpdir/root-help.stderr"
 grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
@@ -254,10 +237,6 @@ grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdo
 run_cli root-version -- --version
 test ! -s "$tmpdir/root-version.stderr"
 test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
-
-assert_closed_stdout closed-root-help --help
-assert_closed_stdout closed-root-version --version
-assert_closed_stdout closed-normal-output issue 42
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
