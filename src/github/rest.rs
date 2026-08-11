@@ -53,6 +53,41 @@ pub fn issue(target: &Target) -> Result<Value> {
     Ok(issue)
 }
 
+pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
+    let endpoint = format!(
+        "repos/{}/pulls/{}/reviews?per_page=100",
+        target.repository, target.number
+    );
+    let pages = cli::json_runtime(
+        ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
+        None,
+        false,
+    )?;
+    let pages = pages.as_array().ok_or_else(|| {
+        Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned an invalid reviews response"),
+            1,
+        )
+    })?;
+    if pages.iter().any(|page| !page.is_array()) {
+        return Err(Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned an invalid reviews page"),
+            1,
+        ));
+    }
+    let reviews = pages
+        .iter()
+        .flat_map(|page| page.as_array().expect("validated above").iter().cloned())
+        .collect::<Vec<_>>();
+    if reviews.iter().any(|review| !review.is_object()) {
+        return Err(Exit::runtime(
+            &RuntimeError::invalid_response("GitHub returned an invalid review"),
+            1,
+        ));
+    }
+    Ok(reviews)
+}
+
 pub fn pages(endpoint: &str) -> Result<Vec<Value>> {
     let pages = cli::json(
         ["api", "--method", "GET", "--paginate", "--slurp", endpoint],

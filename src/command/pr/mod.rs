@@ -1,5 +1,6 @@
 mod checks;
 mod overview;
+mod reviews;
 mod thread;
 mod threads;
 
@@ -14,6 +15,7 @@ pub(super) enum Action {
         diagnostics: CheckDiagnosticsOptions,
     },
     Overview,
+    Reviews,
     Thread {
         thread_id: String,
         include_diff_hunk: bool,
@@ -36,6 +38,7 @@ where
     match subcommand.as_str() {
         "checks" => checks::parse_args(program, remaining),
         "overview" => overview::parse_args(program, remaining),
+        "reviews" => reviews::parse_args(program, remaining),
         "threads" => threads::parse_args(program, remaining),
         "thread" => thread::parse_args(program, remaining),
         "-h" | "--help" => {
@@ -61,6 +64,7 @@ pub(super) fn execute(
             diagnostics,
         } => checks::execute(target, repo, program, required, diagnostics),
         Action::Overview => overview::execute(target, repo, program),
+        Action::Reviews => reviews::execute(target, repo, program),
         Action::Thread {
             thread_id,
             include_diff_hunk,
@@ -176,7 +180,7 @@ fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> 
 }
 
 fn usage(program: &str) -> String {
-    format!("usage: {program} pr [-h] {{overview,threads,thread,checks}} ...")
+    format!("usage: {program} pr [-h] {{overview,reviews,threads,thread,checks}} ...")
 }
 
 fn pr_argument_error(program: &str, message: &str) -> Exit {
@@ -191,7 +195,7 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) {
     let text = format!(
-        "{}\n\npositional arguments:\n  {{overview,threads,thread,checks}}\n    overview  read pull request state and summaries\n    threads   list review thread summaries\n    thread    read one review thread\n    checks    read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\npositional arguments:\n  {{overview,reviews,threads,thread,checks}}\n    overview  read pull request state and summaries\n    reviews   list pull request review submissions\n    threads   list review thread summaries\n    thread    read one review thread\n    checks    read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
     io::stdout().write_all(text.as_bytes()).expect("write help");

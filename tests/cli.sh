@@ -191,8 +191,8 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-read pr [-h] {overview,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview threads thread checks; do
+grep -F 'usage: gh-read pr [-h] {overview,reviews,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview reviews threads thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
 if grep -E '^    (full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
@@ -207,7 +207,7 @@ set -e
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-read pr [-h] {overview,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-read pr [-h] {overview,reviews,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
 grep -Fx 'gh-read pr: error: the following arguments are required: subcommand' "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource

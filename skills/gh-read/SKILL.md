@@ -20,12 +20,14 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 1. PR番号またはPR URLを確定し、`gh-read pr overview <番号またはURL> --compact`を実行する。
 別repoなら`--repo OWNER/REPO`を加える。
 2. `pullRequest`、required checkの集計、未解決review thread数から、review開始、CI待機、head更新への追従、追加取得のいずれが必要か判断する。
-3. threadの位置と件数が必要なら、`gh-read pr threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
-4. resolvedを含む一覧が必要な場合だけ`pr threads`へ`--include-resolved`を加える。既定は未解決threadだけである。
-5. 一覧で特定したthreadのcomment本文が必要なら、`gh-read pr thread <番号またはURL> <thread ID> --compact`を実行する。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
-6. 個別checkが必要なら`gh-read pr checks <番号またはURL> --compact`を使う。required checkだけなら`--required`を加える。
-7. 失敗checkを調べるときは`--failed-diagnostics`でannotationを取得し、annotationだけで不足する場合だけ`--include-failed-logs`で制限付きlogを追加する。必要に応じて`--timeout SECONDS`を変更する。
-8. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
+3. review decisionやreview本文が必要な場合だけ、`gh-read pr reviews <番号またはURL> --compact`でreview submissionを取得する。
+   このsubcommandには`gh-read 0.2.1`以降が必要である。
+4. threadの位置と件数が必要なら、`gh-read pr threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
+5. resolvedを含む一覧が必要な場合だけ`pr threads`へ`--include-resolved`を加える。既定は未解決threadだけである。
+6. 一覧で特定したthreadのcomment本文が必要なら、`gh-read pr thread <番号またはURL> <thread ID> --compact`を実行する。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
+7. 個別checkが必要なら`gh-read pr checks <番号またはURL> --compact`を使う。required checkだけなら`--required`を加える。
+8. 失敗checkを調べるときは`--failed-diagnostics`でannotationを取得し、annotationだけで不足する場合だけ`--include-failed-logs`で制限付きlogを追加する。必要に応じて`--timeout SECONDS`を変更する。
+9. Issueは`gh-read issue <番号またはURL> --compact`で取得し、`issue`と`comments`を確認する。
 
 ## Rules
 
@@ -35,6 +37,7 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 - `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`はマージ要件であるrequired checkの集計である。`checks.all`はrequiredかどうかを問わないCI全体の活動状況を`total`、`passed`、`pending`、`failed`で表す。required checkが0件でも`checks.all`を確認する。
 - `pr overview`の`data.checks`は`{"required": 数値, "passed": 数値, "pending": 数値, "failed": 数値, "all": {"total": 数値, "passed": 数値, "pending": 数値, "failed": 数値}}`の形である。既存のrequired側のfieldは維持される。
 - `pr overview`の`reviewThreads.unresolved`は未解決threadの総数である。
+- `pr reviews`はreview submissionだけを返す。conversation commentやreview thread commentとして扱わず、取得失敗を空配列と解釈しない。
 - `pr threads`の`data.threads`が空なら、未解決threadはないと報告する。
 - `pr thread`には`pr threads`が返したthread IDを渡し、取得失敗をcommentなしと解釈しない。
 - `pr thread`で`diffHunk`が必要な場合だけ`--include-diff-hunk`を指定する。
