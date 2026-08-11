@@ -58,17 +58,3 @@ Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必
 
 診断optionは`fail`と`cancel`だけを対象にします。annotationまたは存在するActions logを一つでも取得できなければ、部分結果をstdoutへ出さず構造化エラーで終了します。
 
-## 開発
-
-```bash
-nix develop
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-cargo build --workspace --release
-cargo audit
-cargo machete
-```
-
-Agent向けSkillの正本は[`skills/gh-read`](skills/gh-read)にあります。
-compatibility testは、Nix開発環境とCIでPython 3.13のreference実装を使用します。
