@@ -257,27 +257,39 @@ JSON
     record_overview_timing graphql
     if [ -n "${GH_OVERVIEW_TIMING_FILE:-}" ]; then
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
 JSON
       exit 0
     fi
-    if jq -e '.query | contains("title") or contains("body") or contains("comments") or contains("reviews")' <<<"$payload" >/dev/null; then
+    if ! jq -e '.query | contains("title") and ((contains("body") or contains("comments") or contains("reviews")) | not)' <<<"$payload" >/dev/null; then
       printf 'overview query requested content fields\n' >&2
       exit 89
     fi
+    if [ "${GH_OVERVIEW_TITLE:-}" = missing ]; then
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+      exit 0
+    fi
+    if [ "${GH_OVERVIEW_TITLE:-}" = invalid ]; then
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"number":42,"title":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+      exit 0
+    fi
     if [ "${GH_OVERVIEW_NULL_FIELDS:-}" = 1 ]; then
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":null,"isDraft":null,"headRefOid":null,"baseRefOid":null,"reviewDecision":null,"mergeStateStatus":null,"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":null,"isDraft":null,"headRefOid":null,"baseRefOid":null,"reviewDecision":null,"mergeStateStatus":null,"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
 JSON
       exit 0
     fi
     if jq -e '.variables.cursor == "overview-cursor"' <<<"$payload" >/dev/null; then
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
 JSON
     else
       cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true}],"pageInfo":{"hasNextPage":true,"endCursor":"overview-cursor"}}}}}}
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true}],"pageInfo":{"hasNextPage":true,"endCursor":"overview-cursor"}}}}}}
 JSON
     fi
     exit 0

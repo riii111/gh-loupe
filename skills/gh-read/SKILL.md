@@ -9,7 +9,7 @@ description: GitHubのPR/Issue metadata、head/base SHA、Draft/state、CI/check
 
 ## Version
 
-最初に`gh-read --version`を実行し、インストール済みbinaryが`0.4.0`以上であることを確認する。
+最初に`gh-read --version`を実行し、インストール済みbinaryが`0.5.0`以上であることを確認する。
 `--version`が`invalid choice`や`unrecognized arguments`で失敗する場合、インストール済みbinaryはこのoption追加前の版である。
 その場合は現在のsourceからbinaryを再インストールする。
 CLIとこのSkillの互換性に影響する変更では、将来の変更ごとにCargo package versionを上げる。
@@ -19,7 +19,7 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 
 1. PR番号またはPR URLを確定し、`gh-read pr overview <番号またはURL> --compact`を実行する。
 別repoなら`--repo OWNER/REPO`を加える。
-2. `pullRequest`、required checkの集計、未解決review thread数から、review開始、CI待機、head更新への追従、追加取得のいずれが必要か判断する。
+2. `pullRequest`のtitleと状態、required checkの集計、未解決review thread数から、review開始、CI待機、head更新への追従、追加取得のいずれが必要か判断する。
 3. Conversation tabのissue comment本文が必要な場合だけ、`gh-read pr comments <番号またはURL> --compact`を実行する。
 4. review decisionやreview本文が必要な場合だけ、`gh-read pr reviews <番号またはURL> --compact`でreview submissionを取得する。
 5. threadの位置と件数が必要なら、`gh-read pr threads <番号またはURL> --compact`で本文を含まない一覧を取得する。
@@ -35,6 +35,7 @@ CLIとこのSkillの互換性に影響する変更では、将来の変更ごと
 - `gh-read`にないraw endpoint、任意GraphQL、任意jq/queryで代用しない。
 - コメント取得中にreply、resolve、dismiss、editを行わない。
 - `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`はマージ要件であるrequired checkの集計である。`checks.all`はrequiredかどうかを問わないCI全体の活動状況を`total`、`passed`、`pending`、`failed`で表す。required checkが0件でも`checks.all`を確認する。
+- `pr overview`の`data.pullRequest.title`は文字列である。欠落や型違いは`invalidResponse`であり、空文字などへ置き換えない。
 - `pr overview`の`data.checks`は`{"required": 数値, "passed": 数値, "pending": 数値, "failed": 数値, "all": {"total": 数値, "passed": 数値, "pending": 数値, "failed": 数値}}`の形である。既存のrequired側のfieldは維持される。
 - `pr overview`の`reviewThreads.unresolved`は未解決threadの総数である。
 - `pr reviews`はreview submissionだけを返す。conversation commentやreview thread commentとして扱わず、取得失敗を空配列と解釈しない。

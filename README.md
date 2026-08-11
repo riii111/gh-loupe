@@ -2,7 +2,7 @@
 
 `gh-read`は、GitHub CLI (`gh`)を子processとして使い、Pull RequestとIssueの定型的な読み取り結果をJSONで返すCLIです。Pull Requestの状態、checks、review submission、conversation comment、review threadと、Issueのmetadata、commentsを取得できます。
 
-`pr overview`はPull Request本文、comment、review本文、thread本文、個別checkを取得せず、review開始やCI待機の判断に必要な状態だけを返します。
+`pr overview`はPull Requestのtitleと状態を返します。本文、comment、review本文、thread本文、個別checkは取得しません。
 
 ## なぜ固定queryなのか
 
@@ -56,6 +56,7 @@ gh-read issue 456 --repo OWNER/REPO --compact
 `pr thread`は`pr threads`が返したGraphQL node IDを指定し、対象Pull Requestに属する単一threadのmetadataと全commentを返します。commentは作成日時、同時刻ではIDの昇順です。`diffHunk`は`--include-diff-hunk`を指定した場合だけ含めます。別のPull Requestやrepositoryのthread、存在しないnode、異なる型のnodeは`notFound`になります。
 
 Pull Requestの確認は`pr overview`から始め、Conversation tabの本文が必要な場合だけ`pr comments`、review decisionやreview本文が必要な場合だけ`pr reviews`を取得します。threadの位置が必要なら`pr threads`、本文が必要な1件だけを`pr thread`で取得します。
+`pr overview`の`pullRequest.title`は文字列です。GitHubの応答から欠落している場合や文字列でない場合は、部分結果を返さず`invalidResponse`になります。
 `pr overview`の`checks.required`、`checks.passed`、`checks.pending`、`checks.failed`は、マージ要件であるrequired checkだけを排他的に集計します。`checks.all`はCI全体の活動状況を表す追加サマリーで、`total`、`passed`、`pending`、`failed`を持ちます。例えば形は次のとおりです。
 
 ```json
