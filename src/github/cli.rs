@@ -8,34 +8,6 @@ use serde_json::Value;
 
 use crate::error::{ErrorKind, Exit, Result, RuntimeError};
 
-pub(super) fn json<I, S>(args: I, payload: Option<&str>, allow_nonzero_json: bool) -> Result<Value>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let mut command = Command::new("gh");
-    command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if payload.is_some() {
-        command.stdin(Stdio::piped());
-    }
-    let output =
-        execute(command, payload, None).map_err(|error| Exit::message(error.to_string()))?;
-    let code = output.status.code().unwrap_or(1);
-    if !output.status.success() && !allow_nonzero_json {
-        return Err(Exit::child(code, &output.stderr));
-    }
-    match serde_json::from_slice(&output.stdout) {
-        Ok(response) => Ok(response),
-        Err(_error) if !output.status.success() => Err(Exit::child(code, &output.stderr)),
-        Err(error) => Err(Exit::message(format!(
-            "GitHub returned invalid JSON: {error}"
-        ))),
-    }
-}
-
 pub(super) fn json_runtime<I, S>(
     args: I,
     payload: Option<&str>,

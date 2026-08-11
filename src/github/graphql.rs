@@ -7,6 +7,7 @@ use crate::model::Target;
 
 use super::cli;
 
+mod pagination;
 pub mod thread;
 pub mod threads;
 
@@ -89,20 +90,20 @@ pub fn pull_request_check_contexts(
         .repository
         .split_once('/')
         .expect("repository is validated");
-    let mut cursor = Value::Null;
+    let mut cursor_tracker = pagination::CursorTracker::default();
     let mut contexts = Vec::new();
     let mut head_oid = None;
     let number = target
         .number
-        .parse::<u64>()
-        .expect("pull request number is validated");
+        .parse::<i32>()
+        .map_err(|_| invalid_graphql_response())?;
 
     loop {
         let variables = json!({
             "owner": owner,
             "name": name,
             "number": number,
-            "cursor": cursor,
+            "cursor": cursor_tracker.cursor(),
         });
         let data = query_runtime_with_deadline(
             CHECK_CONTEXTS_QUERY,
@@ -110,7 +111,7 @@ pub fn pull_request_check_contexts(
             deadline,
             timeout_message,
         )?;
-        let pull_request = value_at_runtime(&data, &["repository", "pullRequest"])?;
+        let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             return Err(Exit::runtime(
                 &RuntimeError::not_found(format!(
@@ -120,14 +121,11 @@ pub fn pull_request_check_contexts(
                 1,
             ));
         }
-        let nodes = value_at_runtime(pull_request, &["commits", "nodes"])?
-            .as_array()
-            .ok_or_else(invalid_graphql_response)?;
-        let commit = nodes
+        let commit = pagination::nodes(pagination::value_at(pull_request, &["commits"])?)?
             .first()
             .and_then(|node| node.get("commit"))
             .ok_or_else(invalid_graphql_response)?;
-        let current_oid = value_at_runtime(commit, &["oid"])?
+        let current_oid = pagination::value_at(commit, &["oid"])?
             .as_str()
             .ok_or_else(invalid_graphql_response)?;
         if head_oid
@@ -137,28 +135,14 @@ pub fn pull_request_check_contexts(
             return Err(invalid_graphql_response());
         }
         head_oid = Some(current_oid.to_owned());
-        let rollup = value_at_runtime(commit, &["statusCheckRollup"])?;
+        let rollup = pagination::value_at(commit, &["statusCheckRollup"])?;
         if rollup.is_null() {
             return Ok((current_oid.to_owned(), contexts));
         }
-        let connection = value_at_runtime(rollup, &["contexts"])?;
-        contexts.extend(
-            value_at_runtime(connection, &["nodes"])?
-                .as_array()
-                .ok_or_else(invalid_graphql_response)?
-                .iter()
-                .cloned(),
-        );
-        let page_info = value_at_runtime(connection, &["pageInfo"])?;
-        let has_next_page = value_at_runtime(page_info, &["hasNextPage"])?
-            .as_bool()
-            .ok_or_else(invalid_graphql_response)?;
-        if !has_next_page {
+        let connection = pagination::value_at(rollup, &["contexts"])?;
+        contexts.extend(pagination::nodes(connection)?.iter().cloned());
+        if cursor_tracker.next(connection)?.is_none() {
             return Ok((current_oid.to_owned(), contexts));
-        }
-        cursor = value_at_runtime(page_info, &["endCursor"])?.clone();
-        if !cursor.is_string() {
-            return Err(invalid_graphql_response());
         }
     }
 }
@@ -168,26 +152,20 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
         .repository
         .split_once('/')
         .expect("repository is validated");
-    let mut cursor = Value::Null;
+    let mut cursor_tracker = pagination::CursorTracker::default();
     let mut unresolved = 0;
 
     let pull_request = loop {
         let owner = serde_json::to_string(owner).expect("serializing a string cannot fail");
         let name = serde_json::to_string(name).expect("serializing a string cannot fail");
-        let cursor_json = serde_json::to_string(&cursor).map_err(|error| {
-            Exit::runtime(
-                &RuntimeError::invalid_response(format!(
-                    "failed to encode GitHub request: {error}"
-                )),
-                1,
-            )
-        })?;
+        let cursor_json = serde_json::to_string(&cursor_tracker.cursor())
+            .expect("GraphQL cursor variables are always serializable");
         let variables = format!(
             r#"{{"owner":{owner},"name":{name},"number":{},"cursor":{cursor_json}}}"#,
             target.number
         );
         let data = query_runtime(OVERVIEW_QUERY, &variables)?;
-        let current = value_at_runtime(&data, &["repository", "pullRequest"])?;
+        let current = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if current.is_null() {
             return Err(Exit::runtime(
                 &RuntimeError::not_found(format!(
@@ -202,9 +180,7 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
             .as_object_mut()
             .and_then(|current| current.shift_remove("reviewThreads"))
             .ok_or_else(invalid_graphql_response)?;
-        let nodes = value_at_runtime(&connection, &["nodes"])?
-            .as_array()
-            .ok_or_else(invalid_graphql_response)?;
+        let nodes = pagination::nodes(&connection)?;
         for node in nodes {
             let is_resolved = node
                 .get("isResolved")
@@ -212,17 +188,9 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
                 .ok_or_else(invalid_graphql_response)?;
             unresolved += usize::from(!is_resolved);
         }
-        let page_info = value_at_runtime(&connection, &["pageInfo"])?;
-        let has_next_page = value_at_runtime(page_info, &["hasNextPage"])?
-            .as_bool()
-            .ok_or_else(invalid_graphql_response)?;
-        if !has_next_page {
+        if cursor_tracker.next(&connection)?.is_none() {
             validate_overview_fields(&current)?;
             break current;
-        }
-        cursor = value_at_runtime(page_info, &["endCursor"])?.clone();
-        if !cursor.is_string() {
-            return Err(invalid_graphql_response());
         }
     };
 
@@ -310,12 +278,6 @@ fn string_or_null(value: &Value) -> bool {
 
 fn bool_or_null(value: &Value) -> bool {
     value.is_boolean() || value.is_null()
-}
-
-fn value_at_runtime<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
-    path.iter().try_fold(value, |value, key| {
-        value.get(*key).ok_or_else(invalid_graphql_response)
-    })
 }
 
 fn invalid_graphql_response() -> Exit {

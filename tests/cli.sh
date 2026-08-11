@@ -230,6 +230,35 @@ assert_comments_runtime_failure() {
   ' "$tmpdir/$name.comments.stderr" >/dev/null
 }
 
+assert_issue_runtime_failure() {
+  local name="$1"
+  local expected_kind="$2"
+  shift 2
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.issue.stdout" 2>"$tmpdir/$name.issue.stderr"
+  local status=$?
+  set -e
+
+  test "$status" -ne 0
+  test ! -s "$tmpdir/$name.issue.stdout"
+  test "$(wc -l <"$tmpdir/$name.issue.stderr")" -eq 1
+  jq -e --arg kind "$expected_kind" '
+    .schemaVersion == 1 and
+    .error.kind == $kind and
+    (.error.message | type == "string") and
+    (.error.retryable | type == "boolean") and
+    (.error.retryAfterSeconds == null)
+  ' "$tmpdir/$name.issue.stderr" >/dev/null
+}
+
 run_cli root-help -- --help
 test ! -s "$tmpdir/root-help.stderr"
 grep -F 'usage: gh-read [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
@@ -264,39 +293,67 @@ assert_argument_error pr-missing-subcommand pr
 assert_argument_error issue-missing-target issue
 assert_argument_error issue-pr-only-option issue 42 --include-resolved
 
-run_cli issue-default -- issue 42
+issue_calls_file="$tmpdir/issue.calls"
+run_cli issue-default "GH_TEST_CALLS_FILE=$issue_calls_file" -- issue 42
 test ! -s "$tmpdir/issue-default.stderr"
 jq -e '. == {
   "issue":{"number":42,"title":"Issue","state":"open","body":"body"},
   "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
 }' "$tmpdir/issue-default.stdout" >/dev/null
+test "$(sed -n '1p' "$issue_calls_file")" = 'repo view --json nameWithOwner'
+test "$(sed -n '2p' "$issue_calls_file")" = \
+  'api repos/riii111/dotfiles/issues/42'
+test "$(sed -n '3p' "$issue_calls_file")" = \
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
+test "$(wc -l <"$issue_calls_file")" -eq 3
 
 run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
 jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
 
-run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
-jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
-
 set +e
-env PATH="$tmpdir/bin:$PATH" GH_TEST_MISSING_ISSUE=1 "$tmpdir/rust/gh-read" issue 42 \
-  >"$tmpdir/issue-missing.stdout" 2>"$tmpdir/issue-missing.stderr"
-issue_status=$?
-set -e
-test "$issue_status" -eq 44
-test ! -s "$tmpdir/issue-missing.stdout"
-test "$(cat "$tmpdir/issue-missing.stderr")" = 'missing issue'
-
-set +e
-env PATH="$tmpdir/bin:$PATH" GH_TEST_INVALID_JSON=1 "$tmpdir/rust/gh-read" issue 42 \
-  >"$tmpdir/issue-invalid-json.stdout" 2>"$tmpdir/issue-invalid-json.stderr"
+env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-read" \
+  issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
+  >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"
 issue_status=$?
 set -e
 test "$issue_status" -eq 1
-test ! -s "$tmpdir/issue-invalid-json.stdout"
-test "$(cat "$tmpdir/issue-invalid-json.stderr")" = \
-  'GitHub returned invalid JSON: expected ident at line 1 column 2'
+test ! -s "$tmpdir/issue-conflicting-repo.stdout"
+test "$(cat "$tmpdir/issue-conflicting-repo.stderr")" = \
+  '--repo conflicts with the issue URL'
+
+run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
+jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
+
+assert_issue_runtime_failure issue-missing notFound \
+  GH_TEST_MISSING_ISSUE=1 -- issue 42
+assert_issue_runtime_failure issue-gh-failure githubCli \
+  GH_TEST_FAILURE=1 -- issue 42 --repo riii111/dotfiles
+assert_issue_runtime_failure issue-invalid-json invalidResponse \
+  GH_TEST_INVALID_JSON=1 -- issue 42 --repo riii111/dotfiles
+assert_issue_runtime_failure issue-invalid-page invalidResponse \
+  GH_TEST_ISSUE_COMMENTS=invalid-page -- issue 42 --repo riii111/dotfiles
+assert_issue_runtime_failure issue-invalid-item invalidResponse \
+  GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
+assert_issue_runtime_failure issue-missing-repository-metadata invalidResponse \
+  GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
+
+set +e
+env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-read" issue 42 --repo riii111/dotfiles \
+  >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"
+issue_status=$?
+set -e
+test "$issue_status" -ne 0
+test ! -s "$tmpdir/issue-spawn.stdout"
+test "$(wc -l <"$tmpdir/issue-spawn.stderr")" -eq 1
+jq -e '
+  .schemaVersion == 1 and
+  .error.kind == "githubCli" and
+  (.error.message | type == "string") and
+  .error.retryable == false and
+  .error.retryAfterSeconds == null
+' "$tmpdir/issue-spawn.stderr" >/dev/null
 
 run_overview overview-default -- pr overview 42 --repo riii111/dotfiles
 jq -e '
@@ -324,6 +381,19 @@ jq -e '
   ([.. | objects | keys[]] | any(. == "body" or . == "comments" or . == "reviews" or . == "bucket" or . == "name") | not)
 ' "$tmpdir/overview-default.overview.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -gt 1
+
+for mode in repeat cycle missing empty wrong-type; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    empty|missing|wrong-type) expected_calls=1 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/overview-pagination-$mode-calls"
+  assert_overview_runtime_error "overview-pagination-$mode" invalidResponse false \
+    GH_TEST_CALLS_FILE="$calls_file" GH_OVERVIEW_PAGINATION="$mode" -- \
+    pr overview 42 --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
 
 timing_file="$tmpdir/overview-timing"
 run_overview overview-concurrent "GH_OVERVIEW_TIMING_FILE=$timing_file" GH_OVERVIEW_SLEEP=1 -- \
@@ -414,6 +484,21 @@ assert_argument_error comments-invalid-zero pr comments 0 --repo riii111/dotfile
 assert_argument_error comments-invalid-repo pr comments 42 --repo ../..
 assert_argument_error comments-conflicting-repo \
   pr comments https://github.com/riii111/dotfiles/pull/42 --repo other/repo
+
+huge_pr_calls="$tmpdir/huge-pr.calls"
+set +e
+GH_TEST_CALLS_FILE="$huge_pr_calls" PATH="$tmpdir/bin:$PATH" \
+  "$tmpdir/rust/gh-read" pr checks 2147483648 --repo riii111/dotfiles --failed-diagnostics \
+  >"$tmpdir/huge-pr.stdout" 2>"$tmpdir/huge-pr.stderr"
+huge_pr_status=$?
+set -e
+test "$huge_pr_status" -eq 2
+test ! -s "$tmpdir/huge-pr.stdout"
+test ! -e "$huge_pr_calls"
+grep -F 'GitHub GraphQL Int range' "$tmpdir/huge-pr.stderr" >/dev/null
+if grep -Eiq 'panicked|stack backtrace' "$tmpdir/huge-pr.stderr"; then
+  exit 1
+fi
 
 calls_file="$tmpdir/comments-invalid.calls"
 set +e
@@ -553,6 +638,19 @@ jq -e '
 ' "$tmpdir/threads-including-resolved.threads.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/threads-including-resolved.threads.stdout")" -eq 1
 
+for mode in repeat cycle missing empty wrong-type; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    empty|missing|wrong-type) expected_calls=1 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/threads-pagination-$mode-calls"
+  assert_threads_runtime_failure "threads-pagination-$mode" invalidResponse \
+    GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_PAGINATION="$mode" -- \
+    pr threads 42 --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
+
 assert_threads_runtime_failure threads-thread-page-failure network \
   GH_TEST_THREAD_PAGE_FAILURE=1 -- pr threads 42 --repo riii111/dotfiles
 assert_threads_runtime_failure threads-comment-page-failure githubCli \
@@ -640,3 +738,15 @@ assert_threads_runtime_failure thread-wrong-type notFound \
   GH_TEST_THREAD_DETAIL=wrong-type -- pr thread 42 thread-detail --repo riii111/dotfiles
 assert_threads_runtime_failure thread-comment-page-failure githubCli \
   GH_TEST_THREAD_DETAIL_PAGE_FAILURE=1 -- pr thread 42 thread-detail --repo riii111/dotfiles
+
+for mode in repeat cycle; do
+  case "$mode" in
+    repeat) expected_calls=2 ;;
+    cycle) expected_calls=3 ;;
+  esac
+  calls_file="$tmpdir/thread-detail-pagination-$mode-calls"
+  assert_threads_runtime_failure "thread-detail-pagination-$mode" invalidResponse \
+    GH_TEST_CALLS_FILE="$calls_file" GH_THREAD_DETAIL_PAGINATION="$mode" -- \
+    pr thread 42 thread-detail --repo riii111/dotfiles
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done

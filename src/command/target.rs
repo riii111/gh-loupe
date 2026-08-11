@@ -24,7 +24,10 @@ fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Res
             .as_ref()
             .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
         {
-            return Err(Exit::message("--repo conflicts with the pull request URL"));
+            let resource_name = resource_url_name(resource);
+            return Err(Exit::message(format!(
+                "--repo conflicts with the {resource_name} URL"
+            )));
         }
         if let Some(number) = positive_number(number) {
             return Ok(Target {
@@ -47,7 +50,7 @@ fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Res
 fn resolve_repo(repo: Option<String>) -> Result<String> {
     let repo = match repo {
         Some(repo) => repo,
-        None => github::current_repository()?,
+        None => github::current_repository_runtime()?,
     };
     if !is_repo(&repo) {
         return Err(Exit::message("--repo must use OWNER/REPO format"));
@@ -77,10 +80,10 @@ pub(super) fn resolve_pr_subcommand_target(
                 "--repo conflicts with the pull request URL",
             ));
         }
-        let Some(number) = positive_number(number) else {
+        let Some(number) = positive_pr_number(number) else {
             return Err(argument_error(
                 program,
-                "pr must be a positive number or GitHub pr URL",
+                "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
             ));
         };
         return Ok(Target {
@@ -89,10 +92,10 @@ pub(super) fn resolve_pr_subcommand_target(
         });
     }
 
-    let Some(number) = positive_number(target) else {
+    let Some(number) = positive_pr_number(target) else {
         return Err(argument_error(
             program,
-            "pr must be a positive number or GitHub pr URL",
+            "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
         ));
     };
     let repository = match repo {
@@ -134,6 +137,11 @@ fn positive_number(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+fn positive_pr_number(value: &str) -> Option<String> {
+    let value = positive_number(value)?;
+    value.parse::<i32>().ok().map(|_| value)
+}
+
 fn is_repo(value: &str) -> bool {
     let mut segments = value.split('/');
     let Some(owner) = segments.next() else {
@@ -156,6 +164,13 @@ fn is_repo(value: &str) -> bool {
 const fn resource_name(resource: Resource) -> &'static str {
     match resource {
         Resource::Pr => "pr",
+        Resource::Issue => "issue",
+    }
+}
+
+const fn resource_url_name(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Pr => "pull request",
         Resource::Issue => "issue",
     }
 }

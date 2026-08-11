@@ -52,7 +52,7 @@
         {
           default = rustPlatform.buildRustPackage {
             pname = "gh-read";
-            version = "0.5.0";
+            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
             src = self;
             cargoLock.lockFile = ./Cargo.lock;

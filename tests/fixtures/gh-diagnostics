@@ -9,6 +9,39 @@ if [ "$1 $2" = "api graphql" ]; then
   payload="$(cat)"
   test -n "$payload"
   case "${GH_DIAGNOSTICS_MODE:-normal}" in
+    head-oid-changed)
+      cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
+      if [ "$cursor" = initial ]; then
+        oid=head
+        page_info='{"hasNextPage":true,"endCursor":"head-change-cursor"}'
+      else
+        oid=changed-head
+        page_info='{"hasNextPage":false,"endCursor":null}'
+      fi
+      cat <<JSON
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"$oid","statusCheckRollup":{"contexts":{"nodes":[],"pageInfo":$page_info}}}}]}}}}}
+JSON
+      ;;
+    pagination-repeat|pagination-cycle|pagination-missing|pagination-empty|pagination-wrong-type)
+      cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
+      case "${GH_DIAGNOSTICS_MODE}" in
+        pagination-repeat) page_info='{"hasNextPage":true,"endCursor":"diagnostics-repeat-cursor"}' ;;
+        pagination-cycle)
+          case "$cursor" in
+            initial) next_cursor=diagnostics-cycle-a ;;
+            diagnostics-cycle-a) next_cursor=diagnostics-cycle-b ;;
+            diagnostics-cycle-b) next_cursor=diagnostics-cycle-a ;;
+          esac
+          page_info="{\"hasNextPage\":true,\"endCursor\":\"$next_cursor\"}"
+          ;;
+        pagination-missing) page_info='{"hasNextPage":true}' ;;
+        pagination-empty) page_info='{"hasNextPage":true,"endCursor":""}' ;;
+        pagination-wrong-type) page_info='{"hasNextPage":true,"endCursor":42}' ;;
+      esac
+      cat <<JSON
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[],"pageInfo":$page_info}}}}]}}}}}
+JSON
+      ;;
     no-failures)
       cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":103,"name":"pass","isRequired":true,"status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:01:00Z","detailsUrl":"https://example.test/pass","checkSuite":{"workflowRun":{"event":"PUSH","workflow":{"name":"CI"}}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}

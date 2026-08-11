@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use crate::error::{Exit, Result};
 use crate::output;
 use crate::usecase;
@@ -90,12 +88,12 @@ fn argument_error(program: &str, message: &str) -> Exit {
     }
 }
 
-fn print_help(program: &str) {
+fn print_help(program: &str) -> Result<()> {
     let text = format!(
         "{}\n\npositional arguments:\n  target               PR number or GitHub pull request URL\n  thread_id            GraphQL review thread node ID\n\noptions:\n  -h, --help           show this help message and exit\n  --repo REPO          OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk  include diffHunk on every comment\n  --compact            emit one-line JSON\n",
         usage(program)
     );
-    io::stdout().write_all(text.as_bytes()).expect("write help");
+    super::super::write_stdout(&text)
 }
 
 #[cfg(test)]
