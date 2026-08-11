@@ -79,6 +79,10 @@ if [ "$1 $2" = "pr checks" ]; then
         printf "no required checks reported on the 'test' branch\n" >&2
         exit 1
         ;;
+      no-checks)
+        printf "no checks reported on the 'test' branch\n" >&2
+        exit 1
+        ;;
       unknown) printf '[{"bucket":"new-state"}]\n' ;;
       default)
         if [ "$bucket_kind" = required ]; then

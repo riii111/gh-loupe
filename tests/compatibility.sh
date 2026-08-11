@@ -196,6 +196,34 @@ assert_overview_runtime_error() {
     "$tmpdir/$name.overview.stderr" >/dev/null
 }
 
+assert_overview_runtime_error_message() {
+  local name="$1"
+  local expected_kind="$2"
+  local expected_retryable="$3"
+  local expected_message="$4"
+  shift 4
+  local -a environment=()
+  while [ "$1" != "--" ]; do
+    environment+=("$1")
+    shift
+  done
+  shift
+
+  set +e
+  env PATH="$tmpdir/bin:$PATH" "${environment[@]}" "$tmpdir/rust/gh-read" "$@" \
+    >"$tmpdir/$name.overview.stdout" 2>"$tmpdir/$name.overview.stderr"
+  local status=$?
+  set -e
+
+  test "$status" -ne 0
+  test ! -s "$tmpdir/$name.overview.stdout"
+  test "$(wc -l <"$tmpdir/$name.overview.stderr")" -eq 1
+  jq -e --arg kind "$expected_kind" --argjson retryable "$expected_retryable" \
+    --arg message "$expected_message" \
+    '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == $retryable and .error.message == $message and (.error.retryAfterSeconds == null)' \
+    "$tmpdir/$name.overview.stderr" >/dev/null
+}
+
 compare_case root-help -- --help
 compare_case pr-help -- pr --help
 compare_case issue-help -- issue --help
@@ -314,7 +342,7 @@ jq -e '.data.checks == {
 }' \
   "$tmpdir/overview-no-required-cli.overview.stdout" >/dev/null
 
-run_overview overview-empty-all GH_OVERVIEW_ALL_CHECKS=empty -- pr overview 42 --repo riii111/dotfiles
+run_overview overview-empty-all GH_OVERVIEW_ALL_CHECKS=no-checks -- pr overview 42 --repo riii111/dotfiles
 jq -e '.data.checks.all == {"total": 0, "passed": 0, "pending": 0, "failed": 0}' \
   "$tmpdir/overview-empty-all.overview.stdout" >/dev/null
 
@@ -329,10 +357,12 @@ assert_overview_runtime_error overview-required-failure githubCli false \
   GH_OVERVIEW_REQUIRED_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-all-failure githubCli false \
   GH_OVERVIEW_ALL_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
-assert_overview_runtime_error overview-required-before-all-failure githubCli false \
+assert_overview_runtime_error_message overview-required-before-all-failure githubCli false \
+  'simulated required checks failure' \
   GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
-assert_overview_runtime_error overview-graphql-before-check-failures githubCli false \
+assert_overview_runtime_error_message overview-graphql-before-check-failures githubCli false \
+  '[{"message": "simulated GraphQL failure"}]' \
   GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \

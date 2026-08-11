@@ -39,11 +39,12 @@ fn check_buckets(target: &Target, required: bool) -> Result<Value> {
         args.push("--required");
     }
     args.extend(["--json", "bucket"]);
-    let checks = if required {
-        cli::json_runtime_or_empty(args, None, true, "no required checks reported on ")?
+    let empty_error_prefix = if required {
+        "no required checks reported on "
     } else {
-        cli::json_runtime(args, None, true)?
+        "no checks reported on "
     };
+    let checks = cli::json_runtime_or_empty(args, None, true, empty_error_prefix)?;
     if !checks.is_array() {
         return Err(Exit::runtime(
             &RuntimeError::invalid_response(if required {
