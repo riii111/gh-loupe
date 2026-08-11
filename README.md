@@ -53,6 +53,7 @@ Pull Requestの確認は最初に`pr overview`を使い、本文やcommentが必
 実行時エラーではstdoutを空にし、stderrへ`schemaVersion`と再試行情報を含むJSONを1行だけ出力します。
 
 `pr checks`は既定ですべてのcheckを返し、`--required`を指定するとrequired checkだけを返します。結果はcheck名、同名ではlinkの昇順です。
+各checkの`workflow`、`startedAt`、`completedAt`は、値が存在するときは文字列、GitHubが値を返さないときはJSON `null`です。この型は通常のCLI経路と`--failed-diagnostics`または`--include-failed-logs`を指定した診断経路で共通です。CLIの空文字と`0001-01-01T00:00:00Z`は値なしとして扱います。これはpre-production段階のschema correctionのため、`schemaVersion`は1のままです。
 
 失敗checkを調べるときは、まず`--failed-diagnostics`でCheck Run annotationを取得します。`--include-failed-logs`はannotationに加えてGitHub Actions jobのlogを取得し、各logを末尾200行、最大64 KiBへ制限します。Actions jobではない失敗checkの`log`は`null`です。診断の既定timeoutは90秒で、`--timeout SECONDS`には正の整数を指定します。進捗は開始時と15秒ごとにstderrへ出力され、`--quiet`でのみ抑制されます。
 
