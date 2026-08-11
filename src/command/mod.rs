@@ -40,8 +40,7 @@ pub fn run() -> Result<()> {
         serde_json::to_string_pretty(&result)
     }
     .map_err(|error| Exit::message(error.to_string()))?;
-    stdout_line(&output);
-    Ok(())
+    write_stdout(&format!("{output}\n"))
 }
 
 fn parse_args() -> Result<Args> {
@@ -54,7 +53,7 @@ fn parse_args() -> Result<Args> {
         ));
     };
     if resource_value == "--version" {
-        print_version();
+        print_version()?;
         std::process::exit(0);
     }
     let root_positional_only = resource_value == "--";
@@ -68,7 +67,7 @@ fn parse_args() -> Result<Args> {
         resource_value = value;
     }
     if !root_positional_only && (resource_value == "-h" || resource_value == "--help") {
-        print_root_help(&program);
+        print_root_help(&program)?;
         std::process::exit(0);
     }
 
@@ -104,21 +103,23 @@ fn displayed_program_name(value: Option<&str>) -> &str {
         .unwrap_or(PROGRAM_NAME)
 }
 
-fn print_root_help(program: &str) {
+fn print_root_help(program: &str) -> Result<()> {
     let text = format!(
         "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
         root_usage(program)
     );
-    io::stdout().write_all(text.as_bytes()).expect("write help");
+    write_stdout(&text)
 }
 
-fn print_version() {
+fn print_version() -> Result<()> {
     let text = format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-    io::stdout()
-        .write_all(text.as_bytes())
-        .expect("write version");
+    write_stdout(&text)
 }
 
-fn stdout_line(message: &str) {
-    writeln!(io::stdout(), "{message}").expect("write output");
+fn write_stdout(text: &str) -> Result<()> {
+    match io::stdout().write_all(text.as_bytes()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(Exit::message(format!("failed to write stdout: {error}"))),
+    }
 }
