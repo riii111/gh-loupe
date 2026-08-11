@@ -179,7 +179,7 @@ where
 }
 
 pub(super) fn runtime_cli_failure(code: i32, stderr: &[u8]) -> Exit {
-    Exit::runtime(&RuntimeError::from_cli_process_failure(code, stderr), 1)
+    Exit::runtime(&RuntimeError::from_cli_process_failure(code, stderr))
 }
 
 fn runtime_exit(
@@ -188,15 +188,12 @@ fn runtime_exit(
     retryable: bool,
     retry_after_seconds: Option<u64>,
 ) -> Exit {
-    Exit::runtime(
-        &RuntimeError {
-            kind,
-            message,
-            retryable,
-            retry_after_seconds,
-        },
-        1,
-    )
+    Exit::runtime(&RuntimeError {
+        kind,
+        message,
+        retryable,
+        retry_after_seconds,
+    })
 }
 
 struct ProcessOutput {
@@ -574,32 +571,20 @@ mod tests {
         let rate_limit = runtime_cli_failure(1, b"secondary rate limit; retry-after: 45\n");
         assert_eq!(
             rate_limit.stderr_line(),
-            Some(
-                r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"secondary rate limit; retry-after: 45","retryable":true,"retryAfterSeconds":45}}"#
-            )
+            r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"secondary rate limit; retry-after: 45","retryable":true,"retryAfterSeconds":45}}"#
         );
 
         let network = runtime_cli_failure(1, b"could not resolve host: api.github.com\n");
-        assert!(
-            network
-                .stderr_line()
-                .expect("structured network error")
-                .contains(r#""kind":"network"#)
-        );
+        assert!(network.stderr_line().contains(r#""kind":"network"#));
 
         let empty_authentication = runtime_cli_failure(4, b"");
         assert!(
             empty_authentication
                 .stderr_line()
-                .expect("structured authentication error")
                 .contains(r#""kind":"authentication""#)
         );
 
         let dns = runtime_cli_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
-        assert!(
-            dns.stderr_line()
-                .expect("structured DNS error")
-                .contains(r#""kind":"network""#)
-        );
+        assert!(dns.stderr_line().contains(r#""kind":"network""#));
     }
 }

@@ -184,7 +184,7 @@ fn parse_retry_after_seconds(message: &str) -> Option<u64> {
 }
 
 pub struct Exit {
-    pub message: Option<String>,
+    pub message: String,
     pub code: i32,
 }
 
@@ -193,35 +193,25 @@ pub type Result<T> = std::result::Result<T, Exit>;
 impl Exit {
     pub fn message(message: impl Into<String>) -> Self {
         Self {
-            message: Some(message.into()),
+            message: message.into(),
             code: 1,
         }
     }
 
-    pub fn runtime(error: &RuntimeError, code: i32) -> Self {
+    pub fn runtime(error: &RuntimeError) -> Self {
         Self {
-            message: Some(
-                serde_json::to_string(&error.json())
-                    .expect("runtime error values are always serializable"),
-            ),
-            code,
+            message: serde_json::to_string(&error.json())
+                .expect("runtime error values are always serializable"),
+            code: 1,
         }
     }
 
     pub fn invalid_response(message: impl Into<String>) -> Self {
-        Self::runtime(
-            &RuntimeError {
-                kind: ErrorKind::InvalidResponse,
-                message: message.into(),
-                retryable: false,
-                retry_after_seconds: None,
-            },
-            1,
-        )
+        Self::runtime(&RuntimeError::invalid_response(message))
     }
 
-    pub fn stderr_line(&self) -> Option<&str> {
-        self.message.as_deref()
+    pub fn stderr_line(&self) -> &str {
+        &self.message
     }
 }
 
@@ -237,18 +227,13 @@ mod tests {
             retryable: true,
             retry_after_seconds: Some(30),
         };
-        let exit = Exit::runtime(&error, 1);
+        let exit = Exit::runtime(&error);
 
         assert_eq!(
             exit.stderr_line(),
-            Some(
-                r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"API rate limit exceeded\ntry later","retryable":true,"retryAfterSeconds":30}}"#
-            )
+            r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"API rate limit exceeded\ntry later","retryable":true,"retryAfterSeconds":30}}"#
         );
-        assert_eq!(
-            exit.stderr_line().expect("structured line").lines().count(),
-            1
-        );
+        assert_eq!(exit.stderr_line().lines().count(), 1);
     }
 
     #[test]

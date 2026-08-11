@@ -25,10 +25,10 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         options.timeout_seconds
     );
     let deadline = diagnostic_deadline(options.timeout_seconds).ok_or_else(|| Exit {
-        message: Some(format!(
+        message: format!(
             "argument --timeout: {} seconds cannot be represented as a diagnostic deadline",
             options.timeout_seconds
-        )),
+        ),
         code: 2,
     })?;
     let checks = if diagnostics_requested {
@@ -53,7 +53,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         let response = github::pull_request::checks(target, required)?;
         let values = response
             .as_array()
-            .ok_or_else(|| invalid_response("GitHub returned an invalid checks response"))?;
+            .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid checks response"))?;
         let mut checks = values
             .iter()
             .map(validate_check)
@@ -95,7 +95,9 @@ fn collect_diagnostics(
                 check
                     .get(CHECK_RUN_ID)
                     .and_then(Value::as_u64)
-                    .ok_or_else(|| invalid_response("GitHub returned an invalid Check Run ID"))?,
+                    .ok_or_else(|| {
+                        Exit::invalid_response("GitHub returned an invalid Check Run ID")
+                    })?,
             )
         } else {
             None
@@ -137,7 +139,7 @@ fn collect_diagnostics(
 fn validate_check(value: &Value) -> Result<Map<String, Value>> {
     let object = value
         .as_object()
-        .ok_or_else(|| invalid_response("GitHub returned an invalid check entry"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid check entry"))?;
     let check = Map::from_iter([
         (
             "name".to_owned(),
@@ -170,7 +172,11 @@ fn validate_check(value: &Value) -> Result<Map<String, Value>> {
     ]);
     match string_field(&check, "bucket") {
         "pass" | "fail" | "pending" | "skipping" | "cancel" => {}
-        _ => return Err(invalid_response("GitHub returned an unknown check bucket")),
+        _ => {
+            return Err(Exit::invalid_response(
+                "GitHub returned an unknown check bucket",
+            ));
+        }
     }
     Ok(check)
 }
@@ -181,11 +187,13 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
     for value in values {
         let object = value
             .as_object()
-            .ok_or_else(|| invalid_response("GitHub returned an invalid check context"))?;
+            .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid check context"))?;
         let is_required = object
             .get("isRequired")
             .and_then(Value::as_bool)
-            .ok_or_else(|| invalid_response("GitHub returned an invalid required check marker"))?;
+            .ok_or_else(|| {
+                Exit::invalid_response("GitHub returned an invalid required check marker")
+            })?;
         if required && !is_required {
             continue;
         }
@@ -220,7 +228,7 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Map<S
                 (name, state, link, None, None, None, None)
             }
             _ => {
-                return Err(invalid_response(
+                return Err(Exit::invalid_response(
                     "GitHub returned an unknown check context type",
                 ));
             }
@@ -264,24 +272,24 @@ fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<Str
         None => None,
         Some(value) if is_known_check_run_conclusion(value) => Some(value),
         Some(_) => {
-            return Err(invalid_response(
+            return Err(Exit::invalid_response(
                 "GitHub returned an unknown check run conclusion",
             ));
         }
     };
     if status == "COMPLETED" {
         return conclusion.map(str::to_owned).ok_or_else(|| {
-            invalid_response("GitHub returned a completed check run without a conclusion")
+            Exit::invalid_response("GitHub returned a completed check run without a conclusion")
         });
     }
     if conclusion.is_some() {
-        return Err(invalid_response(
+        return Err(Exit::invalid_response(
             "GitHub returned a non-completed check run with a conclusion",
         ));
     }
     match status {
         "IN_PROGRESS" | "PENDING" | "QUEUED" | "REQUESTED" | "WAITING" => Ok(status.to_owned()),
-        _ => Err(invalid_response(
+        _ => Err(Exit::invalid_response(
             "GitHub returned an unknown check run status",
         )),
     }
@@ -306,20 +314,22 @@ fn check_run_workflow(object: &Map<String, Value>) -> Result<Option<&str>> {
     let suite = object
         .get("checkSuite")
         .and_then(Value::as_object)
-        .ok_or_else(|| invalid_response("GitHub returned an invalid check suite"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid check suite"))?;
     let Some(run) = suite.get("workflowRun") else {
-        return Err(invalid_response("GitHub returned an invalid workflow run"));
+        return Err(Exit::invalid_response(
+            "GitHub returned an invalid workflow run",
+        ));
     };
     if run.is_null() {
         return Ok(None);
     }
     let run = run
         .as_object()
-        .ok_or_else(|| invalid_response("GitHub returned an invalid workflow run"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid workflow run"))?;
     let workflow = run
         .get("workflow")
         .and_then(Value::as_object)
-        .ok_or_else(|| invalid_response("GitHub returned an invalid workflow"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid workflow"))?;
     Ok(Some(required_string(workflow, "name", "workflow name")?))
 }
 
@@ -331,23 +341,25 @@ fn check_bucket(state: &str) -> Result<&'static str> {
         "CANCELLED" => Ok("cancel"),
         "EXPECTED" | "REQUESTED" | "WAITING" | "QUEUED" | "PENDING" | "IN_PROGRESS" | "STALE"
         | "STARTUP_FAILURE" => Ok("pending"),
-        _ => Err(invalid_response("GitHub returned an unknown check state")),
+        _ => Err(Exit::invalid_response(
+            "GitHub returned an unknown check state",
+        )),
     }
 }
 
 fn validate_annotations(response: &Value) -> Result<Vec<Value>> {
     let pages = response
         .as_array()
-        .ok_or_else(|| invalid_response("GitHub returned an invalid annotation response"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid annotation response"))?;
     let mut annotations = Vec::new();
     for page in pages {
         let values = page
             .as_array()
-            .ok_or_else(|| invalid_response("GitHub returned an invalid annotation page"))?;
+            .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid annotation page"))?;
         for value in values {
             let object = value
                 .as_object()
-                .ok_or_else(|| invalid_response("GitHub returned an invalid annotation"))?;
+                .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid annotation"))?;
             let path = required_string(object, "path", "annotation path")?;
             let start_line = required_u64(object, "start_line", "annotation start line")?;
             let end_line = required_u64(object, "end_line", "annotation end line")?;
@@ -390,12 +402,12 @@ fn required_string<'a>(
     object
         .get(field)
         .and_then(Value::as_str)
-        .ok_or_else(|| invalid_response(&format!("GitHub returned an invalid {label}")))
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub returned an invalid {label}")))
 }
 
 fn required_cli_check_string<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str> {
     object.get(field).and_then(Value::as_str).ok_or_else(|| {
-        invalid_response(&format!("GitHub check field {field} is missing or invalid"))
+        Exit::invalid_response(format!("GitHub check field {field} is missing or invalid"))
     })
 }
 
@@ -414,7 +426,7 @@ fn required_u64(object: &Map<String, Value>, field: &str, label: &str) -> Result
     object
         .get(field)
         .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_response(&format!("GitHub returned an invalid {label}")))
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub returned an invalid {label}")))
 }
 
 fn nullable_string<'a>(
@@ -425,7 +437,7 @@ fn nullable_string<'a>(
     match object.get(field) {
         Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value)),
-        _ => Err(invalid_response(&format!(
+        _ => Err(Exit::invalid_response(format!(
             "GitHub returned an invalid {label}"
         ))),
     }
@@ -487,10 +499,10 @@ fn collect_actions_log(
     let job = github::pull_request::job(target, job_id, deadline, timeout_message)?;
     let job = job
         .as_object()
-        .ok_or_else(|| invalid_response("GitHub returned an invalid Actions job response"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid Actions job response"))?;
     let returned_id = required_u64(job, "id", "Actions job identifier")?;
     if returned_id != job_id {
-        return Err(invalid_response(
+        return Err(Exit::invalid_response(
             "GitHub returned a mismatched Actions job identifier",
         ));
     }
@@ -553,7 +565,9 @@ fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
         valid_utf8,
     } = log;
     if !valid_utf8 {
-        return Err(invalid_response("GitHub returned a non-UTF-8 job log"));
+        return Err(Exit::invalid_response(
+            "GitHub returned a non-UTF-8 job log",
+        ));
     }
     let byte_start = bytes.len().saturating_sub(LOG_BYTE_LIMIT);
     let line_start = line_start(&bytes, total_newlines);
@@ -565,7 +579,9 @@ fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
             || start >= byte_start.saturating_add(UTF8_BOUNDARY_BYTES)
             || start >= bytes.len()
         {
-            return Err(invalid_response("GitHub returned a non-UTF-8 job log"));
+            return Err(Exit::invalid_response(
+                "GitHub returned a non-UTF-8 job log",
+            ));
         }
         start += 1;
         text = std::str::from_utf8(&bytes[start..]);
@@ -646,31 +662,16 @@ fn compare_checks(left: &Map<String, Value>, right: &Map<String, Value>) -> std:
         })
 }
 
-fn invalid_response(message: &str) -> Exit {
-    Exit::runtime(
-        &RuntimeError {
-            kind: ErrorKind::InvalidResponse,
-            message: message.to_owned(),
-            retryable: false,
-            retry_after_seconds: None,
-        },
-        1,
-    )
-}
-
 fn ensure_before_deadline(deadline: Instant, timeout_message: &str) -> Result<()> {
     if Instant::now() < deadline {
         return Ok(());
     }
-    Err(Exit::runtime(
-        &RuntimeError {
-            kind: ErrorKind::Timeout,
-            message: timeout_message.to_owned(),
-            retryable: true,
-            retry_after_seconds: None,
-        },
-        1,
-    ))
+    Err(Exit::runtime(&RuntimeError {
+        kind: ErrorKind::Timeout,
+        message: timeout_message.to_owned(),
+        retryable: true,
+        retry_after_seconds: None,
+    }))
 }
 
 fn diagnostic_deadline(timeout_seconds: u64) -> Option<Instant> {
@@ -893,11 +894,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("unknown status must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -911,11 +908,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("missing status must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -929,11 +922,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("missing conclusion must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -944,11 +933,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("unknown conclusion must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -960,11 +945,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("unknown pending conclusion must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -975,11 +956,7 @@ mod tests {
         let error = validate_check_contexts(&[context], false)
             .expect_err("malformed workflow must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 
     #[test]
@@ -987,10 +964,6 @@ mod tests {
         let error = validate_annotations(&json!([[{"path": "partial.rs"}]]))
             .expect_err("malformed annotation must fail closed");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains("\"kind\":\"invalidResponse\""))
-        );
+        assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
     }
 }

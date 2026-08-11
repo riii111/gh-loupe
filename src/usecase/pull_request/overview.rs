@@ -2,7 +2,7 @@ use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::error::{Exit, Result, RuntimeError};
+use crate::error::{Exit, Result};
 use crate::github::{graphql, rest};
 use crate::model::Target;
 use crate::output;
@@ -79,12 +79,7 @@ fn summarize_buckets(checks: &Value, kind: &str) -> Result<Value> {
 }
 
 fn invalid_checks_response(kind: &str) -> Exit {
-    Exit::runtime(
-        &RuntimeError::invalid_response(format!(
-            "GitHub returned an invalid {kind} checks response"
-        )),
-        1,
-    )
+    Exit::invalid_response(format!("GitHub returned an invalid {kind} checks response"))
 }
 
 #[cfg(test)]
@@ -158,10 +153,6 @@ mod tests {
         let error = summarize_required_checks(&json!([{"bucket": "new-state"}]))
             .expect_err("unknown bucket must fail");
 
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains(r#""kind":"invalidResponse""#))
-        );
+        assert!(error.stderr_line().contains(r#""kind":"invalidResponse""#));
     }
 }

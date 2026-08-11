@@ -181,14 +181,14 @@ mod tests {
 
     fn checks_argument_error(program: &str, message: &str) -> Exit {
         Exit {
-            message: Some(format!("{program} pr checks: error: {message}")),
+            message: format!("{program} pr checks: error: {message}"),
             code: 2,
         }
     }
 
     fn overview_argument_error(program: &str, message: &str) -> Exit {
         Exit {
-            message: Some(format!("{program} pr overview: error: {message}")),
+            message: format!("{program} pr overview: error: {message}"),
             code: 2,
         }
     }
@@ -209,9 +209,11 @@ mod tests {
                 panic!("expected a target error")
             };
             assert_eq!(error.code, 2);
-            assert!(error.stderr_line().is_some_and(|message| {
-                message.contains(&format!("gh-loupe pr {subcommand}: error:"))
-            }));
+            assert!(
+                error
+                    .stderr_line()
+                    .contains(&format!("gh-loupe pr {subcommand}: error:"))
+            );
         }
     }
 }

@@ -86,10 +86,7 @@ fn usage(program: &str) -> String {
 
 fn issue_argument_error(program: &str, message: &str) -> Exit {
     Exit {
-        message: Some(format!(
-            "{}\n{program} issue: error: {message}",
-            usage(program)
-        )),
+        message: format!("{}\n{program} issue: error: {message}", usage(program)),
         code: 2,
     }
 }

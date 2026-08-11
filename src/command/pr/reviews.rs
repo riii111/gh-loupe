@@ -52,10 +52,7 @@ fn usage(program: &str) -> String {
 
 fn argument_error(program: &str, message: &str) -> Exit {
     Exit {
-        message: Some(format!(
-            "{}\n{program} pr reviews: error: {message}",
-            usage(program)
-        )),
+        message: format!("{}\n{program} pr reviews: error: {message}", usage(program)),
         code: 2,
     }
 }

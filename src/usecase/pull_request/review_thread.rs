@@ -15,13 +15,13 @@ fn project_review_thread(review_thread: Value, include_diff_hunk: bool) -> Resul
     let mut result = Map::new();
     let id = required_field(&review_thread, "id")?;
     if !id.is_string() {
-        return Err(invalid_response("GitHub field id must be a string"));
+        return Err(Exit::invalid_response("GitHub field id must be a string"));
     }
     result.insert("id".to_owned(), id.clone());
     for field in ["isResolved", "isOutdated"] {
         let value = required_field(&review_thread, field)?;
         if !value.is_boolean() {
-            return Err(invalid_response(format!(
+            return Err(Exit::invalid_response(format!(
                 "GitHub field {field} must be a boolean"
             )));
         }
@@ -33,7 +33,7 @@ fn project_review_thread(review_thread: Value, include_diff_hunk: bool) -> Resul
 
     let comments = required_field(&review_thread, "comments")?
         .as_array()
-        .ok_or_else(|| invalid_response("GitHub comments must be an array"))?;
+        .ok_or_else(|| Exit::invalid_response("GitHub comments must be an array"))?;
     let mut comments = comments
         .iter()
         .map(|comment| project_comment(comment, include_diff_hunk))
@@ -52,7 +52,7 @@ fn project_comment(comment: &Value, include_diff_hunk: bool) -> Result<Value> {
     for field in ["id", "url", "body", "createdAt", "updatedAt"] {
         let value = required_field(comment, field)?;
         if !value.is_string() {
-            return Err(invalid_response(format!(
+            return Err(Exit::invalid_response(format!(
                 "GitHub field {field} must be a string"
             )));
         }
@@ -65,8 +65,12 @@ fn project_comment(comment: &Value, include_diff_hunk: bool) -> Result<Value> {
             .get("login")
             .filter(|login| login.is_string())
             .cloned()
-            .ok_or_else(|| invalid_response("GitHub author login must be a string"))?,
-        _ => return Err(invalid_response("GitHub author must be an object or null")),
+            .ok_or_else(|| Exit::invalid_response("GitHub author login must be a string"))?,
+        _ => {
+            return Err(Exit::invalid_response(
+                "GitHub author must be an object or null",
+            ));
+        }
     };
     result.insert("author".to_owned(), author);
 
@@ -77,15 +81,19 @@ fn project_comment(comment: &Value, include_diff_hunk: bool) -> Result<Value> {
             .get("id")
             .filter(|id| id.is_string())
             .cloned()
-            .ok_or_else(|| invalid_response("GitHub replyTo id must be a string"))?,
-        _ => return Err(invalid_response("GitHub replyTo must be an object or null")),
+            .ok_or_else(|| Exit::invalid_response("GitHub replyTo id must be a string"))?,
+        _ => {
+            return Err(Exit::invalid_response(
+                "GitHub replyTo must be an object or null",
+            ));
+        }
     };
     result.insert("replyToId".to_owned(), reply_to_id);
 
     if include_diff_hunk {
         let diff_hunk = required_field(comment, "diffHunk")?;
         if !diff_hunk.is_string() {
-            return Err(invalid_response("GitHub diffHunk must be a string"));
+            return Err(Exit::invalid_response("GitHub diffHunk must be a string"));
         }
         result.insert("diffHunk".to_owned(), diff_hunk.clone());
     }
@@ -95,7 +103,7 @@ fn project_comment(comment: &Value, include_diff_hunk: bool) -> Result<Value> {
 fn required_field<'a>(value: &'a Value, field: &str) -> Result<&'a Value> {
     value
         .get(field)
-        .ok_or_else(|| invalid_response(format!("GitHub response omitted {field}")))
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))
 }
 
 fn nullable_location(value: &Value, field: &str) -> Result<Value> {
@@ -106,7 +114,7 @@ fn nullable_location(value: &Value, field: &str) -> Result<Value> {
         _ => false,
     };
     if !valid {
-        return Err(invalid_response(format!(
+        return Err(Exit::invalid_response(format!(
             "GitHub field {field} has an invalid value"
         )));
     }
@@ -117,10 +125,6 @@ fn string_value<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field]
         .as_str()
         .expect("projected comment string was validated")
-}
-
-fn invalid_response(message: impl Into<String>) -> Exit {
-    Exit::invalid_response(message)
 }
 
 #[cfg(test)]
@@ -139,7 +143,7 @@ mod tests {
         assert!(
             error
                 .stderr_line()
-                .is_some_and(|message| message.contains("GitHub field id must be a string"))
+                .contains("GitHub field id must be a string")
         );
     }
 }

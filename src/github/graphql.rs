@@ -113,13 +113,10 @@ pub fn pull_request_check_contexts(
         )?;
         let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
-            return Err(Exit::runtime(
-                &RuntimeError::not_found(format!(
-                    "pull request not found: {}#{}",
-                    target.repository, target.number
-                )),
-                1,
-            ));
+            return Err(Exit::runtime(&RuntimeError::not_found(format!(
+                "pull request not found: {}#{}",
+                target.repository, target.number
+            ))));
         }
         let commit = pagination::nodes(pagination::value_at(pull_request, &["commits"])?)?
             .first()
@@ -167,13 +164,10 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
         let data = query_runtime(OVERVIEW_QUERY, &variables)?;
         let current = pagination::value_at(&data, &["repository", "pullRequest"])?;
         if current.is_null() {
-            return Err(Exit::runtime(
-                &RuntimeError::not_found(format!(
-                    "pull request not found: {}#{}",
-                    target.repository, target.number
-                )),
-                1,
-            ));
+            return Err(Exit::runtime(&RuntimeError::not_found(format!(
+                "pull request not found: {}#{}",
+                target.repository, target.number
+            ))));
         }
         let mut current = current.clone();
         let connection = current
@@ -203,16 +197,14 @@ fn query_runtime(query: &str, variables: &str) -> Result<Value> {
     let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
     if let Some(errors) = response.get("errors") {
         let message = format_graphql_errors(errors);
-        return Err(Exit::runtime(
-            &RuntimeError::from_cli_failure(message.as_bytes()),
-            1,
-        ));
+        return Err(Exit::runtime(&RuntimeError::from_cli_failure(
+            message.as_bytes(),
+        )));
     }
     response.get("data").cloned().ok_or_else(|| {
-        Exit::runtime(
-            &RuntimeError::invalid_response("GitHub returned a GraphQL response without data"),
-            1,
-        )
+        Exit::runtime(&RuntimeError::invalid_response(
+            "GitHub returned a GraphQL response without data",
+        ))
     })
 }
 
@@ -236,16 +228,14 @@ fn query_runtime_with_deadline(
     )?;
     if let Some(errors) = response.get("errors") {
         let message = format_graphql_errors(errors);
-        return Err(Exit::runtime(
-            &RuntimeError::from_cli_failure(message.as_bytes()),
-            1,
-        ));
+        return Err(Exit::runtime(&RuntimeError::from_cli_failure(
+            message.as_bytes(),
+        )));
     }
     response.get("data").cloned().ok_or_else(|| {
-        Exit::runtime(
-            &RuntimeError::invalid_response("GitHub returned a GraphQL response without data"),
-            1,
-        )
+        Exit::runtime(&RuntimeError::invalid_response(
+            "GitHub returned a GraphQL response without data",
+        ))
     })
 }
 
@@ -281,10 +271,9 @@ fn bool_or_null(value: &Value) -> bool {
 }
 
 fn invalid_graphql_response() -> Exit {
-    Exit::runtime(
-        &RuntimeError::invalid_response("GitHub returned an invalid GraphQL response"),
-        1,
-    )
+    Exit::runtime(&RuntimeError::invalid_response(
+        "GitHub returned an invalid GraphQL response",
+    ))
 }
 
 fn format_graphql_errors(value: &Value) -> String {
