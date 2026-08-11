@@ -15,3 +15,13 @@ fn version_reports_the_cargo_package_version() {
     );
     assert!(output.stderr.is_empty());
 }
+
+#[test]
+fn bundled_skill_requires_the_cargo_package_version() {
+    let skill = include_str!("../skills/gh-read/SKILL.md");
+
+    assert!(skill.contains(&format!(
+        "binaryが`{}`以上であることを確認する",
+        env!("CARGO_PKG_VERSION")
+    )));
+}

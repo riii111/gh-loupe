@@ -240,8 +240,8 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-read $GH_READ_PACKAGE_VERSION"
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-read pr [-h] {overview,comments,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview comments threads thread checks; do
+grep -F 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview comments reviews threads thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
 if grep -E '^    (full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
@@ -256,7 +256,7 @@ set -e
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-read pr [-h] {overview,comments,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-read pr [-h] {overview,comments,reviews,threads,thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
 grep -Fx 'gh-read pr: error: the following arguments are required: subcommand' "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource
@@ -304,6 +304,7 @@ jq -e '
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   .data.pullRequest == {
     "number": 42,
+    "title": "Add pull request title",
     "url": "https://github.com/riii111/dotfiles/pull/42",
     "state": "OPEN",
     "isDraft": false,
@@ -401,6 +402,10 @@ assert_overview_runtime_error overview-gh-failure githubCli false \
   GH_TEST_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-invalid-json invalidResponse false \
   GH_TEST_INVALID_JSON=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-missing-title invalidResponse false \
+  GH_OVERVIEW_TITLE=missing -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-invalid-title invalidResponse false \
+  GH_OVERVIEW_TITLE=invalid -- pr overview 42 --repo riii111/dotfiles
 
 assert_argument_error comments-missing-target pr comments
 assert_argument_error comments-abbreviated-repo pr comments 42 --rep riii111/dotfiles
