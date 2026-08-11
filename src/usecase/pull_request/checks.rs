@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,6 +14,7 @@ const LOG_LINE_LIMIT: usize = 200;
 const LOG_BYTE_LIMIT: usize = 64 * 1024;
 const UTF8_BOUNDARY_BYTES: usize = 4;
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
+const MAX_DIAGNOSTIC_WORKERS: usize = 4;
 
 struct Check {
     name: String,
@@ -127,42 +128,248 @@ fn collect_diagnostics(
 
     let progress = Progress::start(failed.len(), options.quiet);
     ensure_before_deadline(deadline, timeout_message)?;
-    for index in failed {
-        ensure_before_deadline(deadline, timeout_message)?;
-        let check = &mut checks[index];
-        let check_run_id = check.check_run_id;
-        let annotations = match check_run_id {
-            Some(id) => validate_annotations(&github::pull_request::annotations(
+    let diagnostic_jobs = failed
+        .iter()
+        .enumerate()
+        .filter_map(|(position, &index)| {
+            checks[index]
+                .check_run_id
+                .map(|check_run_id| DiagnosticJob {
+                    index,
+                    position,
+                    check_run_id,
+                    link: checks[index].link.clone(),
+                })
+        })
+        .collect::<Vec<_>>();
+    if diagnostic_jobs.len() < 2 {
+        for index in failed {
+            ensure_before_deadline(deadline, timeout_message)?;
+            let check = &mut checks[index];
+            let result = collect_one_diagnostic(
                 target,
-                id,
+                check.check_run_id,
+                check.link.as_deref(),
+                options.include_failed_logs,
+                head_oid,
                 deadline,
                 timeout_message,
-            )?)?,
-            None => Vec::new(),
-        };
-        check.annotations = Some(annotations);
-
-        if options.include_failed_logs {
-            let log = if check_run_id.is_some() {
-                collect_actions_log(
-                    target,
-                    check.link.as_deref(),
-                    check_run_id,
-                    head_oid,
-                    LOG_BYTE_LIMIT,
-                    LOG_LINE_LIMIT,
-                    deadline,
-                    timeout_message,
-                )?
-            } else {
-                Value::Null
-            };
-            check.log = Some(log);
+            )?;
+            apply_diagnostic_result(check, result, options.include_failed_logs);
+            progress.complete_one();
         }
-        progress.complete_one();
+    } else {
+        for &index in &failed {
+            if checks[index].check_run_id.is_none() {
+                checks[index].annotations = Some(Vec::new());
+                if options.include_failed_logs {
+                    checks[index].log = Some(Value::Null);
+                }
+            }
+        }
+        let context = DiagnosticContext {
+            target,
+            include_failed_logs: options.include_failed_logs,
+            head_oid,
+            deadline,
+            timeout_message,
+        };
+        let results = collect_diagnostics_parallel(
+            &context,
+            checks,
+            &diagnostic_jobs,
+            failed.len(),
+            &progress,
+        );
+        let mut results = results.lock().expect("lock diagnostic results");
+        for job in &diagnostic_jobs {
+            if results[job.index]
+                .as_ref()
+                .unwrap_or_else(|| panic!("diagnostic worker must return a result"))
+                .is_err()
+            {
+                let Some(Err(error)) = results[job.index].take() else {
+                    panic!("diagnostic result must be an error");
+                };
+                return Err(error);
+            }
+        }
+        for job in diagnostic_jobs {
+            let Some(Ok(result)) = results[job.index].take() else {
+                panic!("diagnostic worker must succeed");
+            };
+            apply_diagnostic_result(&mut checks[job.index], result, options.include_failed_logs);
+        }
     }
     ensure_before_deadline(deadline, timeout_message)?;
     Ok(())
+}
+
+struct DiagnosticJob {
+    index: usize,
+    position: usize,
+    check_run_id: u64,
+    link: Option<String>,
+}
+
+struct DiagnosticContext<'a> {
+    target: &'a Target,
+    include_failed_logs: bool,
+    head_oid: &'a str,
+    deadline: Instant,
+    timeout_message: &'a str,
+}
+
+struct DiagnosticResult {
+    annotations: Vec<Value>,
+    log: Option<Value>,
+}
+
+type SharedDiagnosticResults = Arc<Mutex<Vec<Option<Result<DiagnosticResult>>>>>;
+
+fn collect_one_diagnostic(
+    target: &Target,
+    check_run_id: Option<u64>,
+    link: Option<&str>,
+    include_failed_logs: bool,
+    head_oid: &str,
+    deadline: Instant,
+    timeout_message: &str,
+) -> Result<DiagnosticResult> {
+    let annotations = match check_run_id {
+        Some(id) => validate_annotations(&github::pull_request::annotations(
+            target,
+            id,
+            deadline,
+            timeout_message,
+        )?)?,
+        None => Vec::new(),
+    };
+    let log = if include_failed_logs {
+        Some(if check_run_id.is_some() {
+            collect_actions_log(
+                target,
+                link,
+                check_run_id,
+                head_oid,
+                LOG_BYTE_LIMIT,
+                LOG_LINE_LIMIT,
+                deadline,
+                timeout_message,
+            )?
+        } else {
+            Value::Null
+        })
+    } else {
+        None
+    };
+    Ok(DiagnosticResult { annotations, log })
+}
+
+fn apply_diagnostic_result(check: &mut Check, result: DiagnosticResult, include_failed_logs: bool) {
+    check.annotations = Some(result.annotations);
+    if include_failed_logs {
+        check.log = result.log;
+    }
+}
+
+fn collect_diagnostics_parallel(
+    context: &DiagnosticContext<'_>,
+    checks: &[Check],
+    jobs: &[DiagnosticJob],
+    total_progress: usize,
+    progress: &Progress,
+) -> SharedDiagnosticResults {
+    let next_job = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let results = Arc::new(Mutex::new(
+        (0..checks.len())
+            .map(|_| None)
+            .collect::<Vec<Option<Result<DiagnosticResult>>>>(),
+    ));
+    let mut is_job = vec![false; total_progress];
+    for job in jobs {
+        is_job[job.position] = true;
+    }
+    let completed = Arc::new(
+        is_job
+            .into_iter()
+            .map(|is_job| AtomicBool::new(!is_job))
+            .collect::<Vec<_>>(),
+    );
+    let next_completed = Arc::new(AtomicUsize::new(0));
+    let worker_count = jobs.len().min(MAX_DIAGNOSTIC_WORKERS);
+
+    thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let next_job = Arc::clone(&next_job);
+            let stop = Arc::clone(&stop);
+            let results = Arc::clone(&results);
+            let completed = Arc::clone(&completed);
+            let next_completed = Arc::clone(&next_completed);
+            scope.spawn(move || {
+                loop {
+                    if stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let job_position = next_job.fetch_add(1, Ordering::Relaxed);
+                    let Some(job) = jobs.get(job_position) else {
+                        break;
+                    };
+                    if stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let result = ensure_before_deadline(context.deadline, context.timeout_message)
+                        .and_then(|()| {
+                            collect_one_diagnostic(
+                                context.target,
+                                Some(job.check_run_id),
+                                job.link.as_deref(),
+                                context.include_failed_logs,
+                                context.head_oid,
+                                context.deadline,
+                                context.timeout_message,
+                            )
+                        });
+                    let failed = result.is_err();
+                    if failed {
+                        stop.store(true, Ordering::Release);
+                    }
+                    results.lock().expect("lock diagnostic results")[job.index] = Some(result);
+                    if !failed {
+                        completed[job.position].store(true, Ordering::Release);
+                        mark_ordered_completion(
+                            &completed,
+                            &next_completed,
+                            total_progress,
+                            progress,
+                        );
+                    }
+                }
+            });
+        }
+    });
+    results
+}
+
+fn mark_ordered_completion(
+    completed: &[AtomicBool],
+    next_completed: &AtomicUsize,
+    total: usize,
+    progress: &Progress,
+) {
+    loop {
+        let next = next_completed.load(Ordering::Acquire);
+        if next >= total || !completed[next].load(Ordering::Acquire) {
+            break;
+        }
+        if next_completed
+            .compare_exchange(next, next + 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            progress.complete_one();
+        }
+    }
 }
 
 fn validate_check(value: &Value) -> Result<Check> {

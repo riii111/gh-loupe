@@ -12,7 +12,15 @@ chmod +x "$tmpdir/bin/gh"
 
 run_diagnostics() {
   local repository="${GH_DIAGNOSTICS_REPOSITORY:-owner/repo}"
-  env PATH="$tmpdir/bin:$PATH" GH_DIAGNOSTICS_MODE="${1:-normal}" \
+  env PATH="$tmpdir/bin:$PATH" \
+    GH_DIAGNOSTICS_MODE="${1:-normal}" \
+    GH_DIAGNOSTICS_FAILURES="${GH_DIAGNOSTICS_FAILURES:-}" \
+    GH_DIAGNOSTICS_DELAY_SECONDS="${GH_DIAGNOSTICS_DELAY_SECONDS:-}" \
+    GH_DIAGNOSTICS_ACTIVE_FILE="${GH_DIAGNOSTICS_ACTIVE_FILE:-}" \
+    GH_DIAGNOSTICS_MAX_FILE="${GH_DIAGNOSTICS_MAX_FILE:-}" \
+    GH_DIAGNOSTICS_STARTED_FILE="${GH_DIAGNOSTICS_STARTED_FILE:-}" \
+    GH_DIAGNOSTICS_ROUNDS_FILE="${GH_DIAGNOSTICS_ROUNDS_FILE:-}" \
+    GH_DIAGNOSTICS_MAX_ROUND_FILE="${GH_DIAGNOSTICS_MAX_ROUND_FILE:-}" \
     "$GH_LOUPE_BIN" pr checks 42 --repo "$repository" "${@:2}"
 }
 
@@ -56,6 +64,80 @@ jq -e '
 ' "$tmpdir/check-run-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
 test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
+
+for failures in 0 1 2 10; do
+  calls_file="$tmpdir/parallel-$failures-calls"
+  active_file="$tmpdir/parallel-$failures-active"
+  max_file="$tmpdir/parallel-$failures-max"
+  rounds_file="$tmpdir/parallel-$failures-rounds"
+  max_round_file="$tmpdir/parallel-$failures-max-round"
+  GH_DIAGNOSTICS_FAILURES="$failures" \
+    GH_DIAGNOSTICS_DELAY_SECONDS=0.04 \
+    GH_DIAGNOSTICS_ACTIVE_FILE="$active_file" \
+    GH_DIAGNOSTICS_MAX_FILE="$max_file" \
+    GH_DIAGNOSTICS_ROUNDS_FILE="$rounds_file" \
+    GH_DIAGNOSTICS_MAX_ROUND_FILE="$max_round_file" \
+    GH_DIAGNOSTICS_CALLS="$calls_file" \
+    run_diagnostics parallel --failed-diagnostics --quiet --compact \
+    >"$tmpdir/parallel-$failures.json"
+  test "$(wc -l <"$calls_file" | tr -d ' ')" -eq "$((failures + 1))"
+  if [ "$failures" -eq 0 ]; then
+    test ! -e "$max_file"
+    jq -e '.data.checks == []' "$tmpdir/parallel-$failures.json" >/dev/null
+  else
+    expected_workers="$failures"
+    if [ "$expected_workers" -gt 4 ]; then
+      expected_workers=4
+    fi
+    test "$(cat "$max_file")" -eq "$expected_workers"
+    jq -e --argjson failures "$failures" \
+      '.data.checks | length == $failures and all(.annotations == [])' \
+      "$tmpdir/parallel-$failures.json" >/dev/null
+  fi
+  if [ "$failures" -eq 10 ]; then
+    test "$(cat "$max_round_file")" -eq 3
+    test "$((3 * 40))" -le 200
+  fi
+done
+
+if GH_DIAGNOSTICS_FAILURES=4 \
+  GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-error-active" \
+  GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-error-max" \
+  GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/parallel-error-started" \
+  GH_DIAGNOSTICS_CALLS="$tmpdir/parallel-error-calls" \
+  run_diagnostics parallel-error --failed-diagnostics --quiet --compact \
+  >"$tmpdir/parallel-error.stdout" 2>"$tmpdir/parallel-error.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/parallel-error.stdout"
+jq -e '
+  .error.kind == "githubCli" and
+  .error.message == "simulated parallel failure 1"
+' "$tmpdir/parallel-error.stderr" >/dev/null
+test "$(cat "$tmpdir/parallel-error-max")" -eq 4
+
+if GH_DIAGNOSTICS_FAILURES=4 \
+  GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-rate-limit-active" \
+  GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-rate-limit-max" \
+  GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/parallel-rate-limit-started" \
+  GH_DIAGNOSTICS_CALLS="$tmpdir/parallel-rate-limit-calls" \
+  run_diagnostics parallel-rate-limit --failed-diagnostics --quiet --compact \
+  >"$tmpdir/parallel-rate-limit.stdout" 2>"$tmpdir/parallel-rate-limit.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/parallel-rate-limit.stdout"
+jq -e '
+  .error.kind == "rateLimited" and
+  .error.retryAfterSeconds == 45 and
+  .error.retryable == true
+' "$tmpdir/parallel-rate-limit.stderr" >/dev/null
+test "$(cat "$tmpdir/parallel-rate-limit-max")" -eq 4
 
 run_diagnostics pending-metadata --failed-diagnostics --quiet --compact \
   >"$tmpdir/pending-metadata.json"
