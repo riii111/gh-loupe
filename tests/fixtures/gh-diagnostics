@@ -9,6 +9,17 @@ if [ "$1 $2" = "api graphql" ]; then
   payload="$(cat)"
   test -n "$payload"
   case "${GH_DIAGNOSTICS_MODE:-normal}" in
+    graphql-error)
+      printf '{"errors":[{"message":"simulated diagnostics GraphQL failure"}]}\n'
+      ;;
+    missing-pr)
+      printf '{"data":{"repository":{"pullRequest":null}}}\n'
+      ;;
+    required-filter)
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":100,"name":"required-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/required","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":101,"name":"optional-failure","isRequired":false,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z","detailsUrl":"https://ci.example.test/optional","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+JSON
+      ;;
     head-oid-changed)
       cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
       if [ "$cursor" = initial ]; then
@@ -213,6 +224,10 @@ if [ "$1" = api ] && [[ "$*" == *actions/jobs/20/logs* ]]; then
       printf 'あ'
       head -c 65529 /dev/zero | tr '\0' x
       printf 'tail\n'
+      exit 0
+      ;;
+    non-utf8)
+      printf '\377\n'
       exit 0
       ;;
   esac

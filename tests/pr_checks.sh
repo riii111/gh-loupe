@@ -34,6 +34,19 @@ test "$(wc -l <"$tmpdir/compact.json" | tr -d ' ')" -eq 1
 grep -Fx -- '--required' "$tmpdir/args" >/dev/null
 jq -e '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
 
+if (
+  export GH_TEST_CHECKS_STATUS=unexpected
+  run_checks success \
+  >"$tmpdir/unexpected-status.stdout" 2>"$tmpdir/unexpected-status.stderr"); then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/unexpected-status.stdout"
+jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' \
+  "$tmpdir/unexpected-status.stderr" >/dev/null
+
 run_checks nullable --compact >"$tmpdir/nullable.json"
 jq -e '
   .data.checks[0].link == null and
