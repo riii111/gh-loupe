@@ -255,6 +255,7 @@ jq -e '
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   .data.pullRequest == {
     "number": 42,
+    "title": "Add pull request title",
     "url": "https://github.com/riii111/dotfiles/pull/42",
     "state": "OPEN",
     "isDraft": false,
@@ -352,6 +353,10 @@ assert_overview_runtime_error overview-gh-failure githubCli false \
   GH_TEST_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-invalid-json invalidResponse false \
   GH_TEST_INVALID_JSON=1 -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-missing-title invalidResponse false \
+  GH_OVERVIEW_TITLE=missing -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-invalid-title invalidResponse false \
+  GH_OVERVIEW_TITLE=invalid -- pr overview 42 --repo riii111/dotfiles
 
 assert_argument_error threads-missing-target pr threads
 assert_argument_error threads-abbreviated-repo pr threads 42 --rep riii111/dotfiles
