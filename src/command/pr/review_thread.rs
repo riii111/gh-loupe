@@ -28,19 +28,19 @@ where
     let Some(target) = positionals.next() else {
         return Err(argument_error(
             program,
-            "the following arguments are required: target, thread_id",
+            "the following arguments are required: target, review_thread_id",
         ));
     };
-    let Some(thread_id) = positionals.next() else {
+    let Some(review_thread_id) = positionals.next() else {
         return Err(argument_error(
             program,
-            "the following arguments are required: thread_id",
+            "the following arguments are required: review_thread_id",
         ));
     };
     super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
-        action: super::super::Action::Pr(super::Action::Thread {
-            thread_id,
+        action: super::super::Action::Pr(super::Action::ReviewThread {
+            review_thread_id,
             include_diff_hunk,
         }),
         target,
@@ -54,7 +54,7 @@ pub(super) fn execute(
     target_value: &str,
     repo: Option<String>,
     program: &str,
-    thread_id: &str,
+    review_thread_id: &str,
     include_diff_hunk: bool,
 ) -> Result<serde_json::Value> {
     let target = super::super::target::resolve_pr_subcommand_target(
@@ -64,9 +64,9 @@ pub(super) fn execute(
         argument_error,
     )?;
     Ok(output::success(serde_json::json!({
-        "thread": usecase::pull_request::thread::execute(
+        "reviewThread": usecase::pull_request::review_thread::execute(
             &target,
-            thread_id,
+            review_thread_id,
             include_diff_hunk,
         )?,
     })))
@@ -74,14 +74,14 @@ pub(super) fn execute(
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr thread [-h] [--repo REPO] [--include-diff-hunk] [--compact] target thread_id"
+        "usage: {program} pr review-thread [-h] [--repo REPO] [--include-diff-hunk] [--compact] target review_thread_id"
     )
 }
 
 fn argument_error(program: &str, message: &str) -> Exit {
     Exit {
         message: Some(format!(
-            "{}\n{program} pr thread: error: {message}",
+            "{}\n{program} pr review-thread: error: {message}",
             usage(program)
         )),
         code: 2,
@@ -90,7 +90,7 @@ fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target               PR number or GitHub pull request URL\n  thread_id            GraphQL review thread node ID\n\noptions:\n  -h, --help           show this help message and exit\n  --repo REPO          OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk  include diffHunk on every comment\n  --compact            emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n  review_thread_id    GraphQL review thread node ID\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk include diffHunk on every comment\n  --compact           emit one-line JSON\n",
         usage(program)
     );
     super::super::write_stdout(&text)
@@ -106,7 +106,10 @@ mod tests {
 
     #[test]
     fn parser_preserves_end_of_options_and_missing_value_boundaries() {
-        let result = parse_args("gh-read", values(&["--", "42", "thread-id", "--repo"]));
+        let result = parse_args(
+            "gh-read",
+            values(&["--", "42", "review-thread-id", "--repo"]),
+        );
         let Err(error) = result else {
             panic!("expected an argument error")
         };
@@ -118,7 +121,7 @@ mod tests {
                 .is_some_and(|message| message.contains("unrecognized arguments: --repo"))
         );
 
-        let result = parse_args("gh-read", values(&["42", "thread-id", "--repo"]));
+        let result = parse_args("gh-read", values(&["42", "review-thread-id", "--repo"]));
         let Err(error) = result else {
             panic!("expected a missing-value error")
         };

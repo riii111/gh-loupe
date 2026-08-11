@@ -4,22 +4,22 @@ use crate::error::{Exit, Result};
 use crate::github::graphql;
 use crate::model::Target;
 
-pub fn execute(target: &Target, thread_id: &str, include_diff_hunk: bool) -> Result<Value> {
-    project(
-        graphql::thread::execute(target, thread_id)?,
+pub fn execute(target: &Target, review_thread_id: &str, include_diff_hunk: bool) -> Result<Value> {
+    project_review_thread(
+        graphql::review_thread::execute(target, review_thread_id)?,
         include_diff_hunk,
     )
 }
 
-fn project(thread: Value, include_diff_hunk: bool) -> Result<Value> {
+fn project_review_thread(review_thread: Value, include_diff_hunk: bool) -> Result<Value> {
     let mut result = Map::new();
-    let id = required_field(&thread, "id")?;
+    let id = required_field(&review_thread, "id")?;
     if !id.is_string() {
         return Err(invalid_response("GitHub field id must be a string"));
     }
     result.insert("id".to_owned(), id.clone());
     for field in ["isResolved", "isOutdated"] {
-        let value = required_field(&thread, field)?;
+        let value = required_field(&review_thread, field)?;
         if !value.is_boolean() {
             return Err(invalid_response(format!(
                 "GitHub field {field} must be a boolean"
@@ -28,10 +28,10 @@ fn project(thread: Value, include_diff_hunk: bool) -> Result<Value> {
         result.insert(field.to_owned(), value.clone());
     }
     for field in ["path", "line", "originalLine", "startLine", "diffSide"] {
-        result.insert(field.to_owned(), nullable_location(&thread, field)?);
+        result.insert(field.to_owned(), nullable_location(&review_thread, field)?);
     }
 
-    let comments = required_field(&thread, "comments")?
+    let comments = required_field(&review_thread, "comments")?
         .as_array()
         .ok_or_else(|| invalid_response("GitHub comments must be an array"))?;
     let mut comments = comments
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn malformed_required_field_is_rejected_without_projecting_it() {
-        let result = project(json!({"id": 42}), false);
+        let result = project_review_thread(json!({"id": 42}), false);
         let Err(error) = result else {
             panic!("expected an invalid response")
         };

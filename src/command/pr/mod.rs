@@ -1,9 +1,9 @@
 mod checks;
 mod comments;
 mod overview;
+mod review_thread;
+mod review_threads;
 mod reviews;
-mod thread;
-mod threads;
 
 use crate::error::{Exit, Result};
 use crate::model::CheckDiagnosticsOptions;
@@ -16,11 +16,11 @@ pub(super) enum Action {
     Comments,
     Overview,
     Reviews,
-    Thread {
-        thread_id: String,
+    ReviewThread {
+        review_thread_id: String,
         include_diff_hunk: bool,
     },
-    Threads {
+    ReviewThreads {
         include_resolved: bool,
     },
 }
@@ -40,15 +40,17 @@ where
         "comments" => comments::parse_args(program, remaining),
         "overview" => overview::parse_args(program, remaining),
         "reviews" => reviews::parse_args(program, remaining),
-        "threads" => threads::parse_args(program, remaining),
-        "thread" => thread::parse_args(program, remaining),
+        "review-threads" => review_threads::parse_args(program, remaining),
+        "review-thread" => review_thread::parse_args(program, remaining),
         "-h" | "--help" => {
             print_help(program)?;
             std::process::exit(0);
         }
         _ => Err(pr_argument_error(
             program,
-            "the following arguments are required: subcommand",
+            &format!(
+                "argument subcommand: invalid choice: '{subcommand}' (choose from 'overview', 'comments', 'reviews', 'review-threads', 'review-thread', 'checks')"
+            ),
         )),
     }
 }
@@ -67,12 +69,12 @@ pub(super) fn execute(
         Action::Comments => comments::execute(target, repo, program),
         Action::Overview => overview::execute(target, repo, program),
         Action::Reviews => reviews::execute(target, repo, program),
-        Action::Thread {
-            thread_id,
+        Action::ReviewThread {
+            review_thread_id,
             include_diff_hunk,
-        } => thread::execute(target, repo, program, &thread_id, include_diff_hunk),
-        Action::Threads { include_resolved } => {
-            threads::execute(target, repo, program, include_resolved)
+        } => review_thread::execute(target, repo, program, &review_thread_id, include_diff_hunk),
+        Action::ReviewThreads { include_resolved } => {
+            review_threads::execute(target, repo, program, include_resolved)
         }
     }
 }
@@ -182,7 +184,9 @@ fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> 
 }
 
 fn usage(program: &str) -> String {
-    format!("usage: {program} pr [-h] {{overview,comments,reviews,threads,thread,checks}} ...")
+    format!(
+        "usage: {program} pr [-h] {{overview,comments,reviews,review-threads,review-thread,checks}} ..."
+    )
 }
 
 fn pr_argument_error(program: &str, message: &str) -> Exit {
@@ -197,7 +201,7 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  {{overview,comments,reviews,threads,thread,checks}}\n    overview  read pull request state and summaries\n    comments  read pull request conversation comments\n    reviews   list pull request review submissions\n    threads   list review thread summaries\n    thread    read one review thread\n    checks    read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read one review thread\n    checks          read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
     super::write_stdout(&text)

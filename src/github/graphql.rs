@@ -8,8 +8,8 @@ use crate::model::Target;
 use super::cli;
 
 mod pagination;
-pub mod thread;
-pub mod threads;
+pub mod review_thread;
+pub mod review_threads;
 
 const OVERVIEW_QUERY: &str = r"
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
