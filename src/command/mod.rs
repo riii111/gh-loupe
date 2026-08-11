@@ -88,10 +88,7 @@ fn root_usage(program: &str) -> String {
 
 fn root_argument_error(program: &str, message: &str) -> Exit {
     Exit {
-        message: Some(format!(
-            "{}\n{program}: error: {message}",
-            root_usage(program)
-        )),
+        message: format!("{}\n{program}: error: {message}", root_usage(program)),
         code: 2,
     }
 }

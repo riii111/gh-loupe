@@ -80,10 +80,10 @@ fn usage(program: &str) -> String {
 
 fn argument_error(program: &str, message: &str) -> Exit {
     Exit {
-        message: Some(format!(
+        message: format!(
             "{}\n{program} pr review-thread: error: {message}",
             usage(program)
-        )),
+        ),
         code: 2,
     }
 }
@@ -118,7 +118,7 @@ mod tests {
         assert!(
             error
                 .stderr_line()
-                .is_some_and(|message| message.contains("unrecognized arguments: --repo"))
+                .contains("unrecognized arguments: --repo")
         );
 
         let result = parse_args("gh-loupe", values(&["42", "review-thread-id", "--repo"]));
@@ -128,7 +128,7 @@ mod tests {
         assert!(
             error
                 .stderr_line()
-                .is_some_and(|message| message.contains("argument --repo: expected one argument"))
+                .contains("argument --repo: expected one argument")
         );
     }
 }

@@ -69,11 +69,7 @@ mod tests {
     }
 
     fn assert_invalid_response(error: Exit) {
-        assert!(
-            error
-                .stderr_line()
-                .is_some_and(|line| line.contains(r#""kind":"invalidResponse""#))
-        );
+        assert!(error.stderr_line().contains(r#""kind":"invalidResponse""#));
     }
 
     #[test]

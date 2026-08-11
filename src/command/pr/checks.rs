@@ -124,10 +124,7 @@ fn usage(program: &str) -> String {
 
 fn argument_error(program: &str, message: &str) -> Exit {
     Exit {
-        message: Some(format!(
-            "{}\n{program} pr checks: error: {message}",
-            usage(program)
-        )),
+        message: format!("{}\n{program} pr checks: error: {message}", usage(program)),
         code: 2,
     }
 }
@@ -197,8 +194,10 @@ mod tests {
             .expect_err("unrepresentable timeout must be rejected");
 
         assert_eq!(error.code, 2);
-        assert!(error
-            .stderr_line()
-            .is_some_and(|line| line.contains("cannot be represented as a diagnostic deadline")));
+        assert!(
+            error
+                .stderr_line()
+                .contains("cannot be represented as a diagnostic deadline")
+        );
     }
 }
