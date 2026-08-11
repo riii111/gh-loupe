@@ -170,7 +170,6 @@ JSON
   case "${GH_TEST_CHECKS_STATUS:-success}" in
     pending) exit 8 ;;
     failure) exit 1 ;;
-    unexpected) exit 23 ;;
   esac
   exit 0
 fi
