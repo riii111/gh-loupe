@@ -293,11 +293,28 @@ jq -e '. == {
   "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
 }' "$tmpdir/issue-default.stdout" >/dev/null
 test "$(sed -n '1p' "$issue_calls_file")" = 'repo view --json nameWithOwner'
-test "$(sed -n '2p' "$issue_calls_file")" = \
-  'api repos/riii111/dotfiles/issues/42'
-test "$(sed -n '3p' "$issue_calls_file")" = \
-  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
+grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_calls_file" >/dev/null
+grep -Fx \
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100' \
+  "$issue_calls_file" >/dev/null
 test "$(wc -l <"$issue_calls_file")" -eq 3
+
+issue_timing_file="$tmpdir/issue.timing"
+run_cli issue-parallel \
+  "GH_TEST_ISSUE_TIMING_FILE=$issue_timing_file" \
+  GH_TEST_ISSUE_DELAY=0.2 GH_TEST_ISSUE_COMMENTS_DELAY=0.2 -- \
+  issue 42 --repo riii111/dotfiles
+test "$(wc -l <"$issue_timing_file")" -eq 4
+test "$(sed -n '1p' "$issue_timing_file" | cut -d' ' -f2)" = start
+test "$(sed -n '2p' "$issue_timing_file" | cut -d' ' -f2)" = start
+test "$(sed -n '3p' "$issue_timing_file" | cut -d' ' -f2)" = end
+test "$(sed -n '4p' "$issue_timing_file" | cut -d' ' -f2)" = end
+test "$(grep -c '^issue start$' "$issue_timing_file")" -eq 1
+test "$(grep -c '^issue-comments start$' "$issue_timing_file")" -eq 1
+
+assert_runtime_failure issue-error-precedence notFound issue \
+  GH_TEST_MISSING_ISSUE=1 GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- \
+  issue 42 --repo riii111/dotfiles
 
 run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-url-compact.stderr"
@@ -514,7 +531,7 @@ test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
 
 calls_file="$tmpdir/comments.calls"
-run_comments comments-default "GH_TEST_CALLS_FILE=$calls_file" -- \
+run_comments comments-default "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=success -- \
   pr comments 42 --repo riii111/dotfiles
 jq -e '
   .data.comments == [
@@ -547,7 +564,7 @@ jq -e '
   ([.. | objects | keys[]] | any(. == "pull_request_review_id" or . == "diff_hunk" or . == "review" or . == "pullRequest") | not)
 ' "$tmpdir/comments-default.comments.stdout" >/dev/null
 test "$(cat "$calls_file")" = \
-  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments'
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
 test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -gt 1
 
 run_comments comments-url-compact GH_PR_COMMENTS=empty -- \
@@ -560,7 +577,7 @@ run_comments comments-inferred-repo "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMME
   pr comments 42 --compact
 test "$(sed -n '1p' "$calls_file")" = 'repo view --json nameWithOwner'
 test "$(sed -n '2p' "$calls_file")" = \
-  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments'
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
 test "$(wc -l <"$calls_file")" -eq 2
 
 assert_runtime_failure comments-invalid-page invalidResponse comments \

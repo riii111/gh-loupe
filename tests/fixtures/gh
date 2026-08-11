@@ -14,6 +14,18 @@ record_overview_timing() {
   fi
 }
 
+record_issue_timing() {
+  local operation="$1"
+  local delay="$2"
+  if [ -n "${GH_TEST_ISSUE_TIMING_FILE:-}" ]; then
+    printf '%s start\n' "$operation" >>"$GH_TEST_ISSUE_TIMING_FILE"
+  fi
+  sleep "$delay"
+  if [ -n "${GH_TEST_ISSUE_TIMING_FILE:-}" ]; then
+    printf '%s end\n' "$operation" >>"$GH_TEST_ISSUE_TIMING_FILE"
+  fi
+}
+
 if [ "${GH_TEST_NETWORK_FAILURE:-}" = 1 ]; then
   printf 'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n' >&2
   exit 1
@@ -413,7 +425,8 @@ JSON
   exit 0
 fi
 
-if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments" ]; then
+if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100" ] \
+  && { [ -n "${GH_PR_COMMENTS:-}" ] || [ -n "${GH_PR_COMMENTS_FAILURE:-}" ]; }; then
   if [ "${GH_PR_COMMENTS_FAILURE:-}" = 1 ]; then
     printf '[[{"node_id":"partial"}]]\n'
     printf 'dial tcp: lookup api.github.com: no such host\n' >&2
@@ -445,6 +458,7 @@ JSON
 fi
 
 if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100" ]; then
+  record_issue_timing issue-comments "${GH_TEST_ISSUE_COMMENTS_DELAY:-0}"
   if [ "${GH_TEST_ISSUE_COMMENTS_FAILURE:-}" = 1 ]; then
     printf 'simulated issue comments failure\n' >&2
     exit 31
@@ -467,6 +481,7 @@ if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/4
 fi
 
 if [ "$1" = api ] && [[ "$*" == *repos/riii111/dotfiles/issues/42* ]]; then
+  record_issue_timing issue "${GH_TEST_ISSUE_DELAY:-0}"
   if [ "${GH_TEST_MISSING_ISSUE:-}" = 1 ]; then
     printf 'issue not found\n' >&2
     exit 44

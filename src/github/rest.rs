@@ -89,7 +89,7 @@ pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
 
 pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
     let endpoint = format!(
-        "repos/{}/issues/{}/comments",
+        "repos/{}/issues/{}/comments?per_page=100",
         target.repository, target.number
     );
     let pages = cli::json_runtime(
