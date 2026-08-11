@@ -142,7 +142,7 @@ fn collect_diagnostics(
                 })
         })
         .collect::<Vec<_>>();
-    if diagnostic_jobs.len() < 2 {
+    if diagnostic_worker_count(diagnostic_jobs.len()) == 0 {
         for index in failed {
             ensure_before_deadline(deadline, timeout_message)?;
             let check = &mut checks[index];
@@ -228,6 +228,14 @@ struct DiagnosticContext<'a> {
     timeout_message: &'a str,
 }
 
+fn diagnostic_worker_count(job_count: usize) -> usize {
+    if job_count < 2 {
+        0
+    } else {
+        job_count.min(MAX_DIAGNOSTIC_WORKERS)
+    }
+}
+
 struct DiagnosticResult {
     annotations: Vec<Value>,
     log: Option<Value>,
@@ -306,7 +314,7 @@ fn collect_diagnostics_parallel(
             .collect::<Vec<_>>(),
     );
     let next_completed = Arc::new(AtomicUsize::new(0));
-    let worker_count = jobs.len().min(MAX_DIAGNOSTIC_WORKERS);
+    let worker_count = diagnostic_worker_count(jobs.len());
     mark_ordered_completion(&completed, &next_completed, total_progress, progress);
 
     thread::scope(|scope| {
@@ -317,14 +325,9 @@ fn collect_diagnostics_parallel(
             let completed = Arc::clone(&completed);
             let next_completed = Arc::clone(&next_completed);
             scope.spawn(move || {
-                loop {
-                    let mut next_job = next_job.lock().expect("lock next diagnostic job");
-                    if stop.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let job_position = *next_job;
-                    *next_job += 1;
-                    drop(next_job);
+                while let Some(job_position) =
+                    claim_next_diagnostic_job(&next_job, &stop, jobs.len())
+                {
                     let Some(job) = jobs.get(job_position) else {
                         break;
                     };
@@ -359,6 +362,20 @@ fn collect_diagnostics_parallel(
         }
     });
     results
+}
+
+fn claim_next_diagnostic_job(
+    next_job: &Mutex<usize>,
+    stop: &AtomicBool,
+    job_count: usize,
+) -> Option<usize> {
+    let mut next_job = next_job.lock().expect("lock next diagnostic job");
+    if stop.load(Ordering::Acquire) || *next_job >= job_count {
+        return None;
+    }
+    let job_position = *next_job;
+    *next_job += 1;
+    Some(job_position)
 }
 
 fn mark_ordered_completion(
@@ -905,6 +922,24 @@ impl Drop for Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_with_zero_or_one_job_do_not_create_workers() {
+        assert_eq!(diagnostic_worker_count(0), 0);
+        assert_eq!(diagnostic_worker_count(1), 0);
+        assert_eq!(diagnostic_worker_count(2), 2);
+        assert_eq!(diagnostic_worker_count(10), MAX_DIAGNOSTIC_WORKERS);
+    }
+
+    #[test]
+    fn diagnostic_job_claim_stops_atomically_after_failure() {
+        let next_job = Mutex::new(0);
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(claim_next_diagnostic_job(&next_job, &stop, 2), Some(0));
+        stop.store(true, Ordering::Release);
+        assert_eq!(claim_next_diagnostic_job(&next_job, &stop, 2), None);
+    }
 
     #[test]
     fn log_applies_line_limit_before_byte_limit() {

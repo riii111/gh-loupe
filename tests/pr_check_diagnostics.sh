@@ -23,7 +23,8 @@ run_diagnostics() {
     GH_DIAGNOSTICS_ROUNDS_FILE="${GH_DIAGNOSTICS_ROUNDS_FILE:-}" \
     GH_DIAGNOSTICS_MAX_ROUND_FILE="${GH_DIAGNOSTICS_MAX_ROUND_FILE:-}" \
     GH_DIAGNOSTICS_BATCH_DIR="${GH_DIAGNOSTICS_BATCH_DIR:-}" \
-    GH_DIAGNOSTICS_BARRIER_COUNT="${GH_DIAGNOSTICS_BARRIER_COUNT:-}" \
+    GH_DIAGNOSTICS_STAGGERED_LOW_FILE="${GH_DIAGNOSTICS_STAGGERED_LOW_FILE:-}" \
+    GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE="${GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE:-}" \
     "$GH_LOUPE_BIN" pr checks 42 --repo "$repository" "${@:2}"
 }
 
@@ -114,8 +115,9 @@ for failures in 0 1 2 10; do
   fi
 done
 
-if GH_DIAGNOSTICS_FAILURES=10 \
-  GH_DIAGNOSTICS_BARRIER_COUNT=4 \
+if GH_DIAGNOSTICS_FAILURES=2 \
+  GH_DIAGNOSTICS_STAGGERED_LOW_FILE="$tmpdir/staggered-low" \
+  GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE="$tmpdir/staggered-failure" \
   GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/staggered-active" \
   GH_DIAGNOSTICS_MAX_FILE="$tmpdir/staggered-max" \
   GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/staggered-started" \
@@ -131,8 +133,8 @@ test ! -s "$tmpdir/staggered.stdout"
 jq -e '.error.kind == "githubCli" and .error.message == "simulated staggered failure 2"' \
   "$tmpdir/staggered.stderr" >/dev/null
 test "$(cat "$tmpdir/staggered-active")" -eq 0
-test "$(cat "$tmpdir/staggered-max")" -eq 4
-test "$(wc -l <"$tmpdir/staggered-calls" | tr -d ' ')" -eq 5
+test "$(cat "$tmpdir/staggered-max")" -eq 2
+test "$(wc -l <"$tmpdir/staggered-calls" | tr -d ' ')" -eq 3
 
 GH_DIAGNOSTICS_DELAY_SECONDS=16 \
   run_diagnostics parallel-status-progress --failed-diagnostics --timeout 30 --compact \

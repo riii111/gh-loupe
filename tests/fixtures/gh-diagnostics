@@ -62,14 +62,13 @@ parallel_barrier() {
   fi
   parallel_lock
   local started=0
-  local expected="${GH_DIAGNOSTICS_BARRIER_COUNT:-${GH_DIAGNOSTICS_FAILURES}}"
   if [ -f "$GH_DIAGNOSTICS_STARTED_FILE" ]; then
     started="$(cat "$GH_DIAGNOSTICS_STARTED_FILE")"
   fi
   printf '%s\n' "$((started + 1))" >"$GH_DIAGNOSTICS_STARTED_FILE"
   parallel_unlock
   for _ in $(seq 1 5000); do
-    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "$expected" ]; then
+    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "${GH_DIAGNOSTICS_FAILURES}" ]; then
       return
     fi
     sleep 0.001
@@ -275,8 +274,27 @@ if [ "$1" = api ] && [[ "$*" == *check-runs/*/annotations* ]] && [[ "${GH_DIAGNO
     exit 1
   fi
   if [ "${GH_DIAGNOSTICS_MODE}" = parallel-staggered-error ]; then
-    parallel_barrier
+    if [ "$check_run_id" -eq 1001 ]; then
+      printf '1\n' >"$GH_DIAGNOSTICS_STAGGERED_LOW_FILE"
+      for _ in $(seq 1 5000); do
+        if [ -f "$GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE" ]; then
+          parallel_leave
+          printf '[[]]\n'
+          exit 0
+        fi
+        sleep 0.001
+      done
+      printf 'parallel staggered fixture low job timed out\n' >&2
+      exit 96
+    fi
     if [ "$check_run_id" -eq 1002 ]; then
+      for _ in $(seq 1 5000); do
+        if [ -f "$GH_DIAGNOSTICS_STAGGERED_LOW_FILE" ]; then
+          break
+        fi
+        sleep 0.001
+      done
+      printf '1\n' >"$GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE"
       parallel_leave
       printf 'simulated staggered failure 2\n' >&2
       exit 41
