@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crate::error::{Exit, Result};
@@ -133,12 +132,12 @@ fn argument_error(program: &str, message: &str) -> Exit {
     }
 }
 
-fn print_help(program: &str) {
+fn print_help(program: &str) -> Result<()> {
     let text = format!(
         "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n  --compact              emit one-line JSON\n",
         usage(program)
     );
-    io::stdout().write_all(text.as_bytes()).expect("write help");
+    super::super::write_stdout(&text)
 }
 
 #[cfg(test)]

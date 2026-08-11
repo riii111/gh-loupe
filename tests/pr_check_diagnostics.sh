@@ -122,6 +122,28 @@ test ! -s "$tmpdir/no-failures.stderr"
 jq -e '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
   "$tmpdir/no-failures.json" >/dev/null
 
+for mode in pagination-repeat pagination-cycle pagination-missing pagination-empty pagination-wrong-type head-oid-changed; do
+  case "$mode" in
+    pagination-repeat) expected_calls=2 ;;
+    pagination-cycle) expected_calls=3 ;;
+    head-oid-changed) expected_calls=2 ;;
+    *) expected_calls=1 ;;
+  esac
+  calls_file="$tmpdir/$mode-calls"
+  set +e
+  GH_DIAGNOSTICS_CALLS="$calls_file" run_diagnostics "$mode" \
+    --failed-diagnostics --quiet --compact \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"
+  status=$?
+  set -e
+  test "$status" -eq 1
+  test ! -s "$tmpdir/$mode.stdout"
+  test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
+  jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' \
+    "$tmpdir/$mode.stderr" >/dev/null
+  test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
+done
+
 for mode in annotation-failure metadata-failure log-failure; do
   set +e
   run_diagnostics "$mode" --include-failed-logs --compact \
