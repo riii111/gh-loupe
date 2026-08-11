@@ -12,10 +12,10 @@ if [ "$1 $2" = "api graphql" ]; then
     head-oid-changed)
       cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
       if [ "$cursor" = initial ]; then
-        oid=head
+        oid='head'
         page_info='{"hasNextPage":true,"endCursor":"head-change-cursor"}'
       else
-        oid=changed-head
+        oid='changed-head'
         page_info='{"hasNextPage":false,"endCursor":null}'
       fi
       cat <<JSON

@@ -23,6 +23,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
+          toolchain: 1.96.0
           components: rustfmt
       - run: cargo fmt --all -- --check
 
@@ -35,9 +36,10 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
+          toolchain: 1.96.0
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
     name: Test
@@ -47,11 +49,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: 1.96.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
         with:
           tool: nextest
-      - run: cargo nextest run --workspace
+      - run: cargo nextest run --workspace --locked
 
   build:
     name: Build
@@ -61,8 +65,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: 1.96.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo build --workspace --release
+      - run: cargo build --workspace --release --locked
 
   audit:
     name: Security Audit
@@ -87,3 +93,14 @@ jobs:
         with:
           tool: cargo-machete
       - run: cargo machete
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update
+      - run: sudo apt-get install --no-install-recommends --yes shellcheck
+      - run: shellcheck install.sh tests/*.sh tests/fixtures/gh tests/fixtures/gh-diagnostics
