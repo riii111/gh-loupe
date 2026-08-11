@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+status=0
 
 trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
@@ -12,7 +13,18 @@ chmod +x "$tmpdir/bin/gh"
 
 run_diagnostics() {
   local repository="${GH_DIAGNOSTICS_REPOSITORY:-owner/repo}"
-  env PATH="$tmpdir/bin:$PATH" GH_DIAGNOSTICS_MODE="${1:-normal}" \
+  env PATH="$tmpdir/bin:$PATH" \
+    GH_DIAGNOSTICS_MODE="${1:-normal}" \
+    GH_DIAGNOSTICS_FAILURES="${GH_DIAGNOSTICS_FAILURES:-}" \
+    GH_DIAGNOSTICS_DELAY_SECONDS="${GH_DIAGNOSTICS_DELAY_SECONDS:-}" \
+    GH_DIAGNOSTICS_ACTIVE_FILE="${GH_DIAGNOSTICS_ACTIVE_FILE:-}" \
+    GH_DIAGNOSTICS_MAX_FILE="${GH_DIAGNOSTICS_MAX_FILE:-}" \
+    GH_DIAGNOSTICS_STARTED_FILE="${GH_DIAGNOSTICS_STARTED_FILE:-}" \
+    GH_DIAGNOSTICS_ROUNDS_FILE="${GH_DIAGNOSTICS_ROUNDS_FILE:-}" \
+    GH_DIAGNOSTICS_MAX_ROUND_FILE="${GH_DIAGNOSTICS_MAX_ROUND_FILE:-}" \
+    GH_DIAGNOSTICS_BATCH_DIR="${GH_DIAGNOSTICS_BATCH_DIR:-}" \
+    GH_DIAGNOSTICS_STAGGERED_LOW_FILE="${GH_DIAGNOSTICS_STAGGERED_LOW_FILE:-}" \
+    GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE="${GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE:-}" \
     "$GH_LOUPE_BIN" pr checks 42 --repo "$repository" "${@:2}"
 }
 
@@ -56,6 +68,128 @@ jq -e '
 ' "$tmpdir/check-run-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
 test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
+
+for failures in 0 1 2 10; do
+  calls_file="$tmpdir/parallel-$failures-calls"
+  active_file="$tmpdir/parallel-$failures-active"
+  max_file="$tmpdir/parallel-$failures-max"
+  rounds_file="$tmpdir/parallel-$failures-rounds"
+  max_round_file="$tmpdir/parallel-$failures-max-round"
+  batch_dir="$tmpdir/parallel-$failures-batches"
+  mkdir -p "$batch_dir"
+  mode=parallel
+  if [ "$failures" -eq 10 ]; then
+    mode=parallel-timing
+  fi
+  GH_DIAGNOSTICS_FAILURES="$failures" \
+    GH_DIAGNOSTICS_DELAY_SECONDS=0.04 \
+    GH_DIAGNOSTICS_ACTIVE_FILE="$active_file" \
+    GH_DIAGNOSTICS_MAX_FILE="$max_file" \
+    GH_DIAGNOSTICS_ROUNDS_FILE="$rounds_file" \
+    GH_DIAGNOSTICS_MAX_ROUND_FILE="$max_round_file" \
+    GH_DIAGNOSTICS_BATCH_DIR="$batch_dir" \
+    GH_DIAGNOSTICS_CALLS="$calls_file" \
+    run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+    >"$tmpdir/parallel-$failures.json"
+  test "$(wc -l <"$calls_file" | tr -d ' ')" -eq "$((failures + 1))"
+  if [ "$failures" -eq 0 ]; then
+    test ! -e "$max_file"
+    jq -e '.data.checks == []' "$tmpdir/parallel-$failures.json" >/dev/null
+  else
+    expected_workers="$failures"
+    if [ "$expected_workers" -gt 4 ]; then
+      expected_workers=4
+    fi
+    test "$(cat "$max_file")" -eq "$expected_workers"
+    jq -e --argjson failures "$failures" \
+      '.data.checks | length == $failures and all(.annotations == [])' \
+      "$tmpdir/parallel-$failures.json" >/dev/null
+  fi
+  if [ "$failures" -eq 10 ]; then
+    test "$(cat "$max_round_file")" -eq 3
+    test "$(cat "$batch_dir/1")" -eq 4
+    test "$(cat "$batch_dir/2")" -eq 4
+    test "$(cat "$batch_dir/3")" -eq 2
+    # Each synchronized batch sleeps for 40ms; three batches are at most half of 400ms serially.
+    test "$((3 * 40))" -le "$((10 * 40 / 2))"
+  fi
+done
+
+if GH_DIAGNOSTICS_FAILURES=2 \
+  GH_DIAGNOSTICS_STAGGERED_LOW_FILE="$tmpdir/staggered-low" \
+  GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE="$tmpdir/staggered-failure" \
+  GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/staggered-active" \
+  GH_DIAGNOSTICS_MAX_FILE="$tmpdir/staggered-max" \
+  GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/staggered-started" \
+  GH_DIAGNOSTICS_CALLS="$tmpdir/staggered-calls" \
+  run_diagnostics parallel-staggered-error --failed-diagnostics --quiet --compact \
+  >"$tmpdir/staggered.stdout" 2>"$tmpdir/staggered.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/staggered.stdout"
+jq -e '.error.kind == "githubCli" and .error.message == "simulated staggered failure 2"' \
+  "$tmpdir/staggered.stderr" >/dev/null
+test "$(cat "$tmpdir/staggered-active")" -eq 0
+test "$(cat "$tmpdir/staggered-max")" -eq 2
+test "$(wc -l <"$tmpdir/staggered-calls" | tr -d ' ')" -eq 3
+
+GH_DIAGNOSTICS_DELAY_SECONDS=16 \
+  run_diagnostics parallel-status-progress --failed-diagnostics --timeout 30 --compact \
+  >"$tmpdir/status-progress.json" 2>"$tmpdir/status-progress.stderr"
+grep -Fx 'gh-loupe: collecting diagnostics for 3 failed checks' \
+  "$tmpdir/status-progress.stderr" >/dev/null
+grep -E '^gh-loupe: diagnostics 1/3 complete; (15|16)s elapsed$' \
+  "$tmpdir/status-progress.stderr" >/dev/null
+jq -e '
+  [.data.checks[].name] == ["aaa-status", "bbb-failure", "ccc-failure"] and
+  .data.checks[0].annotations == [] and
+  .data.checks[1].annotations == [] and
+  .data.checks[2].annotations == []
+' "$tmpdir/status-progress.json" >/dev/null
+
+if GH_DIAGNOSTICS_FAILURES=4 \
+  GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-error-active" \
+  GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-error-max" \
+  GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/parallel-error-started" \
+  GH_DIAGNOSTICS_CALLS="$tmpdir/parallel-error-calls" \
+  run_diagnostics parallel-error --failed-diagnostics --quiet --compact \
+  >"$tmpdir/parallel-error.stdout" 2>"$tmpdir/parallel-error.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/parallel-error.stdout"
+jq -e '
+  .error.kind == "githubCli" and
+  .error.message == "simulated parallel failure 1"
+' "$tmpdir/parallel-error.stderr" >/dev/null
+test "$(cat "$tmpdir/parallel-error-active")" -eq 0
+test "$(cat "$tmpdir/parallel-error-max")" -eq 4
+
+if GH_DIAGNOSTICS_FAILURES=4 \
+  GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-rate-limit-active" \
+  GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-rate-limit-max" \
+  GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/parallel-rate-limit-started" \
+  GH_DIAGNOSTICS_CALLS="$tmpdir/parallel-rate-limit-calls" \
+  run_diagnostics parallel-rate-limit --failed-diagnostics --quiet --compact \
+  >"$tmpdir/parallel-rate-limit.stdout" 2>"$tmpdir/parallel-rate-limit.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/parallel-rate-limit.stdout"
+jq -e '
+  .error.kind == "rateLimited" and
+  .error.retryAfterSeconds == 45 and
+  .error.retryable == true
+' "$tmpdir/parallel-rate-limit.stderr" >/dev/null
+test "$(cat "$tmpdir/parallel-rate-limit-active")" -eq 0
+test "$(cat "$tmpdir/parallel-rate-limit-max")" -eq 4
 
 run_diagnostics pending-metadata --failed-diagnostics --quiet --compact \
   >"$tmpdir/pending-metadata.json"

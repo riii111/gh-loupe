@@ -5,6 +5,104 @@ if [ -n "${GH_DIAGNOSTICS_CALLS:-}" ]; then
   printf '%s\n' "$*" >>"$GH_DIAGNOSTICS_CALLS"
 fi
 
+parallel_lock() {
+  local lock="${GH_DIAGNOSTICS_ACTIVE_FILE}.lock"
+  while ! mkdir "$lock" 2>/dev/null; do
+    sleep 0.001
+  done
+}
+
+parallel_unlock() {
+  rmdir "${GH_DIAGNOSTICS_ACTIVE_FILE}.lock"
+}
+
+parallel_enter() {
+  if [ -z "${GH_DIAGNOSTICS_ACTIVE_FILE:-}" ]; then
+    return
+  fi
+  parallel_lock
+  local active=0
+  if [ -f "$GH_DIAGNOSTICS_ACTIVE_FILE" ]; then
+    active="$(cat "$GH_DIAGNOSTICS_ACTIVE_FILE")"
+  fi
+  active=$((active + 1))
+  printf '%s\n' "$active" >"$GH_DIAGNOSTICS_ACTIVE_FILE"
+  if [ ! -f "${GH_DIAGNOSTICS_MAX_FILE}" ] || [ "$active" -gt "$(cat "$GH_DIAGNOSTICS_MAX_FILE")" ]; then
+    printf '%s\n' "$active" >"$GH_DIAGNOSTICS_MAX_FILE"
+  fi
+  if [ -n "${GH_DIAGNOSTICS_ROUNDS_FILE:-}" ]; then
+    local started=0
+    if [ -f "$GH_DIAGNOSTICS_ROUNDS_FILE" ]; then
+      started="$(cat "$GH_DIAGNOSTICS_ROUNDS_FILE")"
+    fi
+    started=$((started + 1))
+    printf '%s\n' "$started" >"$GH_DIAGNOSTICS_ROUNDS_FILE"
+    local round=$(((started - 1) / 4 + 1))
+    if [ ! -f "${GH_DIAGNOSTICS_MAX_ROUND_FILE}" ] || [ "$round" -gt "$(cat "$GH_DIAGNOSTICS_MAX_ROUND_FILE")" ]; then
+      printf '%s\n' "$round" >"$GH_DIAGNOSTICS_MAX_ROUND_FILE"
+    fi
+  fi
+  parallel_unlock
+}
+
+parallel_leave() {
+  if [ -z "${GH_DIAGNOSTICS_ACTIVE_FILE:-}" ]; then
+    return
+  fi
+  parallel_lock
+  local active
+  active="$(cat "$GH_DIAGNOSTICS_ACTIVE_FILE")"
+  printf '%s\n' "$((active - 1))" >"$GH_DIAGNOSTICS_ACTIVE_FILE"
+  parallel_unlock
+}
+
+parallel_barrier() {
+  if [ -z "${GH_DIAGNOSTICS_STARTED_FILE:-}" ]; then
+    return
+  fi
+  parallel_lock
+  local started=0
+  if [ -f "$GH_DIAGNOSTICS_STARTED_FILE" ]; then
+    started="$(cat "$GH_DIAGNOSTICS_STARTED_FILE")"
+  fi
+  printf '%s\n' "$((started + 1))" >"$GH_DIAGNOSTICS_STARTED_FILE"
+  parallel_unlock
+  for _ in $(seq 1 5000); do
+    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "${GH_DIAGNOSTICS_FAILURES}" ]; then
+      return
+    fi
+    sleep 0.001
+  done
+  printf 'parallel fixture barrier timed out\n' >&2
+  exit 98
+}
+
+parallel_timing_barrier() {
+  local started
+  started="$(cat "$GH_DIAGNOSTICS_ROUNDS_FILE")"
+  local batch=$(((started - 1) / 4 + 1))
+  local expected=$((GH_DIAGNOSTICS_FAILURES - (batch - 1) * 4))
+  if [ "$expected" -gt 4 ]; then
+    expected=4
+  fi
+  local batch_file="$GH_DIAGNOSTICS_BATCH_DIR/$batch"
+  parallel_lock
+  local count=0
+  if [ -f "$batch_file" ]; then
+    count="$(cat "$batch_file")"
+  fi
+  printf '%s\n' "$((count + 1))" >"$batch_file"
+  parallel_unlock
+  for _ in $(seq 1 5000); do
+    if [ "$(cat "$batch_file")" -ge "$expected" ]; then
+      return
+    fi
+    sleep 0.001
+  done
+  printf 'parallel timing fixture barrier timed out\n' >&2
+  exit 97
+}
+
 if [ "$1 $2" = "api graphql" ]; then
   payload="$(cat)"
   test -n "$payload"
@@ -19,6 +117,24 @@ if [ "$1 $2" = "api graphql" ]; then
       cat <<'JSON'
 {"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","databaseId":100,"name":"required-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/required","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":101,"name":"optional-failure","isRequired":false,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z","detailsUrl":"https://ci.example.test/optional","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
 JSON
+      ;;
+    parallel-status-progress)
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"aaa-status","isRequired":true,"state":"FAILURE","targetUrl":"https://ci.example.test/status"},{"__typename":"CheckRun","databaseId":1101,"name":"bbb-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/parallel/1","checkSuite":{"workflowRun":null}},{"__typename":"CheckRun","databaseId":1102,"name":"ccc-failure","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/parallel/2","checkSuite":{"workflowRun":null}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}
+JSON
+      ;;
+    parallel|parallel-error|parallel-rate-limit|parallel-timing|parallel-staggered-error)
+      failures="${GH_DIAGNOSTICS_FAILURES:-0}"
+      printf '%s' '{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"head","statusCheckRollup":{"contexts":{"nodes":['
+      if [ "$failures" -gt 0 ]; then
+        for i in $(seq 1 "$failures"); do
+          if [ "$i" -gt 1 ]; then
+            printf ','
+          fi
+          printf '{"__typename":"CheckRun","databaseId":%d,"name":"parallel-failure-%02d","isRequired":true,"status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z","detailsUrl":"https://ci.example.test/parallel/%d","checkSuite":{"workflowRun":null}}' "$((1000 + i))" "$i" "$i"
+        done
+      fi
+      printf '%s\n' '],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]}}}}}'
       ;;
     head-oid-changed)
       cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
@@ -137,6 +253,59 @@ JSON
   cat <<'JSON'
 [{"total_count":2,"check_runs":[{"id":100,"name":"actions-failure","details_url":"https://github.com/owner/repo/actions/runs/10/job/20?pr=42","status":"completed","conclusion":"failure","started_at":"2026-08-11T10:00:00Z","completed_at":"2026-08-11T10:05:00Z"},{"id":101,"name":"external-cancel","details_url":"https://ci.example.test/build/7","status":"completed","conclusion":"cancelled","started_at":"2026-08-11T09:00:00Z","completed_at":"2026-08-11T09:05:00Z"}]}]
 JSON
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *check-runs/*/annotations* ]] && [[ "${GH_DIAGNOSTICS_MODE:-normal}" == parallel* ]]; then
+  check_run_url="${!#}"
+  check_run_id="${check_run_url##*check-runs/}"
+  check_run_id="${check_run_id%%/*}"
+  parallel_enter
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-error ]; then
+    parallel_barrier
+    parallel_leave
+    printf 'simulated parallel failure %s\n' "$((check_run_id - 1000))" >&2
+    exit 41
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-rate-limit ]; then
+    parallel_barrier
+    parallel_leave
+    printf 'secondary rate limit; retry-after: 45\n' >&2
+    exit 1
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-staggered-error ]; then
+    if [ "$check_run_id" -eq 1001 ]; then
+      printf '1\n' >"$GH_DIAGNOSTICS_STAGGERED_LOW_FILE"
+      for _ in $(seq 1 5000); do
+        if [ -f "$GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE" ]; then
+          parallel_leave
+          printf '[[]]\n'
+          exit 0
+        fi
+        sleep 0.001
+      done
+      printf 'parallel staggered fixture low job timed out\n' >&2
+      exit 96
+    fi
+    if [ "$check_run_id" -eq 1002 ]; then
+      for _ in $(seq 1 5000); do
+        if [ -f "$GH_DIAGNOSTICS_STAGGERED_LOW_FILE" ]; then
+          break
+        fi
+        sleep 0.001
+      done
+      printf '1\n' >"$GH_DIAGNOSTICS_STAGGERED_FAILURE_FILE"
+      parallel_leave
+      printf 'simulated staggered failure 2\n' >&2
+      exit 41
+    fi
+  fi
+  if [ "${GH_DIAGNOSTICS_MODE}" = parallel-timing ]; then
+    parallel_timing_barrier
+  fi
+  sleep "${GH_DIAGNOSTICS_DELAY_SECONDS:-0.04}"
+  parallel_leave
+  printf '[[]]\n'
   exit 0
 fi
 
