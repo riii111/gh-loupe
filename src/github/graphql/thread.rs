@@ -171,7 +171,7 @@ fn query(document: &str, variables: &str) -> Result<Value> {
         {
             return Err(not_found(message));
         }
-        return Err(cli::classify_failure(1, message.as_bytes()));
+        return Err(cli::runtime_cli_failure(1, message.as_bytes()));
     }
     response
         .get("data")

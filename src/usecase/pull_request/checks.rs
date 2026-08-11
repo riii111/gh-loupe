@@ -34,38 +34,20 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         options.timeout_seconds
     );
     let deadline = diagnostic_deadline(options.timeout_seconds);
-    let (mut checks, diagnostic_head) = if diagnostics_requested {
+    let checks = if diagnostics_requested {
         let (head_oid, contexts) =
             github::graphql::pull_request_check_contexts(target, deadline, &timeout_message)?;
-        (
-            validate_check_contexts(&contexts, required)?,
-            Some(head_oid),
-        )
-    } else {
-        let response = github::pull_request::checks(target, required)?;
-        let values = response
-            .as_array()
-            .ok_or_else(|| invalid_response("GitHub returned an invalid checks response"))?;
-        (
-            values
-                .iter()
-                .map(validate_check)
-                .collect::<Result<Vec<_>>>()?,
-            None,
-        )
-    };
-    checks.sort_by(|left, right| {
-        string_field(left, "name")
-            .cmp(string_field(right, "name"))
-            .then_with(|| string_field(left, "link").cmp(string_field(right, "link")))
-    });
-
-    if diagnostics_requested {
+        let mut checks = validate_check_contexts(&contexts, required)?;
+        checks.sort_by(|left, right| {
+            string_field(left, "name")
+                .cmp(string_field(right, "name"))
+                .then_with(|| string_field(left, "link").cmp(string_field(right, "link")))
+        });
         collect_diagnostics(
             target,
             &mut checks,
             options,
-            diagnostic_head.as_deref().expect("diagnostic head is set"),
+            &head_oid,
             deadline,
             &timeout_message,
         )?;
@@ -73,7 +55,24 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
             check.remove(CHECK_RUN_MARKER);
             check.remove(CHECK_RUN_ID);
         }
-    }
+        checks
+    } else {
+        let response = github::pull_request::checks(target, required)?;
+        let values = response
+            .as_array()
+            .ok_or_else(|| invalid_response("GitHub returned an invalid checks response"))?;
+        let mut checks = values
+            .iter()
+            .map(validate_check)
+            .collect::<Result<Vec<_>>>()?;
+        checks.sort_by(|left, right| {
+            string_field(left, "name")
+                .cmp(string_field(right, "name"))
+                .then_with(|| string_field(left, "link").cmp(string_field(right, "link")))
+        });
+        checks
+    };
+
     Ok(output::success(json!({ "checks": checks })))
 }
 

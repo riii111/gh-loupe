@@ -61,7 +61,7 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
                 "pull request not found: {}#{}",
                 target.repository, target.number
             );
-            return Err(cli::classify_failure(1, message.as_bytes()));
+            return Err(cli::runtime_cli_failure(1, message.as_bytes()));
         }
         let connection = value_at(pull_request, &["reviewThreads"])?;
         threads.extend(nodes(connection)?.iter().cloned());
@@ -141,7 +141,7 @@ fn query(document: &str, variables: &str) -> Result<Value> {
     let response = cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload), false)?;
     if let Some(errors) = response.get("errors") {
         let message = format!("GitHub GraphQL error: {errors}");
-        return Err(cli::classify_failure(1, message.as_bytes()));
+        return Err(cli::runtime_cli_failure(1, message.as_bytes()));
     }
     response
         .get("data")

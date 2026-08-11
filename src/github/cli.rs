@@ -67,7 +67,7 @@ where
 {
     let output = runtime_output(args, None, deadline, timeout_message)?;
     if !output.status.success() {
-        return Err(classify_failure(
+        return Err(runtime_cli_failure(
             output.status.code().unwrap_or(1),
             &output.stderr,
         ));
@@ -111,7 +111,7 @@ fn parse_runtime_json(
 ) -> Result<Value> {
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() && (!allow_nonzero_json || !matches!(code, 1 | 8)) {
-        return Err(classify_failure(code, &output.stderr));
+        return Err(runtime_cli_failure(code, &output.stderr));
     }
     match serde_json::from_slice(&output.stdout) {
         Ok(response) => Ok(response),
@@ -126,7 +126,7 @@ fn parse_runtime_json(
         {
             Ok(Value::Array(Vec::new()))
         }
-        Err(_error) if !output.status.success() => Err(classify_failure(code, &output.stderr)),
+        Err(_error) if !output.status.success() => Err(runtime_cli_failure(code, &output.stderr)),
         Err(error) => Err(runtime_exit(
             ErrorKind::InvalidResponse,
             format!("GitHub returned invalid JSON: {error}"),
@@ -171,63 +171,8 @@ where
     }
 }
 
-pub(super) fn classify_failure(code: i32, stderr: &[u8]) -> Exit {
-    let message = String::from_utf8_lossy(stderr).trim().to_owned();
-    let message = if message.is_empty() {
-        format!("GitHub CLI exited with status {code}")
-    } else {
-        message
-    };
-    let normalized = message.to_ascii_lowercase();
-    let (kind, retryable) = if code == 4
-        || normalized.contains("gh auth login")
-        || normalized.contains("http 401")
-        || normalized.contains("authentication")
-    {
-        (ErrorKind::Authentication, false)
-    } else if normalized.contains("rate limit") || normalized.contains("secondary rate") {
-        (ErrorKind::RateLimited, true)
-    } else if normalized.contains("http 403") || normalized.contains("forbidden") {
-        (ErrorKind::Authorization, false)
-    } else if normalized.contains("http 404")
-        || normalized.contains("not found")
-        || normalized.contains("could not resolve to a pullrequest")
-        || normalized.contains("could not resolve to a repository")
-    {
-        (ErrorKind::NotFound, false)
-    } else if normalized.contains("could not resolve host")
-        || normalized.contains("dial tcp")
-        || normalized.contains("no such host")
-        || normalized.contains("error connecting to ")
-        || normalized.contains("check your internet connection")
-        || normalized.contains("connection reset")
-        || normalized.contains("connection refused")
-        || normalized.contains("tls handshake")
-        || normalized.contains("network")
-    {
-        (ErrorKind::Network, true)
-    } else if normalized.contains("timed out") || normalized.contains("timeout") {
-        (ErrorKind::Timeout, true)
-    } else {
-        (ErrorKind::GitHubCli, false)
-    };
-    let retry_after_seconds = (kind == ErrorKind::RateLimited)
-        .then(|| parse_retry_after_seconds(&normalized))
-        .flatten();
-    runtime_exit(kind, message, retryable, retry_after_seconds)
-}
-
-fn parse_retry_after_seconds(message: &str) -> Option<u64> {
-    ["retry-after:", "retry after"]
-        .into_iter()
-        .find_map(|marker| {
-            let remainder = message.split_once(marker)?.1.trim_start();
-            let digits = remainder
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>();
-            (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
-        })
+pub(super) fn runtime_cli_failure(code: i32, stderr: &[u8]) -> Exit {
+    Exit::runtime(&RuntimeError::from_cli_process_failure(code, stderr), 1)
 }
 
 fn runtime_exit(
@@ -512,7 +457,7 @@ mod tests {
 
     #[test]
     fn runtime_failures_are_classified_without_losing_retry_after() {
-        let rate_limit = classify_failure(1, b"secondary rate limit; retry-after: 45\n");
+        let rate_limit = runtime_cli_failure(1, b"secondary rate limit; retry-after: 45\n");
         assert_eq!(
             rate_limit.stderr_line(),
             Some(
@@ -520,7 +465,7 @@ mod tests {
             )
         );
 
-        let network = classify_failure(1, b"could not resolve host: api.github.com\n");
+        let network = runtime_cli_failure(1, b"could not resolve host: api.github.com\n");
         assert!(
             network
                 .stderr_line()
@@ -528,7 +473,7 @@ mod tests {
                 .contains(r#""kind":"network"#)
         );
 
-        let empty_authentication = classify_failure(4, b"");
+        let empty_authentication = runtime_cli_failure(4, b"");
         assert!(
             empty_authentication
                 .stderr_line()
@@ -536,7 +481,7 @@ mod tests {
                 .contains(r#""kind":"authentication""#)
         );
 
-        let dns = classify_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
+        let dns = runtime_cli_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
         assert!(
             dns.stderr_line()
                 .expect("structured DNS error")

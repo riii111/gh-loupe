@@ -2,10 +2,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-#[allow(
-    dead_code,
-    reason = "used by follow-up subcommands with schema v1 output"
-)]
 pub fn success(data: Value) -> Value {
     json!({
         "schemaVersion": 1,

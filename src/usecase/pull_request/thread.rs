@@ -13,12 +13,20 @@ pub fn execute(target: &Target, thread_id: &str, include_diff_hunk: bool) -> Res
 
 fn project(thread: Value, include_diff_hunk: bool) -> Result<Value> {
     let mut result = Map::new();
-    for field in ["id", "isResolved", "isOutdated"] {
-        result.insert(field.to_owned(), required_field(&thread, field)?.clone());
+    let id = required_field(&thread, "id")?;
+    if !id.is_string() {
+        return Err(invalid_response("GitHub field id must be a string"));
     }
-    validate_string(&result, "id")?;
-    validate_bool(&result, "isResolved")?;
-    validate_bool(&result, "isOutdated")?;
+    result.insert("id".to_owned(), id.clone());
+    for field in ["isResolved", "isOutdated"] {
+        let value = required_field(&thread, field)?;
+        if !value.is_boolean() {
+            return Err(invalid_response(format!(
+                "GitHub field {field} must be a boolean"
+            )));
+        }
+        result.insert(field.to_owned(), value.clone());
+    }
     for field in ["path", "line", "originalLine", "startLine", "diffSide"] {
         result.insert(field.to_owned(), nullable_location(&thread, field)?);
     }
@@ -42,13 +50,13 @@ fn project(thread: Value, include_diff_hunk: bool) -> Result<Value> {
 fn project_comment(comment: &Value, include_diff_hunk: bool) -> Result<Value> {
     let mut result = Map::new();
     for field in ["id", "url", "body", "createdAt", "updatedAt"] {
-        let value = required_field(comment, field)?.clone();
+        let value = required_field(comment, field)?;
         if !value.is_string() {
             return Err(invalid_response(format!(
                 "GitHub field {field} must be a string"
             )));
         }
-        result.insert(field.to_owned(), value);
+        result.insert(field.to_owned(), value.clone());
     }
     let author = required_field(comment, "author")?;
     let author = match author {
@@ -90,26 +98,6 @@ fn required_field<'a>(value: &'a Value, field: &str) -> Result<&'a Value> {
         .ok_or_else(|| invalid_response(format!("GitHub response omitted {field}")))
 }
 
-fn validate_string(value: &Map<String, Value>, field: &str) -> Result<()> {
-    if value.get(field).is_some_and(Value::is_string) {
-        Ok(())
-    } else {
-        Err(invalid_response(format!(
-            "GitHub field {field} must be a string"
-        )))
-    }
-}
-
-fn validate_bool(value: &Map<String, Value>, field: &str) -> Result<()> {
-    if value.get(field).is_some_and(Value::is_boolean) {
-        Ok(())
-    } else {
-        Err(invalid_response(format!(
-            "GitHub field {field} must be a boolean"
-        )))
-    }
-}
-
 fn nullable_location(value: &Value, field: &str) -> Result<Value> {
     let value = required_field(value, field)?;
     let valid = match field {
@@ -133,4 +121,25 @@ fn string_value<'a>(value: &'a Value, field: &str) -> &'a str {
 
 fn invalid_response(message: impl Into<String>) -> Exit {
     Exit::invalid_response(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn malformed_required_field_is_rejected_without_projecting_it() {
+        let result = project(json!({"id": 42}), false);
+        let Err(error) = result else {
+            panic!("expected an invalid response")
+        };
+
+        assert!(
+            error
+                .stderr_line()
+                .is_some_and(|message| message.contains("GitHub field id must be a string"))
+        );
+    }
 }
