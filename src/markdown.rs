@@ -216,15 +216,18 @@ fn code_mask(body: &str) -> Vec<bool> {
     let mut protected = vec![false; bytes.len()];
     let mut cursor = 0;
     let mut list_content_indent = None;
+    let mut list_content_column = None;
     while cursor < bytes.len() {
         let first_line_end = line_end(bytes, cursor);
-        let (_, _, current_list_indent) = container_prefix_end(bytes, cursor, first_line_end);
-        if current_list_indent.is_some() {
+        let (container_cursor, _, current_list_indent) =
+            container_prefix_end(bytes, cursor, first_line_end);
+        if let Some(indent) = current_list_indent {
             list_content_indent = current_list_indent;
+            list_content_column = Some(visual_column(bytes, cursor, cursor + indent));
         }
         let blank_line = is_blank_line(bytes, cursor, first_line_end);
-        let in_list_content = list_content_indent
-            .is_some_and(|indent| leading_space_count(bytes, cursor, first_line_end) >= indent);
+        let line_content_column = visual_column(bytes, cursor, container_cursor)
+            + leading_column(bytes, container_cursor, first_line_end);
         if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_indent) {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
@@ -237,14 +240,24 @@ fn code_mask(body: &str) -> Vec<bool> {
                     break;
                 }
             }
-        } else if indented_code(bytes, cursor, first_line_end) && !in_list_content {
+        } else if indented_code(
+            bytes,
+            cursor,
+            first_line_end,
+            container_cursor,
+            list_content_column,
+        ) {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
         } else {
             cursor = first_line_end;
         }
-        if current_list_indent.is_none() && !in_list_content && !blank_line {
+        if current_list_indent.is_none()
+            && !blank_line
+            && list_content_column.is_none_or(|base| line_content_column < base)
+        {
             list_content_indent = None;
+            list_content_column = None;
         }
     }
 
@@ -301,6 +314,9 @@ fn fence_start(
     }
     let fence = bytes[cursor];
     let length = run_length(bytes, cursor, fence);
+    if fence == b'`' && bytes[cursor + length..end].contains(&b'`') {
+        return None;
+    }
     (length >= 3).then_some(Fence {
         byte: fence,
         length,
@@ -371,12 +387,19 @@ fn is_list_marker(bytes: &[u8], start: usize, end: usize) -> bool {
             .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
 }
 
-fn indented_code(bytes: &[u8], start: usize, end: usize) -> bool {
-    let mut spaces = 0;
-    while start + spaces < end && bytes[start + spaces] == b' ' {
-        spaces += 1;
+fn indented_code(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    container_cursor: usize,
+    list_content_column: Option<usize>,
+) -> bool {
+    let indent_column = leading_column(bytes, container_cursor, end);
+    if let Some(list_content_column) = list_content_column {
+        visual_column(bytes, start, container_cursor) + indent_column >= list_content_column + 4
+    } else {
+        indent_column >= 4
     }
-    spaces >= 4 || bytes.get(start) == Some(&b'\t')
 }
 
 fn leading_space_count(bytes: &[u8], start: usize, end: usize) -> usize {
@@ -384,6 +407,30 @@ fn leading_space_count(bytes: &[u8], start: usize, end: usize) -> usize {
         .iter()
         .take_while(|byte| matches!(byte, b' ' | b'\t'))
         .count()
+}
+
+fn leading_column(bytes: &[u8], start: usize, end: usize) -> usize {
+    let mut column = 0;
+    for byte in &bytes[start..end] {
+        match byte {
+            b' ' => column += 1,
+            b'\t' => column = (column / 4 + 1) * 4,
+            _ => break,
+        }
+    }
+    column
+}
+
+fn visual_column(bytes: &[u8], start: usize, end: usize) -> usize {
+    let mut column = 0;
+    for byte in &bytes[start..end] {
+        match byte {
+            b'\t' => column = (column / 4 + 1) * 4,
+            b'\r' | b'\n' => break,
+            _ => column += 1,
+        }
+    }
+    column
 }
 
 fn is_blank_line(bytes: &[u8], start: usize, end: usize) -> bool {
@@ -537,6 +584,10 @@ mod tests {
     fn leaves_code_and_malformed_details_untouched() {
         let body = "`<details>inline</details>`\n\n```markdown\n<details>fenced</details>\n```\n\n    <details>indented</details>\n\n<details>\n<summary>open</summary>\nnot closed";
         assert_eq!(omit_details(body), (body.to_owned(), false));
+        assert_eq!(
+            omit_details("```foo`bar\n<details><summary>valid</summary>hidden</details>"),
+            ("```foo`bar\nvalid".to_owned(), true)
+        );
     }
 
     #[test]
@@ -603,6 +654,13 @@ mod tests {
             omit_details("10. item\n\n    <details><summary>valid</summary>hidden</details>"),
             ("10. item\n\n    valid".to_owned(), true)
         );
+        for body in [
+            "- item\n      <details><summary>literal</summary>hidden</details>",
+            ">     <details><summary>literal</summary>hidden</details>",
+            " \t<details><summary>literal</summary>hidden</details>",
+        ] {
+            assert_eq!(omit_details(body), (body.to_owned(), false));
+        }
         let body = r"\`
 <details>
 <summary>valid</summary>
