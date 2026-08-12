@@ -31,6 +31,10 @@ if [ "${GH_TEST_NETWORK_FAILURE:-}" = 1 ]; then
   exit 1
 fi
 
+if [ "${GH_TEST_SIGNAL:-}" = 1 ]; then
+  kill -TERM "$$"
+fi
+
 if [ "${GH_TEST_REPOSITORY_NOT_FOUND:-}" = 1 ]; then
   printf "GraphQL: Could not resolve to a Repository with the name 'riii111/missing'. (repository)\n" >&2
   exit 1
@@ -39,6 +43,17 @@ fi
 if [ "${GH_TEST_FAILURE:-}" = 1 ]; then
   printf 'simulated gh failure\n' >&2
   exit 23
+fi
+
+if [ "${GH_TEST_NONZERO_VALID_JSON:-}" = 1 ]; then
+  printf '{"unexpected":"success"}\n'
+  printf 'simulated non-zero exit with valid JSON\n' >&2
+  exit 23
+fi
+
+if [ "${GH_TEST_RATE_LIMIT_RESOURCE:-}" = 1 ]; then
+  printf 'failed to read https://api.github.com/rate-limit resource\n' >&2
+  exit 1
 fi
 
 if [ "${GH_TEST_STDIN_FAILURE:-}" = 1 ]; then

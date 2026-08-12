@@ -47,6 +47,17 @@ test ! -s "$tmpdir/unexpected-status.stdout"
 jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' \
   "$tmpdir/unexpected-status.stderr" >/dev/null
 
+if GH_TEST_SIGNAL=1 run_checks signal \
+  >"$tmpdir/signal.stdout" 2>"$tmpdir/signal.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/signal.stdout"
+jq -e '.schemaVersion == 1 and .error.kind == "githubCli" and .error.message == "GitHub CLI terminated by signal"' \
+  "$tmpdir/signal.stderr" >/dev/null
+
 run_checks nullable --compact >"$tmpdir/nullable.json"
 jq -e '
   .data.checks[0].link == null and

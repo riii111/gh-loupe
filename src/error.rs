@@ -66,15 +66,15 @@ impl RuntimeError {
         }
     }
 
-    pub(crate) fn from_cli_process_failure(code: i32, stderr: &[u8]) -> Self {
-        Self::classify_cli_failure(Some(code), stderr)
+    pub(crate) fn from_cli_process_failure(code: Option<i32>, stderr: &[u8]) -> Self {
+        Self::classify_cli_failure(code, stderr)
     }
 
     fn classify_cli_failure(code: Option<i32>, stderr: &[u8]) -> Self {
         let message = String::from_utf8_lossy(stderr).trim().to_owned();
         let message = if message.is_empty() {
             code.map_or_else(
-                || "GitHub CLI failed without an error message".to_owned(),
+                || "GitHub CLI terminated by signal".to_owned(),
                 |code| format!("GitHub CLI exited with status {code}"),
             )
         } else {
@@ -93,9 +93,7 @@ impl RuntimeError {
                 ],
             ) {
             (ErrorKind::Authentication, false)
-        } else if contains_words(&lower, &["rate", "limit"])
-            || contains_words(&lower, &["secondary", "rate"])
-        {
+        } else if lower.contains("rate limit") && !lower.contains("rate limiting") {
             (ErrorKind::RateLimited, true)
         } else if contains_any(
             &lower,
@@ -154,16 +152,6 @@ fn contains_word(value: &str, word: &str) -> bool {
     value
         .split(|character: char| !character.is_ascii_alphanumeric())
         .any(|part| part == word)
-}
-
-fn contains_words(value: &str, words: &[&str]) -> bool {
-    let parts = value
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    parts
-        .windows(words.len())
-        .any(|window| window.iter().zip(words).all(|(part, word)| part == word))
 }
 
 fn parse_retry_after_seconds(message: &str) -> Option<u64> {
@@ -313,7 +301,7 @@ mod tests {
         ];
 
         for (code, stderr, kind, retryable, retry_after_seconds) in cases {
-            let error = RuntimeError::from_cli_process_failure(code, stderr);
+            let error = RuntimeError::from_cli_process_failure(Some(code), stderr);
             assert_eq!(
                 (error.kind, error.retryable, error.retry_after_seconds),
                 (kind, retryable, retry_after_seconds,)
@@ -327,10 +315,20 @@ mod tests {
             b"networking support is disabled".as_slice(),
             b"the not-foundish value was rejected".as_slice(),
             b"rate limiting is configured locally".as_slice(),
+            b"GET https://api.github.com/rate-limit".as_slice(),
+            b"resource named rate-limit".as_slice(),
         ] {
-            let error = RuntimeError::from_cli_process_failure(1, stderr);
+            let error = RuntimeError::from_cli_process_failure(Some(1), stderr);
             assert_eq!(error.kind, ErrorKind::GitHubCli);
             assert!(!error.retryable);
         }
+    }
+
+    #[test]
+    fn signal_failures_are_not_reported_as_exit_status_one() {
+        let error = RuntimeError::from_cli_process_failure(None, b"");
+
+        assert_eq!(error.kind, ErrorKind::GitHubCli);
+        assert_eq!(error.message, "GitHub CLI terminated by signal");
     }
 }

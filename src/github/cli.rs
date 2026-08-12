@@ -64,10 +64,7 @@ where
         Some((max_bytes, max_lines)),
     )?;
     if !output.status.success() {
-        return Err(runtime_cli_failure(
-            output.status.code().unwrap_or(1),
-            &output.stderr,
-        ));
+        return Err(runtime_cli_failure(output.status.code(), &output.stderr));
     }
     Ok(BoundedBytes {
         bytes: output.stdout,
@@ -101,7 +98,7 @@ where
 }
 
 fn parse_runtime_json(output: ProcessOutput) -> Result<Value> {
-    let code = output.status.code().unwrap_or(1);
+    let code = output.status.code();
     if !output.status.success() {
         return Err(runtime_cli_failure(code, &output.stderr));
     }
@@ -117,14 +114,14 @@ fn parse_runtime_json(output: ProcessOutput) -> Result<Value> {
 }
 
 fn parse_runtime_json_or_empty(output: ProcessOutput, empty_error_prefix: &str) -> Result<Value> {
-    let code = output.status.code().unwrap_or(1);
-    if !output.status.success() && !matches!(code, 1 | 8) {
+    let code = output.status.code();
+    if !output.status.success() && !matches!(code, Some(1 | 8)) {
         return Err(runtime_cli_failure(code, &output.stderr));
     }
     match serde_json::from_slice(&output.stdout) {
         Ok(response) => Ok(response),
         Err(_error)
-            if code == 1
+            if code == Some(1)
                 && output.stdout.is_empty()
                 && String::from_utf8_lossy(&output.stderr)
                     .trim()
@@ -178,7 +175,7 @@ where
     }
 }
 
-pub(super) fn runtime_cli_failure(code: i32, stderr: &[u8]) -> Exit {
+pub(super) fn runtime_cli_failure(code: Option<i32>, stderr: &[u8]) -> Exit {
     Exit::runtime(&RuntimeError::from_cli_process_failure(code, stderr))
 }
 
@@ -584,23 +581,23 @@ mod tests {
 
     #[test]
     fn runtime_failures_are_classified_without_losing_retry_after() {
-        let rate_limit = runtime_cli_failure(1, b"secondary rate limit; retry-after: 45\n");
+        let rate_limit = runtime_cli_failure(Some(1), b"secondary rate limit; retry-after: 45\n");
         assert_eq!(
             rate_limit.stderr_line(),
             r#"{"schemaVersion":1,"error":{"kind":"rateLimited","message":"secondary rate limit; retry-after: 45","retryable":true,"retryAfterSeconds":45}}"#
         );
 
-        let network = runtime_cli_failure(1, b"could not resolve host: api.github.com\n");
+        let network = runtime_cli_failure(Some(1), b"could not resolve host: api.github.com\n");
         assert!(network.stderr_line().contains(r#""kind":"network"#));
 
-        let empty_authentication = runtime_cli_failure(4, b"");
+        let empty_authentication = runtime_cli_failure(Some(4), b"");
         assert!(
             empty_authentication
                 .stderr_line()
                 .contains(r#""kind":"authentication""#)
         );
 
-        let dns = runtime_cli_failure(1, b"dial tcp: lookup api.github.com: no such host\n");
+        let dns = runtime_cli_failure(Some(1), b"dial tcp: lookup api.github.com: no such host\n");
         assert!(dns.stderr_line().contains(r#""kind":"network""#));
     }
 }
