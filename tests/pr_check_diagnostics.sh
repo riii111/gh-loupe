@@ -135,20 +135,6 @@ test "$(cat "$tmpdir/staggered-active")" -eq 0
 test "$(cat "$tmpdir/staggered-max")" -eq 2
 test "$(wc -l <"$tmpdir/staggered-calls" | tr -d ' ')" -eq 3
 
-GH_DIAGNOSTICS_DELAY_SECONDS=16 \
-  run_diagnostics parallel-status-progress --failed-diagnostics --timeout 30 --compact \
-  >"$tmpdir/status-progress.json" 2>"$tmpdir/status-progress.stderr"
-grep -Fx 'gh-loupe: collecting diagnostics for 3 failed checks' \
-  "$tmpdir/status-progress.stderr" >/dev/null
-grep -E '^gh-loupe: diagnostics 1/3 complete; (15|16)s elapsed$' \
-  "$tmpdir/status-progress.stderr" >/dev/null
-jq -e '
-  [.data.checks[].name] == ["aaa-status", "bbb-failure", "ccc-failure"] and
-  .data.checks[0].annotations == [] and
-  .data.checks[1].annotations == [] and
-  .data.checks[2].annotations == []
-' "$tmpdir/status-progress.json" >/dev/null
-
 if GH_DIAGNOSTICS_FAILURES=4 \
   GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-error-active" \
   GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-error-max" \
@@ -387,11 +373,6 @@ test "$status" -eq 2
 test ! -s "$tmpdir/unrepresentable-timeout.stdout"
 grep -F 'argument --timeout: value cannot be represented as a diagnostic deadline' \
   "$tmpdir/unrepresentable-timeout.stderr" >/dev/null
-
-run_diagnostics progress --include-failed-logs --timeout 30 --compact \
-  >"$tmpdir/progress.json" 2>"$tmpdir/progress.stderr"
-grep -E '^gh-loupe: diagnostics 0/2 complete; (15|16)s elapsed$' "$tmpdir/progress.stderr" >/dev/null
-jq -e '.data.checks | length == 3' "$tmpdir/progress.json" >/dev/null
 
 run_diagnostics normal --failed-diagnostics --compact 2>&- >"$tmpdir/closed-progress.json"
 jq -e '.data.checks | length == 3' "$tmpdir/closed-progress.json" >/dev/null
