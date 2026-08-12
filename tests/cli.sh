@@ -380,8 +380,12 @@ assert_runtime_failure issue-invalid-item invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-missing-repository-metadata invalidResponse issue \
   GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
-assert_runtime_failure issue-stdin-failure githubCli issue \
-  GH_TEST_STDIN_FAILURE=1 -- issue 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-stdin-failure githubCli false \
+  GH_TEST_STDIN_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
+assert_runtime_failure issue-nonzero-valid-json githubCli issue \
+  GH_TEST_NONZERO_VALID_JSON=1 -- issue 42 --repo riii111/dotfiles
+assert_runtime_failure issue-rate-limit-resource githubCli issue \
+  GH_TEST_RATE_LIMIT_RESOURCE=1 -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-comments-page-failure githubCli issue \
   GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- issue 42 --repo riii111/dotfiles
 
