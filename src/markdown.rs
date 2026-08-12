@@ -24,6 +24,7 @@ struct Fence {
     byte: u8,
     length: usize,
     blockquote_depth: usize,
+    list_indent: Option<usize>,
 }
 
 pub fn omit_details(body: &str) -> (String, bool) {
@@ -214,9 +215,16 @@ fn code_mask(body: &str) -> Vec<bool> {
     let bytes = body.as_bytes();
     let mut protected = vec![false; bytes.len()];
     let mut cursor = 0;
+    let mut list_content_indent = None;
     while cursor < bytes.len() {
         let first_line_end = line_end(bytes, cursor);
-        if let Some(fence) = fence_start(bytes, cursor, first_line_end) {
+        let (_, _, current_list_indent) = container_prefix_end(bytes, cursor, first_line_end);
+        if current_list_indent.is_some() {
+            list_content_indent = current_list_indent;
+        }
+        let in_list_content = list_content_indent
+            .is_some_and(|indent| leading_space_count(bytes, cursor, first_line_end) >= indent);
+        if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_indent) {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
             while cursor < bytes.len() {
@@ -228,11 +236,14 @@ fn code_mask(body: &str) -> Vec<bool> {
                     break;
                 }
             }
-        } else if indented_code(bytes, cursor, first_line_end) {
+        } else if indented_code(bytes, cursor, first_line_end) && !in_list_content {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
         } else {
             cursor = first_line_end;
+        }
+        if current_list_indent.is_none() && !in_list_content {
+            list_content_indent = None;
         }
     }
 
@@ -244,7 +255,7 @@ fn code_mask(body: &str) -> Vec<bool> {
             cursor += 1;
             continue;
         }
-        if bytes[cursor] != b'`' {
+        if bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
             cursor += 1;
             continue;
         }
@@ -266,8 +277,24 @@ fn line_end(bytes: &[u8], start: usize) -> usize {
         .map_or(bytes.len(), |offset| start + offset + 1)
 }
 
-fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<Fence> {
-    let (cursor, blockquote_depth) = container_prefix_end(bytes, start, end);
+fn fence_start(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    list_content_indent: Option<usize>,
+) -> Option<Fence> {
+    let (mut cursor, blockquote_depth, mut list_indent) = container_prefix_end(bytes, start, end);
+    if cursor == start
+        && list_indent.is_none()
+        && let Some(indent) = list_content_indent
+        && leading_space_count(bytes, start, end) >= indent
+        && bytes
+            .get(start + indent)
+            .is_some_and(|byte| matches!(byte, b'`' | b'~'))
+    {
+        cursor = start + indent;
+        list_indent = Some(indent);
+    }
     if cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
         return None;
     }
@@ -277,11 +304,39 @@ fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<Fence> {
         byte: fence,
         length,
         blockquote_depth,
+        list_indent,
     })
 }
 
 fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
-    let cursor = blockquote_prefix_end(bytes, start, end, fence.blockquote_depth);
+    let mut cursor = start;
+    for _ in 0..fence.blockquote_depth {
+        let mut spaces = 0;
+        while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+            spaces += 1;
+        }
+        if spaces == 4 || bytes.get(cursor) != Some(&b'>') {
+            return false;
+        }
+        cursor += 1;
+        if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+        }
+    }
+
+    let leading_spaces = leading_space_count(bytes, cursor, end);
+    cursor += leading_spaces;
+    if fence
+        .list_indent
+        .is_some_and(|indent| cursor - start < indent)
+        || fence.list_indent.is_none() && leading_spaces > 3
+    {
+        return false;
+    }
+    if is_list_marker(bytes, cursor, end) {
+        return false;
+    }
     if bytes.get(cursor) != Some(&fence.byte) {
         return false;
     }
@@ -295,6 +350,26 @@ fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
 }
 
+fn is_list_marker(bytes: &[u8], start: usize, end: usize) -> bool {
+    if matches!(bytes.get(start), Some(b'-' | b'+' | b'*')) {
+        return bytes
+            .get(start + 1..end)
+            .and_then(|rest| rest.first())
+            .is_some_and(|byte| matches!(byte, b' ' | b'\t'));
+    }
+    let mut cursor = start;
+    while cursor < end && cursor - start < 9 && bytes[cursor].is_ascii_digit() {
+        cursor += 1;
+    }
+    cursor > start
+        && cursor < end
+        && matches!(bytes[cursor], b'.' | b')')
+        && bytes
+            .get(cursor + 1..end)
+            .and_then(|rest| rest.first())
+            .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+}
+
 fn indented_code(bytes: &[u8], start: usize, end: usize) -> bool {
     let mut spaces = 0;
     while start + spaces < end && bytes[start + spaces] == b' ' {
@@ -303,9 +378,17 @@ fn indented_code(bytes: &[u8], start: usize, end: usize) -> bool {
     spaces >= 4 || bytes.get(start) == Some(&b'\t')
 }
 
-fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize) {
+fn leading_space_count(bytes: &[u8], start: usize, end: usize) -> usize {
+    bytes[start..end]
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count()
+}
+
+fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize, Option<usize>) {
     let mut cursor = start;
     let mut blockquote_depth = 0;
+    let mut list_indent = None;
     loop {
         let before_marker = cursor;
         let mut spaces = 0;
@@ -314,13 +397,13 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             spaces += 1;
         }
         if cursor >= end {
-            return (cursor, blockquote_depth);
+            return (cursor, blockquote_depth, list_indent);
         }
         if spaces == 4 {
-            return (before_marker, blockquote_depth);
+            return (before_marker, blockquote_depth, list_indent);
         }
         if matches!(bytes[cursor], b'`' | b'~') {
-            return (cursor, blockquote_depth);
+            return (cursor, blockquote_depth, list_indent);
         }
         if bytes[cursor] == b'>' {
             blockquote_depth += 1;
@@ -338,6 +421,7 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
                 cursor += 1;
             }
+            list_indent = Some(cursor - start);
             continue;
         }
         let digits_start = cursor;
@@ -354,34 +438,11 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
                 cursor += 1;
             }
+            list_indent = Some(cursor - start);
             continue;
         }
-        return (before_marker, blockquote_depth);
+        return (before_marker, blockquote_depth, list_indent);
     }
-}
-
-fn blockquote_prefix_end(bytes: &[u8], start: usize, end: usize, depth: usize) -> usize {
-    let mut cursor = start;
-    for _ in 0..depth {
-        let mut spaces = 0;
-        while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
-            spaces += 1;
-        }
-        if spaces == 4 || bytes.get(cursor) != Some(&b'>') {
-            return end;
-        }
-        cursor += 1;
-        if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
-        }
-    }
-    let mut spaces = 0;
-    while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
-        cursor += 1;
-        spaces += 1;
-    }
-    if spaces == 4 { end } else { cursor }
 }
 
 fn html_comment_mask(bytes: &[u8], protected: &mut [bool]) {
@@ -423,7 +484,7 @@ fn run_length(bytes: &[u8], start: usize, byte: u8) -> usize {
 fn inline_code_end(bytes: &[u8], protected: &[bool], start: usize, length: usize) -> Option<usize> {
     let mut cursor = start;
     while cursor < bytes.len() {
-        if protected[cursor] || bytes[cursor] != b'`' {
+        if protected[cursor] || bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
             cursor += 1;
             continue;
         }
@@ -506,6 +567,39 @@ mod tests {
             ),
             (
                 "<!-- <details><summary>literal</summary>hidden</details> -->\nvalid".to_owned(),
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn respects_ordered_list_content_indent_and_escaped_backticks() {
+        assert_eq!(
+            omit_details("10. item\n    <details><summary>valid</summary>hidden</details>"),
+            ("10. item\n    valid".to_owned(), true)
+        );
+        assert_eq!(
+            omit_details(
+                "10. ```markdown\n    literal\n    ```\n<details><summary>valid</summary>hidden</details>"
+            ),
+            (
+                "10. ```markdown\n    literal\n    ```\nvalid".to_owned(),
+                true
+            )
+        );
+        let body = r"\`
+<details>
+<summary>valid</summary>
+hidden
+</details>
+\`";
+        assert_eq!(
+            omit_details(body),
+            (
+                r"\`
+valid
+\`"
+                .to_owned(),
                 true
             )
         );
