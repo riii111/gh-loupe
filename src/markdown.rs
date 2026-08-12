@@ -19,19 +19,6 @@ struct DetailsBlock {
     end: usize,
 }
 
-#[derive(Clone, Copy)]
-struct Fence {
-    byte: u8,
-    length: usize,
-    blockquote_depth: usize,
-    list_content_column: Option<usize>,
-}
-
-#[derive(Clone, Copy)]
-struct ListPrefix {
-    content_column: usize,
-}
-
 pub fn omit_details(body: &str) -> (String, bool) {
     let protected = code_mask(body);
     let tags = tags(body, &protected);
@@ -218,72 +205,56 @@ impl TagKind {
 fn code_mask(body: &str) -> Vec<bool> {
     let bytes = body.as_bytes();
     let mut protected = vec![false; bytes.len()];
+    for (event, range) in pulldown_cmark::Parser::new(body).into_offset_iter() {
+        if matches!(
+            event,
+            pulldown_cmark::Event::Code(_)
+                | pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(_))
+                | pulldown_cmark::Event::End(pulldown_cmark::TagEnd::CodeBlock)
+        ) {
+            mark(&mut protected, range.start, range.end);
+        }
+    }
+    mask_container_indented_code(bytes, &mut protected);
+
+    html_attribute_mask(bytes, &mut protected);
+    html_raw_text_mask(bytes, &mut protected);
+    html_comment_mask(bytes, &mut protected);
+    protected
+}
+
+#[derive(Clone, Copy)]
+struct ListPrefix {
+    content_column: usize,
+}
+
+fn mask_container_indented_code(bytes: &[u8], protected: &mut [bool]) {
     let mut cursor = 0;
     let mut list_content_column = None;
     while cursor < bytes.len() {
-        let first_line_end = line_end(bytes, cursor);
-        let (container_cursor, _, current_list) =
-            container_prefix_end(bytes, cursor, first_line_end);
+        let end = line_end(bytes, cursor);
+        let (container_cursor, blockquote_depth, current_list) =
+            container_prefix_end(bytes, cursor, end);
         if let Some(prefix) = current_list {
             list_content_column = Some(prefix.content_column);
         }
-        let blank_line = is_blank_line(bytes, cursor, first_line_end);
         let line_content_column = visual_column(bytes, cursor, container_cursor)
-            + leading_column(bytes, container_cursor, first_line_end);
-        if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_column) {
-            mark(&mut protected, cursor, first_line_end);
-            cursor = first_line_end;
-            while cursor < bytes.len() {
-                let next_end = line_end(bytes, cursor);
-                mark(&mut protected, cursor, next_end);
-                let is_closing = fence_end(bytes, cursor, next_end, fence);
-                cursor = next_end;
-                if is_closing {
-                    break;
-                }
-            }
-        } else if indented_code(
-            bytes,
-            cursor,
-            first_line_end,
-            container_cursor,
-            list_content_column,
-        ) {
-            mark(&mut protected, cursor, first_line_end);
-            cursor = first_line_end;
-        } else {
-            cursor = first_line_end;
+            + leading_column(bytes, container_cursor, end);
+        let list_code = list_content_column.is_some_and(|base| line_content_column >= base + 4);
+        let blockquote_code = current_list.is_none()
+            && blockquote_depth > 0
+            && leading_column(bytes, container_cursor, end) >= 4;
+        if !protected[cursor] && (list_code || blockquote_code) {
+            mark(protected, cursor, end);
         }
         if current_list.is_none()
-            && !blank_line
+            && !is_blank_line(bytes, cursor, end)
             && list_content_column.is_none_or(|base| line_content_column < base)
         {
             list_content_column = None;
         }
-    }
-
-    html_attribute_mask(bytes, &mut protected);
-    html_comment_mask(bytes, &mut protected);
-
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        if protected[cursor] {
-            cursor += 1;
-            continue;
-        }
-        if bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
-            cursor += 1;
-            continue;
-        }
-        let length = run_length(bytes, cursor, b'`');
-        let Some(end) = inline_code_end(bytes, &protected, cursor + length, length) else {
-            cursor += length;
-            continue;
-        };
-        mark(&mut protected, cursor, end);
         cursor = end;
     }
-    protected
 }
 
 fn line_end(bytes: &[u8], start: usize) -> usize {
@@ -291,135 +262,6 @@ fn line_end(bytes: &[u8], start: usize) -> usize {
         .iter()
         .position(|byte| *byte == b'\n')
         .map_or(bytes.len(), |offset| start + offset + 1)
-}
-
-fn fence_start(
-    bytes: &[u8],
-    start: usize,
-    end: usize,
-    list_content_column: Option<usize>,
-) -> Option<Fence> {
-    let (mut cursor, blockquote_depth, current_list) = container_prefix_end(bytes, start, end);
-    if current_list.is_none()
-        && let Some(content_column) = list_content_column
-        && let Some(candidate) = fence_cursor_at_column(bytes, start, end, content_column)
-    {
-        cursor = candidate;
-    }
-    if cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
-        return None;
-    }
-    let fence = bytes[cursor];
-    let length = run_length(bytes, cursor, fence);
-    if fence == b'`' && bytes[cursor + length..end].contains(&b'`') {
-        return None;
-    }
-    (length >= 3).then_some(Fence {
-        byte: fence,
-        length,
-        blockquote_depth,
-        list_content_column,
-    })
-}
-
-fn fence_cursor_at_column(
-    bytes: &[u8],
-    start: usize,
-    end: usize,
-    content_column: usize,
-) -> Option<usize> {
-    let cursor = first_nonspace(bytes, start, end);
-    let column = visual_column(bytes, start, cursor);
-    (column >= content_column && column < content_column + 4).then_some(cursor)
-}
-
-fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
-    let mut cursor = start;
-    for _ in 0..fence.blockquote_depth {
-        let mut spaces = 0;
-        while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
-            spaces += 1;
-        }
-        if spaces == 4 || bytes.get(cursor) != Some(&b'>') {
-            return false;
-        }
-        cursor += 1;
-        if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
-        }
-    }
-
-    let candidate = first_nonspace(bytes, cursor, end);
-    let candidate_column = visual_column(bytes, start, candidate);
-    if let Some(content_column) = fence.list_content_column {
-        if candidate_column < content_column || candidate_column >= content_column + 4 {
-            return false;
-        }
-    } else if leading_column(bytes, cursor, end) > 3 {
-        return false;
-    }
-    cursor = candidate;
-    if is_list_marker(bytes, cursor, end) {
-        return false;
-    }
-    if bytes.get(cursor) != Some(&fence.byte) {
-        return false;
-    }
-    let run = run_length(bytes, cursor, fence.byte);
-    if run < fence.length {
-        return false;
-    }
-    let cursor = cursor + run;
-    bytes[cursor..end]
-        .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
-}
-
-fn is_list_marker(bytes: &[u8], start: usize, end: usize) -> bool {
-    if matches!(bytes.get(start), Some(b'-' | b'+' | b'*')) {
-        return bytes
-            .get(start + 1..end)
-            .and_then(|rest| rest.first())
-            .is_some_and(|byte| matches!(byte, b' ' | b'\t'));
-    }
-    let mut cursor = start;
-    while cursor < end && cursor - start < 9 && bytes[cursor].is_ascii_digit() {
-        cursor += 1;
-    }
-    cursor > start
-        && cursor < end
-        && matches!(bytes[cursor], b'.' | b')')
-        && bytes
-            .get(cursor + 1..end)
-            .and_then(|rest| rest.first())
-            .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
-}
-
-fn first_nonspace(bytes: &[u8], start: usize, end: usize) -> usize {
-    start + leading_space_count(bytes, start, end)
-}
-
-fn indented_code(
-    bytes: &[u8],
-    start: usize,
-    end: usize,
-    container_cursor: usize,
-    list_content_column: Option<usize>,
-) -> bool {
-    let indent_column = leading_column(bytes, container_cursor, end);
-    if let Some(list_content_column) = list_content_column {
-        visual_column(bytes, start, container_cursor) + indent_column >= list_content_column + 4
-    } else {
-        indent_column >= 4
-    }
-}
-
-fn leading_space_count(bytes: &[u8], start: usize, end: usize) -> usize {
-    bytes[start..end]
-        .iter()
-        .take_while(|byte| matches!(byte, b' ' | b'\t'))
-        .count()
 }
 
 fn leading_column(bytes: &[u8], start: usize, end: usize) -> usize {
@@ -472,9 +314,6 @@ fn container_prefix_end(
         }
         if spaces == 4 {
             return (before_marker, blockquote_depth, list_prefix);
-        }
-        if matches!(bytes[cursor], b'`' | b'~') {
-            return (cursor, blockquote_depth, list_prefix);
         }
         if bytes[cursor] == b'>' {
             blockquote_depth += 1;
@@ -546,25 +385,127 @@ fn html_attribute_mask(bytes: &[u8], protected: &mut [bool]) {
 
         let mut scan = cursor + 1;
         let mut quote = None;
+        let mut quoted_ranges: Vec<(usize, usize)> = Vec::new();
         while scan < bytes.len() {
             match quote {
                 Some(expected) if bytes[scan] == expected => {
-                    protected[scan] = true;
+                    quoted_ranges.last_mut().expect("quote range starts").1 = scan + 1;
                     quote = None;
                 }
-                Some(_) => protected[scan] = true,
                 None if matches!(bytes[scan], b'"' | b'\'') => {
-                    protected[scan] = true;
+                    quoted_ranges.push((scan, scan + 1));
                     quote = Some(bytes[scan]);
                 }
-                None if bytes[scan] == b'>' => break,
+                None if bytes[scan] == b'>' => {
+                    for (start, end) in quoted_ranges {
+                        mark(protected, start, end);
+                    }
+                    break;
+                }
                 None if bytes[scan] == b'<' => break,
-                None => {}
+                Some(_) | None => {}
             }
             scan += 1;
         }
-        cursor = scan.saturating_add(1);
+        if bytes.get(scan) == Some(&b'>') && quote.is_none() {
+            cursor = scan + 1;
+        } else {
+            cursor += 1;
+        }
     }
+}
+
+fn html_raw_text_mask(bytes: &[u8], protected: &mut [bool]) {
+    for name in [
+        b"script".as_slice(),
+        b"style",
+        b"textarea",
+        b"title",
+        b"xmp",
+    ] {
+        let mut cursor = 0;
+        while cursor + name.len() + 2 <= bytes.len() {
+            if bytes[cursor] != b'<'
+                || protected[cursor]
+                || is_escaped(bytes, cursor)
+                || !bytes
+                    .get(cursor + 1..cursor + name.len() + 1)
+                    .is_some_and(|value| value.eq_ignore_ascii_case(name))
+                || !matches!(
+                    bytes.get(cursor + name.len() + 1),
+                    Some(b'>' | b' ' | b'\t' | b'\r' | b'\n')
+                )
+            {
+                cursor += 1;
+                continue;
+            }
+            let Some(open_end) = html_tag_end(bytes, cursor) else {
+                cursor += 1;
+                continue;
+            };
+            let close_start = find_closing_tag(bytes, open_end, name).unwrap_or(bytes.len());
+            let close_end = if close_start < bytes.len() {
+                html_tag_end(bytes, close_start).unwrap_or(bytes.len())
+            } else {
+                bytes.len()
+            };
+            mark(protected, cursor, close_end);
+            cursor = close_end;
+        }
+    }
+
+    let mut cursor = 0;
+    while cursor + 9 <= bytes.len() {
+        if bytes[cursor..].starts_with(b"<![CDATA[")
+            && !protected[cursor]
+            && !is_escaped(bytes, cursor)
+        {
+            let end = bytes[cursor + 9..]
+                .windows(3)
+                .position(|window| window == b"]]>")
+                .map_or(bytes.len(), |offset| cursor + 9 + offset + 3);
+            mark(protected, cursor, end);
+            cursor = end;
+        } else {
+            cursor += 1;
+        }
+    }
+}
+
+fn html_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut quote = None;
+    let mut cursor = start + 1;
+    while cursor < bytes.len() {
+        match quote {
+            Some(expected) if bytes[cursor] == expected => quote = None,
+            None if matches!(bytes[cursor], b'"' | b'\'') => quote = Some(bytes[cursor]),
+            None if bytes[cursor] == b'>' => return Some(cursor + 1),
+            None if bytes[cursor] == b'<' => return None,
+            Some(_) | None => {}
+        }
+        cursor += 1;
+    }
+    None
+}
+
+fn find_closing_tag(bytes: &[u8], start: usize, name: &[u8]) -> Option<usize> {
+    let mut cursor = start;
+    while cursor + name.len() + 3 <= bytes.len() {
+        if bytes[cursor] == b'<'
+            && bytes.get(cursor + 1) == Some(&b'/')
+            && bytes[cursor + 2..]
+                .get(..name.len())
+                .is_some_and(|value| value.eq_ignore_ascii_case(name))
+            && matches!(
+                bytes.get(cursor + name.len() + 2),
+                Some(b'>' | b' ' | b'\t' | b'\r' | b'\n')
+            )
+        {
+            return Some(cursor);
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn html_comment_mask(bytes: &[u8], protected: &mut [bool]) {
@@ -595,29 +536,6 @@ fn is_escaped(bytes: &[u8], position: usize) -> bool {
         cursor -= 1;
     }
     backslashes % 2 == 1
-}
-
-fn run_length(bytes: &[u8], start: usize, byte: u8) -> usize {
-    bytes[start..]
-        .iter()
-        .take_while(|value| **value == byte)
-        .count()
-}
-
-fn inline_code_end(bytes: &[u8], protected: &[bool], start: usize, length: usize) -> Option<usize> {
-    let mut cursor = start;
-    while cursor < bytes.len() {
-        if protected[cursor] || bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
-            cursor += 1;
-            continue;
-        }
-        let run = run_length(bytes, cursor, b'`');
-        if run == length && (cursor..cursor + run).all(|index| !protected[index]) {
-            return Some(cursor + run);
-        }
-        cursor += run;
-    }
-    None
 }
 
 fn mark(protected: &mut [bool], start: usize, end: usize) {
@@ -663,6 +581,28 @@ mod tests {
         let body =
             r#"<div title="<details><summary>literal</summary>hidden</details>">outside</div>"#;
         assert_eq!(omit_details(body), (body.to_owned(), false));
+        for (body, expected) in [
+            (
+                "<div title=\"broken\n<details><summary>valid</summary>hidden</details>",
+                "<div title=\"broken\nvalid",
+            ),
+            (
+                "text <x a='broken\n<details><summary>valid</summary>hidden</details>",
+                "text <x a='broken\nvalid",
+            ),
+        ] {
+            assert_eq!(omit_details(body), (expected.to_owned(), true));
+        }
+    }
+
+    #[test]
+    fn leaves_raw_text_and_cdata_html_literal() {
+        for body in [
+            "<script>\n<details><summary>literal</summary>hidden</details>\n</script>",
+            "<![CDATA[\n<details><summary>literal</summary>hidden</details>\n]]>",
+        ] {
+            assert_eq!(omit_details(body), (body.to_owned(), false));
+        }
     }
 
     #[test]
