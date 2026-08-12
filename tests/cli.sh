@@ -977,6 +977,11 @@ assert_json -s "
   ([.[1:][] | .variables | keys] | all(. == [\"cursor\", \"id\"]))
 " "$payloads_file" >/dev/null
 
+assert_runtime_failure thread-second-page-failure githubCli runtime \
+  GH_TEST_THREAD_DETAIL_SECOND_PAGE_FAILURE=1 -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+grep -F 'thread-b' "$tmpdir/thread-second-page-failure.runtime.stderr" >/dev/null
+
 assert_runtime_failure thread-wrong-pr notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-pr -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_runtime_failure thread-wrong-repo notFound runtime \

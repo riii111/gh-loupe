@@ -289,6 +289,11 @@ JSON
     else
       comment_a_body='first by id'
     fi
+    if [ "${GH_TEST_THREAD_DETAIL_SECOND_PAGE_FAILURE:-}" = 1 ] \
+      && [ "$thread_id" = thread-b ]; then
+      printf 'simulated second review thread pagination failure\n' >&2
+      exit 35
+    fi
     if [ "${GH_TEST_THREAD_DETAIL_PAGE_FAILURE:-}" = 1 ]; then
       printf 'simulated thread detail pagination failure\n' >&2
       exit 34
