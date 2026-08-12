@@ -20,14 +20,109 @@ const MAX_DIAGNOSTIC_WORKERS: usize = 4;
 struct Check {
     name: String,
     state: String,
-    bucket: String,
+    bucket: CheckBucket,
     link: Option<String>,
     workflow: Option<String>,
     started_at: Option<String>,
     completed_at: Option<String>,
     check_run_id: Option<u64>,
-    annotations: Option<Vec<Value>>,
+    annotations: Option<Vec<Annotation>>,
     log: Option<Value>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CheckBucket {
+    Pass,
+    Fail,
+    Pending,
+    Skipping,
+    Cancel,
+}
+
+impl CheckBucket {
+    fn from_cli(value: &str) -> Result<Self> {
+        match value {
+            "pass" => Ok(Self::Pass),
+            "fail" => Ok(Self::Fail),
+            "pending" => Ok(Self::Pending),
+            "skipping" => Ok(Self::Skipping),
+            "cancel" => Ok(Self::Cancel),
+            _ => Err(Exit::invalid_response(
+                "GitHub returned an unknown check bucket",
+            )),
+        }
+    }
+
+    fn from_state(state: &str) -> Result<Self> {
+        match state {
+            "SUCCESS" => Ok(Self::Pass),
+            "SKIPPED" | "NEUTRAL" => Ok(Self::Skipping),
+            "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => Ok(Self::Fail),
+            "CANCELLED" => Ok(Self::Cancel),
+            "EXPECTED" | "REQUESTED" | "WAITING" | "QUEUED" | "PENDING" | "IN_PROGRESS"
+            | "STALE" | "STARTUP_FAILURE" => Ok(Self::Pending),
+            _ => Err(Exit::invalid_response(
+                "GitHub returned an unknown check state",
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Pending => "pending",
+            Self::Skipping => "skipping",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Annotation {
+    path: String,
+    start_line: u64,
+    end_line: u64,
+    annotation_level: String,
+    title: Option<String>,
+    message: String,
+}
+
+impl Annotation {
+    fn from_object(object: &Map<String, Value>) -> Result<Self> {
+        let path = required_string(object, "path", "annotation path")?.to_owned();
+        let start_line = required_u64(object, "start_line", "annotation start line")?;
+        let end_line = required_u64(object, "end_line", "annotation end line")?;
+        let annotation_level =
+            required_string(object, "annotation_level", "annotation level")?.to_owned();
+        let message = required_string(object, "message", "annotation message")?.to_owned();
+        let title = nullable_string(object, "title", "annotation title")?.map(str::to_owned);
+        Ok(Self {
+            path,
+            start_line,
+            end_line,
+            annotation_level,
+            title,
+            message,
+        })
+    }
+
+    fn into_value(self) -> Value {
+        Value::Object(Map::from_iter([
+            ("path".to_owned(), Value::String(self.path)),
+            ("startLine".to_owned(), Value::from(self.start_line)),
+            ("endLine".to_owned(), Value::from(self.end_line)),
+            (
+                "annotationLevel".to_owned(),
+                Value::String(self.annotation_level),
+            ),
+            (
+                "title".to_owned(),
+                self.title.map_or(Value::Null, Value::String),
+            ),
+            ("message".to_owned(), Value::String(self.message)),
+        ]))
+    }
 }
 
 impl Check {
@@ -35,7 +130,10 @@ impl Check {
         let mut value = Map::from_iter([
             ("name".to_owned(), Value::String(self.name)),
             ("state".to_owned(), Value::String(self.state)),
-            ("bucket".to_owned(), Value::String(self.bucket)),
+            (
+                "bucket".to_owned(),
+                Value::String(self.bucket.as_str().to_owned()),
+            ),
             (
                 "link".to_owned(),
                 self.link.map_or(Value::Null, Value::String),
@@ -54,7 +152,15 @@ impl Check {
             ),
         ]);
         if let Some(annotations) = self.annotations {
-            value.insert("annotations".to_owned(), Value::Array(annotations));
+            value.insert(
+                "annotations".to_owned(),
+                Value::Array(
+                    annotations
+                        .into_iter()
+                        .map(Annotation::into_value)
+                        .collect(),
+                ),
+            );
         }
         if let Some(log) = self.log {
             value.insert("log".to_owned(), log);
@@ -123,7 +229,7 @@ fn collect_diagnostics(
         .iter()
         .enumerate()
         .filter_map(|(index, check)| {
-            matches!(check.bucket.as_str(), "fail" | "cancel").then_some(index)
+            matches!(check.bucket, CheckBucket::Fail | CheckBucket::Cancel).then_some(index)
         })
         .collect::<Vec<_>>();
     if failed.is_empty() {
@@ -204,7 +310,7 @@ fn diagnostic_worker_count(job_count: usize) -> usize {
 }
 
 struct DiagnosticResult {
-    annotations: Vec<Value>,
+    annotations: Vec<Annotation>,
     log: Option<Value>,
 }
 
@@ -360,19 +466,11 @@ fn validate_check(value: &Value) -> Result<Check> {
     let object = value
         .as_object()
         .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid check entry"))?;
-    let bucket = required_cli_check_string(object, "bucket")?;
-    match bucket {
-        "pass" | "fail" | "pending" | "skipping" | "cancel" => {}
-        _ => {
-            return Err(Exit::invalid_response(
-                "GitHub returned an unknown check bucket",
-            ));
-        }
-    }
+    let bucket = CheckBucket::from_cli(required_cli_check_string(object, "bucket")?)?;
     Ok(Check {
         name: required_cli_check_string(object, "name")?.to_owned(),
         state: required_cli_check_string(object, "state")?.to_owned(),
-        bucket: bucket.to_owned(),
+        bucket,
         link: cli_check_metadata(object, "link")?,
         workflow: cli_check_metadata(object, "workflow")?,
         started_at: cli_check_metadata(object, "startedAt")?,
@@ -400,8 +498,7 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Check
             continue;
         }
         let type_name = required_string(object, "__typename", "check context type")?;
-        let (name, state, link, workflow, started_at, completed_at, check_run_id) = match type_name
-        {
+        let details = match type_name {
             "CheckRun" => {
                 let check_run_id = required_u64(object, "databaseId", "check run identifier")?;
                 let name = required_string(object, "name", "check run name")?;
@@ -413,21 +510,29 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Check
                 let completed_at =
                     nullable_string(object, "completedAt", "check run completion time")?;
                 let workflow = check_run_workflow(object)?;
-                (
+                CheckDetails {
                     name,
                     state,
                     link,
                     workflow,
                     started_at,
                     completed_at,
-                    Some(check_run_id),
-                )
+                    check_run_id: Some(check_run_id),
+                }
             }
             "StatusContext" => {
                 let name = required_string(object, "context", "commit status context")?;
                 let state = required_string(object, "state", "commit status state")?.to_owned();
                 let link = nullable_string(object, "targetUrl", "commit status target URL")?;
-                (name, state, link, None, None, None, None)
+                CheckDetails {
+                    name,
+                    state,
+                    link,
+                    workflow: None,
+                    started_at: None,
+                    completed_at: None,
+                    check_run_id: None,
+                }
             }
             _ => {
                 return Err(Exit::invalid_response(
@@ -435,21 +540,31 @@ fn validate_check_contexts(values: &[Value], required: bool) -> Result<Vec<Check
                 ));
             }
         };
-        let bucket = check_bucket(&state)?;
+        let bucket = CheckBucket::from_state(&details.state)?;
         checks.push(Check {
-            name: name.to_owned(),
-            state,
-            bucket: bucket.to_owned(),
-            link: link.map(str::to_owned),
-            workflow: workflow.map(str::to_owned),
-            started_at: started_at.map(str::to_owned),
-            completed_at: completed_at.map(str::to_owned),
-            check_run_id,
+            name: details.name.to_owned(),
+            state: details.state,
+            bucket,
+            link: details.link.map(str::to_owned),
+            workflow: details.workflow.map(str::to_owned),
+            started_at: details.started_at.map(str::to_owned),
+            completed_at: details.completed_at.map(str::to_owned),
+            check_run_id: details.check_run_id,
             annotations: None,
             log: None,
         });
     }
     Ok(checks)
+}
+
+struct CheckDetails<'a> {
+    name: &'a str,
+    state: String,
+    link: Option<&'a str>,
+    workflow: Option<&'a str>,
+    started_at: Option<&'a str>,
+    completed_at: Option<&'a str>,
+    check_run_id: Option<u64>,
 }
 
 fn graphql_check_run_state(status: &str, conclusion: Option<&str>) -> Result<String> {
@@ -518,21 +633,7 @@ fn check_run_workflow(object: &Map<String, Value>) -> Result<Option<&str>> {
     Ok(Some(required_string(workflow, "name", "workflow name")?))
 }
 
-fn check_bucket(state: &str) -> Result<&'static str> {
-    match state {
-        "SUCCESS" => Ok("pass"),
-        "SKIPPED" | "NEUTRAL" => Ok("skipping"),
-        "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => Ok("fail"),
-        "CANCELLED" => Ok("cancel"),
-        "EXPECTED" | "REQUESTED" | "WAITING" | "QUEUED" | "PENDING" | "IN_PROGRESS" | "STALE"
-        | "STARTUP_FAILURE" => Ok("pending"),
-        _ => Err(Exit::invalid_response(
-            "GitHub returned an unknown check state",
-        )),
-    }
-}
-
-fn validate_annotations(response: &Value) -> Result<Vec<Value>> {
+fn validate_annotations(response: &Value) -> Result<Vec<Annotation>> {
     let pages = response
         .as_array()
         .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid annotation response"))?;
@@ -545,36 +646,16 @@ fn validate_annotations(response: &Value) -> Result<Vec<Value>> {
             let object = value
                 .as_object()
                 .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid annotation"))?;
-            let path = required_string(object, "path", "annotation path")?;
-            let start_line = required_u64(object, "start_line", "annotation start line")?;
-            let end_line = required_u64(object, "end_line", "annotation end line")?;
-            let annotation_level = required_string(object, "annotation_level", "annotation level")?;
-            let message = required_string(object, "message", "annotation message")?;
-            let title = nullable_string(object, "title", "annotation title")?;
-            annotations.push(json!({
-                "path": path,
-                "startLine": start_line,
-                "endLine": end_line,
-                "annotationLevel": annotation_level,
-                "title": title,
-                "message": message,
-            }));
+            annotations.push(Annotation::from_object(object)?);
         }
     }
     annotations.sort_by(|left, right| {
-        annotation_string(left, "path")
-            .cmp(annotation_string(right, "path"))
-            .then_with(|| {
-                annotation_u64(left, "startLine").cmp(&annotation_u64(right, "startLine"))
-            })
-            .then_with(|| annotation_u64(left, "endLine").cmp(&annotation_u64(right, "endLine")))
-            .then_with(|| {
-                annotation_string(left, "message").cmp(annotation_string(right, "message"))
-            })
-            .then_with(|| {
-                annotation_optional_string(left, "title")
-                    .cmp(&annotation_optional_string(right, "title"))
-            })
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.start_line.cmp(&right.start_line))
+            .then_with(|| left.end_line.cmp(&right.end_line))
+            .then_with(|| left.message.cmp(&right.message))
+            .then_with(|| left.title.cmp(&right.title))
     });
     Ok(annotations)
 }
@@ -622,22 +703,6 @@ fn nullable_string<'a>(
             "GitHub returned an invalid {label}"
         ))),
     }
-}
-
-fn annotation_string<'a>(annotation: &'a Value, field: &str) -> &'a str {
-    annotation[field]
-        .as_str()
-        .expect("validated annotation field is a string")
-}
-
-fn annotation_optional_string<'a>(annotation: &'a Value, field: &str) -> Option<&'a str> {
-    annotation[field].as_str()
-}
-
-fn annotation_u64(annotation: &Value, field: &str) -> u64 {
-    annotation[field]
-        .as_u64()
-        .expect("validated annotation field is an integer")
 }
 
 fn actions_job_id(target: &Target, link: &str) -> Option<u64> {
@@ -1058,27 +1123,27 @@ mod tests {
 
     #[test]
     fn check_bucket_maps_all_known_states() {
-        assert_eq!(bucket("SUCCESS"), "pass");
-        assert_eq!(bucket("SKIPPED"), "skipping");
-        assert_eq!(bucket("NEUTRAL"), "skipping");
-        assert_eq!(bucket("ERROR"), "fail");
-        assert_eq!(bucket("FAILURE"), "fail");
-        assert_eq!(bucket("TIMED_OUT"), "fail");
-        assert_eq!(bucket("ACTION_REQUIRED"), "fail");
-        assert_eq!(bucket("CANCELLED"), "cancel");
-        assert_eq!(bucket("EXPECTED"), "pending");
-        assert_eq!(bucket("REQUESTED"), "pending");
-        assert_eq!(bucket("WAITING"), "pending");
-        assert_eq!(bucket("QUEUED"), "pending");
-        assert_eq!(bucket("PENDING"), "pending");
-        assert_eq!(bucket("IN_PROGRESS"), "pending");
-        assert_eq!(bucket("STALE"), "pending");
-        assert_eq!(bucket("STARTUP_FAILURE"), "pending");
-        assert!(check_bucket("UNKNOWN").is_err());
+        assert_eq!(bucket("SUCCESS"), CheckBucket::Pass);
+        assert_eq!(bucket("SKIPPED"), CheckBucket::Skipping);
+        assert_eq!(bucket("NEUTRAL"), CheckBucket::Skipping);
+        assert_eq!(bucket("ERROR"), CheckBucket::Fail);
+        assert_eq!(bucket("FAILURE"), CheckBucket::Fail);
+        assert_eq!(bucket("TIMED_OUT"), CheckBucket::Fail);
+        assert_eq!(bucket("ACTION_REQUIRED"), CheckBucket::Fail);
+        assert_eq!(bucket("CANCELLED"), CheckBucket::Cancel);
+        assert_eq!(bucket("EXPECTED"), CheckBucket::Pending);
+        assert_eq!(bucket("REQUESTED"), CheckBucket::Pending);
+        assert_eq!(bucket("WAITING"), CheckBucket::Pending);
+        assert_eq!(bucket("QUEUED"), CheckBucket::Pending);
+        assert_eq!(bucket("PENDING"), CheckBucket::Pending);
+        assert_eq!(bucket("IN_PROGRESS"), CheckBucket::Pending);
+        assert_eq!(bucket("STALE"), CheckBucket::Pending);
+        assert_eq!(bucket("STARTUP_FAILURE"), CheckBucket::Pending);
+        assert!(CheckBucket::from_state("UNKNOWN").is_err());
     }
 
-    fn bucket(state: &str) -> &str {
-        check_bucket(state).unwrap_or_else(|_| panic!("known check state: {state}"))
+    fn bucket(state: &str) -> CheckBucket {
+        CheckBucket::from_state(state).unwrap_or_else(|_| panic!("known check state: {state}"))
     }
 
     #[test]
@@ -1222,5 +1287,24 @@ mod tests {
             .expect_err("malformed annotation must fail closed");
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
+    }
+
+    #[test]
+    fn annotation_message_is_validated_before_title() {
+        let error = validate_annotations(&json!([[
+            {
+                "path": "partial.rs",
+                "start_line": 1,
+                "end_line": 1,
+                "annotation_level": "failure"
+            }
+        ]]))
+        .expect_err("missing annotation message must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .contains("GitHub returned an invalid annotation message")
+        );
     }
 }
