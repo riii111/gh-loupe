@@ -5,7 +5,7 @@ use crate::model::Target;
 
 use super::pagination;
 
-const REVIEW_THREADS_QUERY: &str = r"
+const REVIEW_THREAD_SUMMARIES_QUERY: &str = r"
 query ReviewThreadSummaries($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -31,7 +31,7 @@ query ReviewThreadSummaries($owner: String!, $name: String!, $number: Int!, $cur
 }
 ";
 
-const REVIEW_THREAD_COMMENTS_QUERY: &str = r"
+const REVIEW_THREAD_SUMMARY_COMMENTS_QUERY: &str = r"
 query ReviewThreadSummaryComments($id: ID!, $cursor: String) {
   node(id: $id) {
     ... on PullRequestReviewThread {
@@ -50,7 +50,7 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
         .split_once('/')
         .expect("repository is validated");
     let mut cursor_tracker = pagination::CursorTracker::default();
-    let mut review_threads = Vec::new();
+    let mut summaries = Vec::new();
     let number = target
         .number
         .parse::<i32>()
@@ -63,7 +63,7 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
             "number": number,
             "cursor": cursor_tracker.cursor(),
         });
-        let data = super::query(REVIEW_THREADS_QUERY, &variables)?;
+        let data = super::query(REVIEW_THREAD_SUMMARIES_QUERY, &variables)?;
         let pull_request = pagination::take_value_at(data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             let message = format!(
@@ -73,56 +73,41 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
             return Err(Exit::runtime(&RuntimeError::not_found(message)));
         }
         let mut connection = pagination::take_value_at(pull_request, &["reviewThreads"])?;
-        review_threads.extend(pagination::take_nodes(&mut connection)?);
+        summaries.extend(pagination::take_nodes(&mut connection)?);
         let Some(_) = cursor_tracker.next(&connection)? else {
             break;
         };
     }
 
     if !include_resolved {
-        review_threads
-            .retain(|review_thread| review_thread.get("isResolved") != Some(&Value::Bool(true)));
+        summaries.retain(|summary| summary.get("isResolved") != Some(&Value::Bool(true)));
     }
-    for review_thread in &mut review_threads {
-        append_review_thread_comment_pages(review_thread)?;
+    for summary in &mut summaries {
+        append_summary_comment_pages(summary)?;
     }
-    Ok(review_threads)
+    Ok(summaries)
 }
 
-fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
-    let id = review_thread
+fn append_summary_comment_pages(summary: &mut Value) -> Result<()> {
+    let id = summary
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| Exit::invalid_response("GitHub field id must be a string"))?
         .to_owned();
-    let mut comments = review_thread
+    let mut comments = summary
         .as_object_mut()
-        .and_then(|review_thread| review_thread.shift_remove("comments"))
+        .and_then(|summary| summary.shift_remove("comments"))
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
-    let mut cursor_tracker = pagination::CursorTracker::default();
-    while let Some(cursor) = cursor_tracker.next(&comments)? {
+    pagination::append_connection_pages(&mut comments, |cursor| {
         let variables = json!({"id": id, "cursor": cursor});
-        let data = super::query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
-        let mut page = pagination::take_value_at(data, &["node", "comments"])?;
-        let new_nodes = pagination::take_nodes(&mut page)?;
-        comments
-            .get_mut("nodes")
-            .and_then(Value::as_array_mut)
-            .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?
-            .extend(new_nodes);
-        comments
-            .as_object_mut()
-            .ok_or_else(|| Exit::invalid_response("GitHub comments must be an object"))?
-            .insert(
-                "pageInfo".to_owned(),
-                pagination::take_value_at(page, &["pageInfo"])?,
-            );
-    }
+        let data = super::query(REVIEW_THREAD_SUMMARY_COMMENTS_QUERY, &variables)?;
+        pagination::take_value_at(data, &["node", "comments"])
+    })?;
     let nodes = comments
         .as_object_mut()
         .and_then(|comments| comments.shift_remove("nodes"))
         .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?;
-    review_thread
+    summary
         .as_object_mut()
         .expect("review thread was validated as an object")
         .insert("comments".to_owned(), nodes);

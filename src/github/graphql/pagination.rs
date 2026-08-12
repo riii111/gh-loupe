@@ -69,6 +69,27 @@ pub(super) fn take_nodes(connection: &mut Value) -> Result<Vec<Value>> {
     }
 }
 
+pub(super) fn append_connection_pages<F>(connection: &mut Value, mut fetch_page: F) -> Result<()>
+where
+    F: FnMut(String) -> Result<Value>,
+{
+    let mut cursor_tracker = CursorTracker::default();
+    while let Some(cursor) = cursor_tracker.next(connection)? {
+        let mut page = fetch_page(cursor)?;
+        let new_nodes = take_nodes(&mut page)?;
+        connection
+            .get_mut("nodes")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| Exit::invalid_response("GitHub connection nodes must be an array"))?
+            .extend(new_nodes);
+        connection
+            .as_object_mut()
+            .ok_or_else(|| Exit::invalid_response("GitHub comments must be an object"))?
+            .insert("pageInfo".to_owned(), take_value_at(page, &["pageInfo"])?);
+    }
+    Ok(())
+}
+
 pub(super) fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
     path.iter().try_fold(value, |value, key| {
         value
