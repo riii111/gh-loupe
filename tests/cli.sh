@@ -438,6 +438,9 @@ assert_runtime_failure issue-malformed invalidResponse issue \
 assert_runtime_failure issue-pr-target invalidResponse issue \
   GH_TEST_ISSUE_RESPONSE=pr-marker -- issue 42 --repo riii111/dotfiles
 grep -F 'use the pr commands' "$tmpdir/issue-pr-target.issue.stderr" >/dev/null
+assert_runtime_failure issue-null-pr-target invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=null-pr-marker -- issue 42 --repo riii111/dotfiles
+grep -F 'use the pr commands' "$tmpdir/issue-null-pr-target.issue.stderr" >/dev/null
 assert_runtime_failure issue-comments-missing-field invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=missing-field -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-comments-wrong-type invalidResponse issue \

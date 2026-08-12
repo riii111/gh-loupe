@@ -33,10 +33,7 @@ pub fn execute(target: &Target) -> Result<Value> {
 }
 
 fn project_issue(issue: &Value) -> Result<Value> {
-    if issue
-        .get("pull_request")
-        .is_some_and(|pull_request| !pull_request.is_null())
-    {
+    if issue.get("pull_request").is_some() {
         return Err(Exit::invalid_response(
             "GitHub target is a pull request; use the pr commands",
         ));
@@ -401,6 +398,14 @@ mod tests {
             json!({"pull_request": {"html_url": "https://github.com/owner/repository/pull/39"}});
 
         let error = project_issue(&issue).expect_err("pull request must be rejected");
+        assert!(error.stderr_line().contains("use the pr commands"));
+    }
+
+    #[test]
+    fn null_pull_request_marker_is_rejected() {
+        let issue = json!({"pull_request": null});
+
+        let error = project_issue(&issue).expect_err("null pull request marker must be rejected");
         assert!(error.stderr_line().contains("use the pr commands"));
     }
 }

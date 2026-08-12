@@ -564,6 +564,11 @@ JSON
 {"number":42,"title":"Pull request","html_url":"https://github.com/riii111/dotfiles/pull/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"pull_request":{"html_url":"https://github.com/riii111/dotfiles/pull/42"}}
 JSON
       ;;
+    null-pr-marker)
+      cat <<'JSON'
+{"number":42,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"pull_request":null}
+JSON
+      ;;
     *)
       printf 'unknown issue response fixture: %s\n' "${GH_TEST_ISSUE_RESPONSE}" >&2
       exit 90
