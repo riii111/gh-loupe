@@ -89,14 +89,20 @@ struct Annotation {
 
 impl Annotation {
     fn from_object(object: &Map<String, Value>) -> Result<Self> {
+        let path = required_string(object, "path", "annotation path")?.to_owned();
+        let start_line = required_u64(object, "start_line", "annotation start line")?;
+        let end_line = required_u64(object, "end_line", "annotation end line")?;
+        let annotation_level =
+            required_string(object, "annotation_level", "annotation level")?.to_owned();
+        let message = required_string(object, "message", "annotation message")?.to_owned();
+        let title = nullable_string(object, "title", "annotation title")?.map(str::to_owned);
         Ok(Self {
-            path: required_string(object, "path", "annotation path")?.to_owned(),
-            start_line: required_u64(object, "start_line", "annotation start line")?,
-            end_line: required_u64(object, "end_line", "annotation end line")?,
-            annotation_level: required_string(object, "annotation_level", "annotation level")?
-                .to_owned(),
-            title: nullable_string(object, "title", "annotation title")?.map(str::to_owned),
-            message: required_string(object, "message", "annotation message")?.to_owned(),
+            path,
+            start_line,
+            end_line,
+            annotation_level,
+            title,
+            message,
         })
     }
 
@@ -1237,5 +1243,24 @@ mod tests {
             .expect_err("malformed annotation must fail closed");
 
         assert!(error.stderr_line().contains("\"kind\":\"invalidResponse\""));
+    }
+
+    #[test]
+    fn annotation_message_is_validated_before_title() {
+        let error = validate_annotations(&json!([[
+            {
+                "path": "partial.rs",
+                "start_line": 1,
+                "end_line": 1,
+                "annotation_level": "failure"
+            }
+        ]]))
+        .expect_err("missing annotation message must fail closed");
+
+        assert!(
+            error
+                .stderr_line()
+                .contains("GitHub returned an invalid annotation message")
+        );
     }
 }
