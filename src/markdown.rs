@@ -32,7 +32,18 @@ pub fn omit_details(body: &str) -> (String, bool) {
     for block in blocks {
         result.push_str(&body[cursor..block.start]);
         if let Some((summary_start, summary_end)) = summary_content(&tags, block) {
+            let result_ends_whitespace = result.chars().last().is_some_and(char::is_whitespace);
+            if summary_start != summary_end && !result.is_empty() && !result_ends_whitespace {
+                result.push('\n');
+            }
             result.push_str(&body[summary_start..summary_end]);
+            let next_starts_whitespace = body[block.end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+            if !body[block.end..].is_empty() && !next_starts_whitespace && !result.ends_with('\n') {
+                result.push('\n');
+            }
         }
         cursor = block.end;
     }
@@ -95,6 +106,7 @@ fn tags(body: &str, protected: &[bool]) -> Vec<Tag> {
     while cursor < bytes.len() {
         if bytes[cursor] == b'<'
             && !protected[cursor]
+            && !is_escaped(bytes, cursor)
             && let Some(tag) = parse_tag(bytes, cursor)
             && (cursor..tag.end).all(|index| !protected[index])
         {
@@ -241,13 +253,8 @@ fn line_end(bytes: &[u8], start: usize) -> usize {
 }
 
 fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<(u8, usize)> {
-    let mut cursor = start;
-    let mut spaces = 0;
-    while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
-        cursor += 1;
-        spaces += 1;
-    }
-    if spaces == 4 || cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
+    let cursor = container_prefix_end(bytes, start, end);
+    if cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
         return None;
     }
     let fence = bytes[cursor];
@@ -256,13 +263,8 @@ fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<(u8, usize)> {
 }
 
 fn fence_end(bytes: &[u8], start: usize, end: usize, fence: u8, length: usize) -> bool {
-    let mut cursor = start;
-    let mut spaces = 0;
-    while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
-        cursor += 1;
-        spaces += 1;
-    }
-    if spaces == 4 || bytes.get(cursor) != Some(&fence) {
+    let mut cursor = container_prefix_end(bytes, start, end);
+    if bytes.get(cursor) != Some(&fence) {
         return false;
     }
     let run = run_length(bytes, cursor, fence);
@@ -281,6 +283,71 @@ fn indented_code(bytes: &[u8], start: usize, end: usize) -> bool {
         spaces += 1;
     }
     spaces >= 4 || bytes.get(start) == Some(&b'\t')
+}
+
+fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> usize {
+    let mut cursor = start;
+    loop {
+        let before_marker = cursor;
+        let mut spaces = 0;
+        while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+            spaces += 1;
+        }
+        if cursor >= end {
+            return cursor;
+        }
+        if spaces == 4 {
+            return before_marker;
+        }
+        if matches!(bytes[cursor], b'`' | b'~') {
+            return cursor;
+        }
+        if bytes[cursor] == b'>' {
+            cursor += 1;
+            if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
+                cursor += 1;
+            }
+            continue;
+        }
+        if matches!(bytes[cursor], b'-' | b'+' | b'*')
+            && cursor + 1 < end
+            && matches!(bytes[cursor + 1], b' ' | b'\t')
+        {
+            cursor += 1;
+            while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
+                cursor += 1;
+            }
+            continue;
+        }
+        let digits_start = cursor;
+        while cursor < end && cursor - digits_start < 9 && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor > digits_start
+            && cursor < end
+            && matches!(bytes[cursor], b'.' | b')')
+            && cursor + 1 < end
+            && matches!(bytes[cursor + 1], b' ' | b'\t')
+        {
+            cursor += 1;
+            while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
+                cursor += 1;
+            }
+            continue;
+        }
+        return before_marker;
+    }
+}
+
+fn is_escaped(bytes: &[u8], position: usize) -> bool {
+    let mut backslashes = 0;
+    let mut cursor = position;
+    while cursor > 0 && bytes[cursor - 1] == b'\\' {
+        backslashes += 1;
+        cursor -= 1;
+    }
+    backslashes % 2 == 1
 }
 
 fn run_length(bytes: &[u8], start: usize, byte: u8) -> usize {
@@ -338,6 +405,33 @@ mod tests {
     fn leaves_code_and_malformed_details_untouched() {
         let body = "`<details>inline</details>`\n\n```markdown\n<details>fenced</details>\n```\n\n    <details>indented</details>\n\n<details>\n<summary>open</summary>\nnot closed";
         assert_eq!(omit_details(body), (body.to_owned(), false));
+    }
+
+    #[test]
+    fn leaves_container_fences_and_escaped_tags_literal() {
+        assert_eq!(
+            omit_details(
+                "- ```markdown\n  <details>literal</details>\n  ```\n<details><summary>valid</summary>hidden</details>"
+            ),
+            (
+                "- ```markdown\n  <details>literal</details>\n  ```\nvalid".to_owned(),
+                true
+            )
+        );
+        assert_eq!(
+            omit_details(
+                "\\<details>literal\\</details>\n<details><summary>valid</summary>hidden</details>"
+            ),
+            ("\\<details>literal\\</details>\nvalid".to_owned(), true)
+        );
+    }
+
+    #[test]
+    fn keeps_block_boundary_when_details_are_inline() {
+        assert_omitted(
+            "before<details><summary>heading</summary>hidden</details>after",
+            "before\nheading\nafter",
+        );
     }
 
     #[test]
