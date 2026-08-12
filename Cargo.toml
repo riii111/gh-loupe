@@ -47,33 +47,12 @@ all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 
-must_use_candidate = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-module_name_repetitions = "allow"
-doc_markdown = "allow"
-similar_names = "allow"
-too_many_lines = "allow"
-cast_possible_truncation = "allow"
-cast_possible_wrap = "allow"
 cast_sign_loss = "allow"
-cast_precision_loss = "allow"
-cast_lossless = "allow"
-items_after_statements = "allow"
 needless_pass_by_value = "allow"
-unused_self = "allow"
-implicit_hasher = "allow"
-match_wildcard_for_single_variants = "allow"
 struct_field_names = "allow"
 
 missing_const_for_fn = "allow"
 significant_drop_tightening = "allow"
-option_if_let_else = "allow"
-future_not_send = "allow"
-branches_sharing_code = "allow"
-iter_with_drain = "allow"
-collection_is_never_read = "allow"
-used_underscore_binding = "allow"
 
 absolute_paths = "warn"
 dbg_macro = "deny"
