@@ -93,7 +93,7 @@ impl RuntimeError {
                 ],
             ) {
             (ErrorKind::Authentication, false)
-        } else if lower.contains("rate limit") && !lower.contains("rate limiting") {
+        } else if contains_rate_limit(&lower) {
             (ErrorKind::RateLimited, true)
         } else if contains_any(
             &lower,
@@ -152,6 +152,14 @@ fn contains_word(value: &str, word: &str) -> bool {
     value
         .split(|character: char| !character.is_ascii_alphanumeric())
         .any(|part| part == word)
+}
+
+fn contains_rate_limit(value: &str) -> bool {
+    const MARKER: &str = "rate limit";
+
+    value
+        .match_indices(MARKER)
+        .any(|(index, _)| !value[index + MARKER.len()..].starts_with("ing"))
 }
 
 fn parse_retry_after_seconds(message: &str) -> Option<u64> {
@@ -330,5 +338,16 @@ mod tests {
 
         assert_eq!(error.kind, ErrorKind::GitHubCli);
         assert_eq!(error.message, "GitHub CLI terminated by signal");
+    }
+
+    #[test]
+    fn a_real_rate_limit_is_not_hidden_by_an_unrelated_rate_limiting_message() {
+        let error = RuntimeError::from_cli_process_failure(
+            Some(1),
+            b"rate limiting is configured locally\nAPI rate limit exceeded",
+        );
+
+        assert_eq!(error.kind, ErrorKind::RateLimited);
+        assert!(error.retryable);
     }
 }
