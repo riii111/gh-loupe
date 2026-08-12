@@ -157,9 +157,12 @@ fn contains_word(value: &str, word: &str) -> bool {
 fn contains_rate_limit(value: &str) -> bool {
     const MARKER: &str = "rate limit";
 
-    value
-        .match_indices(MARKER)
-        .any(|(index, _)| !value[index + MARKER.len()..].starts_with("ing"))
+    value.match_indices(MARKER).any(|(index, _)| {
+        let before = value[..index].chars().next_back();
+        let after = value[index + MARKER.len()..].chars().next();
+        !before.is_some_and(|character| character.is_ascii_alphanumeric())
+            && !after.is_some_and(|character| character.is_ascii_alphanumeric())
+    })
 }
 
 fn parse_retry_after_seconds(message: &str) -> Option<u64> {
@@ -325,6 +328,7 @@ mod tests {
             b"rate limiting is configured locally".as_slice(),
             b"GET https://api.github.com/rate-limit".as_slice(),
             b"resource named rate-limit".as_slice(),
+            b"resource named corporate limits".as_slice(),
         ] {
             let error = RuntimeError::from_cli_process_failure(Some(1), stderr);
             assert_eq!(error.kind, ErrorKind::GitHubCli);
