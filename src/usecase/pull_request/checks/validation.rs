@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 
-use super::output::{Annotation, Check, CheckBucket};
+use super::{Annotation, Check, CheckBucket};
 
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
 
@@ -284,7 +284,7 @@ mod tests {
 
         let mut checks = validate_check_contexts(&[older, newer], false)
             .unwrap_or_else(|_| panic!("valid check run contexts"));
-        checks.sort_by(super::super::output::compare_checks);
+        checks.sort_by(super::super::compare_checks);
 
         assert_eq!(
             checks[0].started_at.as_deref(),

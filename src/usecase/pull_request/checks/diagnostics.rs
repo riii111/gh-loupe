@@ -11,8 +11,8 @@ use crate::github;
 use crate::model::{CheckDiagnosticsOptions, Target};
 
 use super::actions_log::{LOG_BYTE_LIMIT, LOG_LINE_LIMIT, collect_actions_log};
-use super::output::{Annotation, Check, CheckBucket};
 use super::validation::validate_annotations;
+use super::{Annotation, Check, CheckBucket};
 
 const MAX_DIAGNOSTIC_WORKERS: usize = 4;
 
