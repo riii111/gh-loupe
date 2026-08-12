@@ -1,78 +1,50 @@
 use crate::error::{Exit, Result};
+use crate::output;
 use crate::usecase;
 
-pub(super) fn parse<I>(program: &str, mut remaining: I) -> Result<super::Args>
+pub(super) fn parse<I>(program: &str, remaining: I) -> Result<super::Args>
 where
     I: Iterator<Item = String>,
 {
-    let mut target = None;
-    let mut repo = None;
-    let mut compact = false;
-    let mut positional_only = false;
-    let mut unrecognized = Vec::new();
-    while let Some(value) = remaining.next() {
-        if positional_only {
-            if target.is_none() {
-                target = Some(value);
-            } else {
-                unrecognized.push(value);
-            }
-            continue;
-        }
-        match value.as_str() {
-            "--" => positional_only = true,
-            option if super::exact_long_option_value(option, "--repo").is_some() => {
-                repo = super::exact_long_option_value(option, "--repo").map(str::to_owned);
-            }
-            "--repo" => {
-                let Some(value) = remaining.next() else {
-                    return Err(issue_argument_error(
-                        program,
-                        "argument --repo: expected one argument",
-                    ));
-                };
-                if value != "-" && value.starts_with('-') {
-                    return Err(issue_argument_error(
-                        program,
-                        "argument --repo: expected one argument",
-                    ));
-                }
-                repo = Some(value);
-            }
-            "--compact" => compact = true,
-            "-h" | "--help" => {
-                print_help(program)?;
-                std::process::exit(0);
-            }
-            option if option.starts_with('-') => unrecognized.push(option.to_owned()),
-            value if target.is_none() => target = Some(value.to_owned()),
-            value => unrecognized.push(value.to_owned()),
-        }
-    }
-    let Some(target) = target else {
+    let parsed = super::parse_subcommand_args(
+        program,
+        remaining,
+        1,
+        issue_argument_error,
+        print_help,
+        |_, _| Ok(false),
+    )?;
+    let mut positionals = parsed.positionals.into_iter();
+    let Some(target) = positionals.next() else {
         return Err(issue_argument_error(
             program,
             "the following arguments are required: target",
         ));
     };
-    if !unrecognized.is_empty() {
-        return Err(issue_argument_error(
-            program,
-            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
-        ));
-    }
+    super::unrecognized_args(program, issue_argument_error, &parsed.unrecognized)?;
     Ok(super::Args {
         action: super::Action::Issue,
         target,
-        repo,
-        compact,
+        repo: parsed.repo,
+        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
 
-pub(super) fn execute(target_value: &str, repo: Option<String>) -> Result<serde_json::Value> {
-    let target = super::target::resolve_issue_target(target_value, repo)?;
-    usecase::issue::inspect::execute(&target)
+pub(super) fn execute(
+    target_value: &str,
+    repo: Option<String>,
+    program: &str,
+) -> Result<serde_json::Value> {
+    let target = super::target::resolve_target(
+        target_value,
+        repo,
+        super::target::Resource::Issue,
+        super::target::positive_number,
+        issue_argument_error,
+        program,
+    )?;
+    Ok(output::success(usecase::issue::inspect::execute(&target)?))
 }
 
 fn usage(program: &str) -> String {

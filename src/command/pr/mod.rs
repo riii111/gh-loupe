@@ -6,9 +6,7 @@ mod review_threads;
 mod reviews;
 
 use crate::error::{Exit, Result};
-use crate::github;
 use crate::model::CheckDiagnosticsOptions;
-use crate::model::Target;
 use crate::output;
 
 pub(super) enum Action {
@@ -65,7 +63,22 @@ pub(super) fn execute(
     repo: Option<String>,
     program: &str,
 ) -> Result<serde_json::Value> {
-    let target = resolve_target(&action, target_value, repo, program)?;
+    let argument_error: fn(&str, &str) -> Exit = match &action {
+        Action::Checks { .. } => checks::argument_error,
+        Action::Comments => comments::argument_error,
+        Action::Overview => overview::argument_error,
+        Action::Reviews => reviews::argument_error,
+        Action::ReviewThread { .. } => review_thread::argument_error,
+        Action::ReviewThreads { .. } => review_threads::argument_error,
+    };
+    let target = super::target::resolve_target(
+        target_value,
+        repo,
+        super::target::Resource::Pr,
+        positive_pr_number,
+        argument_error,
+        program,
+    )?;
     let data = match action {
         Action::Checks {
             required,
@@ -97,168 +110,9 @@ pub(super) fn execute(
     Ok(output::success(data))
 }
 
-fn resolve_target(
-    action: &Action,
-    target_value: &str,
-    repo: Option<String>,
-    program: &str,
-) -> Result<Target> {
-    let argument_error: fn(&str, &str) -> Exit = match action {
-        Action::Checks { .. } => checks::argument_error,
-        Action::Comments => comments::argument_error,
-        Action::Overview => overview::argument_error,
-        Action::Reviews => reviews::argument_error,
-        Action::ReviewThread { .. } => review_thread::argument_error,
-        Action::ReviewThreads { .. } => review_threads::argument_error,
-    };
-    if let Some((url_repo, number)) =
-        super::target::parse_url(target_value, super::target::Resource::Pr)
-    {
-        if !super::target::is_repo(url_repo) {
-            return Err(argument_error(
-                program,
-                "pr URL must contain a valid OWNER/REPO",
-            ));
-        }
-        if repo
-            .as_ref()
-            .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
-        {
-            return Err(argument_error(
-                program,
-                "--repo conflicts with the pull request URL",
-            ));
-        }
-        let Some(number) = positive_pr_number(number) else {
-            return Err(argument_error(
-                program,
-                "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
-            ));
-        };
-        return Ok(Target {
-            repository: url_repo.to_owned(),
-            number,
-        });
-    }
-
-    let Some(number) = positive_pr_number(target_value) else {
-        return Err(argument_error(
-            program,
-            "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL",
-        ));
-    };
-    let repository = match repo {
-        Some(repo) => repo,
-        None => github::current_repository_runtime()?,
-    };
-    if !super::target::is_repo(&repository) {
-        return Err(argument_error(program, "--repo must use OWNER/REPO format"));
-    }
-    Ok(Target { repository, number })
-}
-
 fn positive_pr_number(value: &str) -> Option<String> {
     let value = super::target::positive_number(value)?;
     value.parse::<i32>().ok().map(|_| value)
-}
-
-struct SubcommandArgs {
-    positionals: Vec<String>,
-    repo: Option<String>,
-    compact: bool,
-    unrecognized: Vec<String>,
-}
-
-fn parse_subcommand_args<I, F>(
-    program: &str,
-    mut values: I,
-    positional_count: usize,
-    argument_error: fn(&str, &str) -> Exit,
-    print_help: fn(&str) -> Result<()>,
-    mut parse_option: F,
-) -> Result<SubcommandArgs>
-where
-    I: Iterator<Item = String>,
-    F: FnMut(&str, &mut I) -> Result<bool>,
-{
-    let mut positionals = Vec::new();
-    let mut repo = None;
-    let mut compact = false;
-    let mut positional_only = false;
-    let mut unrecognized = Vec::new();
-
-    while let Some(value) = values.next() {
-        if positional_only {
-            if positionals.len() < positional_count {
-                positionals.push(value);
-            } else {
-                unrecognized.push(value);
-            }
-            continue;
-        }
-        if value == "--" {
-            positional_only = true;
-            continue;
-        }
-        if let Some(value) = super::exact_long_option_value(&value, "--repo") {
-            repo = Some(value.to_owned());
-            continue;
-        }
-        match value.as_str() {
-            "--repo" => {
-                let Some(value) = values.next() else {
-                    return Err(argument_error(
-                        program,
-                        "argument --repo: expected one argument",
-                    ));
-                };
-                if value != "-" && value.starts_with('-') {
-                    return Err(argument_error(
-                        program,
-                        "argument --repo: expected one argument",
-                    ));
-                }
-                repo = Some(value);
-            }
-            "--compact" => compact = true,
-            "-h" | "--help" => {
-                print_help(program)?;
-                std::process::exit(0);
-            }
-            option => {
-                if parse_option(option, &mut values)? {
-                    continue;
-                }
-                if option.starts_with('-') || positionals.len() >= positional_count {
-                    unrecognized.push(value);
-                } else {
-                    positionals.push(value);
-                }
-            }
-        }
-    }
-
-    Ok(SubcommandArgs {
-        positionals,
-        repo,
-        compact,
-        unrecognized,
-    })
-}
-
-fn unrecognized_args(
-    program: &str,
-    argument_error: fn(&str, &str) -> Exit,
-    unrecognized: &[String],
-) -> Result<()> {
-    if unrecognized.is_empty() {
-        Ok(())
-    } else {
-        Err(argument_error(
-            program,
-            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
-        ))
-    }
 }
 
 fn usage(program: &str) -> String {

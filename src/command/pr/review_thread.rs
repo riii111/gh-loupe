@@ -8,7 +8,7 @@ where
 {
     let mut include_diff_hunk = false;
     let mut include_details = false;
-    let parsed = super::parse_subcommand_args(
+    let parsed = super::super::parse_subcommand_args(
         program,
         values,
         2,
@@ -39,7 +39,7 @@ where
             "the following arguments are required: review_thread_id",
         ));
     };
-    super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
+    super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
         action: super::super::Action::Pr(super::Action::ReviewThread {
             review_thread_id,

@@ -13,7 +13,7 @@ where
     let mut include_failed_logs = false;
     let mut timeout_seconds = 90;
     let mut quiet = false;
-    let parsed = super::parse_subcommand_args(
+    let parsed = super::super::parse_subcommand_args(
         program,
         values,
         1,
@@ -59,7 +59,7 @@ where
             "the following arguments are required: target",
         ));
     };
-    super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
+    super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
         action: super::super::Action::Pr(super::Action::Checks {
             required,
