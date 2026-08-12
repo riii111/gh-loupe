@@ -112,35 +112,38 @@ pub fn pull_request_check_contexts(
         });
         let data =
             query_with_deadline(CHECK_CONTEXTS_QUERY, &variables, deadline, timeout_message)?;
-        let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
+        let pull_request = pagination::take_value_at(data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             return Err(Exit::runtime(&RuntimeError::not_found(format!(
                 "pull request not found: {}#{}",
                 target.repository, target.number
             ))));
         }
-        let commit = pagination::nodes(pagination::value_at(pull_request, &["commits"])?)?
-            .first()
-            .and_then(|node| node.get("commit"))
+        let mut commits = pagination::take_value_at(pull_request, &["commits"])?;
+        let commit = pagination::take_nodes(&mut commits)?
+            .into_iter()
+            .next()
+            .and_then(|mut node| node.as_object_mut()?.shift_remove("commit"))
             .ok_or_else(invalid_graphql_response)?;
-        let current_oid = pagination::value_at(commit, &["oid"])?
+        let current_oid = pagination::value_at(&commit, &["oid"])?
             .as_str()
-            .ok_or_else(invalid_graphql_response)?;
+            .ok_or_else(invalid_graphql_response)?
+            .to_owned();
         if head_oid
             .as_deref()
-            .is_some_and(|expected| expected != current_oid)
+            .is_some_and(|expected| expected != current_oid.as_str())
         {
             return Err(invalid_graphql_response());
         }
-        head_oid = Some(current_oid.to_owned());
-        let rollup = pagination::value_at(commit, &["statusCheckRollup"])?;
+        head_oid = Some(current_oid.clone());
+        let rollup = pagination::take_value_at(commit, &["statusCheckRollup"])?;
         if rollup.is_null() {
-            return Ok((current_oid.to_owned(), contexts));
+            return Ok((current_oid, contexts));
         }
-        let connection = pagination::value_at(rollup, &["contexts"])?;
-        contexts.extend(pagination::nodes(connection)?.iter().cloned());
-        if cursor_tracker.next(connection)?.is_none() {
-            return Ok((current_oid.to_owned(), contexts));
+        let mut connection = pagination::take_value_at(rollup, &["contexts"])?;
+        contexts.extend(pagination::take_nodes(&mut connection)?);
+        if cursor_tracker.next(&connection)?.is_none() {
+            return Ok((current_oid, contexts));
         }
     }
 }
@@ -165,14 +168,13 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
             "cursor": cursor_tracker.cursor(),
         });
         let data = query(OVERVIEW_QUERY, &variables)?;
-        let current = pagination::value_at(&data, &["repository", "pullRequest"])?;
+        let mut current = pagination::take_value_at(data, &["repository", "pullRequest"])?;
         if current.is_null() {
             return Err(Exit::runtime(&RuntimeError::not_found(format!(
                 "pull request not found: {}#{}",
                 target.repository, target.number
             ))));
         }
-        let mut current = current.clone();
         let connection = current
             .as_object_mut()
             .and_then(|current| current.shift_remove("reviewThreads"))
@@ -236,16 +238,20 @@ fn execute_query(
         )?,
         None => cli::json_runtime(["api", "graphql", "--input", "-"], Some(&payload))?,
     };
-    graphql_response(&response)
+    graphql_response(response)
 }
 
-fn graphql_response(response: &Value) -> Result<QueryResponse> {
-    if let Some(errors) = response.get("errors") {
-        return Ok(QueryResponse::Errors(errors.clone()));
+fn graphql_response(response: Value) -> Result<QueryResponse> {
+    let Value::Object(mut response) = response else {
+        return Err(Exit::runtime(&RuntimeError::invalid_response(
+            "GitHub returned a GraphQL response without data",
+        )));
+    };
+    if let Some(errors) = response.shift_remove("errors") {
+        return Ok(QueryResponse::Errors(errors));
     }
     response
-        .get("data")
-        .cloned()
+        .shift_remove("data")
         .map(QueryResponse::Data)
         .ok_or_else(|| {
             Exit::runtime(&RuntimeError::invalid_response(

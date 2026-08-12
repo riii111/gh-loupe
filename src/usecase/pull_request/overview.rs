@@ -1,6 +1,6 @@
 use std::thread;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github::{graphql, rest};
@@ -25,29 +25,31 @@ pub fn execute(target: &Target) -> Result<Value> {
     let (pull_request, unresolved) = graphql_result?;
     let required = summarize_required_checks(&required_result?)?;
     let all = summarize_all_checks(&all_result?)?;
-    Ok(json!({
-        "pullRequest": pull_request,
-        "checks": {
-            "required": required["required"],
-            "passed": required["passed"],
-            "pending": required["pending"],
-            "failed": required["failed"],
-            "all": all,
-        },
-        "reviewThreads": {
-            "unresolved": unresolved,
-        },
-    }))
+    let mut checks = Map::new();
+    checks.insert("required".to_owned(), required["required"].clone());
+    checks.insert("passed".to_owned(), required["passed"].clone());
+    checks.insert("pending".to_owned(), required["pending"].clone());
+    checks.insert("failed".to_owned(), required["failed"].clone());
+    checks.insert("all".to_owned(), all);
+
+    let mut review_threads = Map::new();
+    review_threads.insert("unresolved".to_owned(), Value::from(unresolved));
+
+    let mut result = Map::new();
+    result.insert("pullRequest".to_owned(), pull_request);
+    result.insert("checks".to_owned(), Value::Object(checks));
+    result.insert("reviewThreads".to_owned(), Value::Object(review_threads));
+    Ok(Value::Object(result))
 }
 
 fn summarize_required_checks(checks: &Value) -> Result<Value> {
     let checks = summarize_buckets(checks, "required")?;
-    Ok(json!({
-        "required": checks["total"],
-        "passed": checks["passed"],
-        "pending": checks["pending"],
-        "failed": checks["failed"],
-    }))
+    let mut result = Map::new();
+    result.insert("required".to_owned(), checks["total"].clone());
+    result.insert("passed".to_owned(), checks["passed"].clone());
+    result.insert("pending".to_owned(), checks["pending"].clone());
+    result.insert("failed".to_owned(), checks["failed"].clone());
+    Ok(Value::Object(result))
 }
 
 fn summarize_all_checks(checks: &Value) -> Result<Value> {
@@ -69,12 +71,12 @@ fn summarize_buckets(checks: &Value, kind: &str) -> Result<Value> {
             _ => return Err(invalid_checks_response(kind)),
         }
     }
-    Ok(json!({
-        "total": checks.len(),
-        "passed": passed,
-        "pending": pending,
-        "failed": failed,
-    }))
+    let mut result = Map::new();
+    result.insert("total".to_owned(), Value::from(checks.len()));
+    result.insert("passed".to_owned(), Value::from(passed));
+    result.insert("pending".to_owned(), Value::from(pending));
+    result.insert("failed".to_owned(), Value::from(failed));
+    Ok(Value::Object(result))
 }
 
 fn invalid_checks_response(kind: &str) -> Exit {
@@ -83,6 +85,8 @@ fn invalid_checks_response(kind: &str) -> Exit {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]

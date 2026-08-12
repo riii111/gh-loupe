@@ -1,13 +1,16 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
 pub fn success(data: Value) -> Value {
-    json!({
-        "schemaVersion": 1,
-        "observedAt": utc_rfc3339(SystemTime::now()),
-        "data": data,
-    })
+    Value::Object(Map::from_iter([
+        ("schemaVersion".to_owned(), Value::from(1)),
+        (
+            "observedAt".to_owned(),
+            Value::String(utc_rfc3339(SystemTime::now())),
+        ),
+        ("data".to_owned(), data),
+    ]))
 }
 
 fn utc_rfc3339(time: SystemTime) -> String {
@@ -42,6 +45,8 @@ fn civil_date(days_since_epoch: u64) -> (i64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    use serde_json::json;
 
     use super::*;
 

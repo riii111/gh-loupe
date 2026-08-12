@@ -67,7 +67,8 @@ query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
 pub fn execute(target: &Target, review_thread_id: &str) -> Result<Value> {
     let variables = json!({"id": review_thread_id});
     let data = query(REVIEW_THREAD_QUERY, &variables)?;
-    let mut review_thread = review_thread_node(&data, review_thread_id)?.clone();
+    review_thread_node(&data, review_thread_id)?;
+    let mut review_thread = pagination::take_value_at(data, &["node"])?;
     verify_pull_request(&review_thread, target)?;
     review_thread
         .as_object_mut()
@@ -108,9 +109,9 @@ fn append_review_thread_comment_pages(
     while let Some(cursor) = cursor_tracker.next(&comments)? {
         let variables = json!({"id": review_thread_id, "cursor": cursor});
         let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
-        let node = review_thread_node(&data, review_thread_id)?;
-        let page = pagination::value_at(node, &["comments"])?;
-        let new_nodes = pagination::nodes(page)?.to_vec();
+        review_thread_node(&data, review_thread_id)?;
+        let mut page = pagination::take_value_at(data, &["node", "comments"])?;
+        let new_nodes = pagination::take_nodes(&mut page)?;
         comments
             .get_mut("nodes")
             .and_then(Value::as_array_mut)
@@ -121,7 +122,7 @@ fn append_review_thread_comment_pages(
             .ok_or_else(|| Exit::invalid_response("GitHub comments must be an object"))?
             .insert(
                 "pageInfo".to_owned(),
-                pagination::value_at(page, &["pageInfo"])?.clone(),
+                pagination::take_value_at(page, &["pageInfo"])?,
             );
     }
     let nodes = comments

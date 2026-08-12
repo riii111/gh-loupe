@@ -102,9 +102,12 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         checks
     };
 
-    Ok(json!({
-        "checks": checks.into_iter().map(Check::into_value).collect::<Vec<_>>()
-    }))
+    let mut result = Map::new();
+    result.insert(
+        "checks".to_owned(),
+        Value::Array(checks.into_iter().map(Check::into_value).collect()),
+    );
+    Ok(Value::Object(result))
 }
 
 fn collect_diagnostics(

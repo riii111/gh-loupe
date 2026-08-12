@@ -110,19 +110,19 @@ fn flatten_pages(
     page_message: &str,
     item_message: &str,
 ) -> Result<Vec<Value>> {
-    let pages = pages
-        .as_array()
-        .ok_or_else(|| Exit::invalid_response(response_message))?;
+    let Value::Array(pages) = pages else {
+        return Err(Exit::invalid_response(response_message));
+    };
     let mut items = Vec::new();
     for page in pages {
-        let page = page
-            .as_array()
-            .ok_or_else(|| Exit::invalid_response(page_message))?;
+        let Value::Array(page) = page else {
+            return Err(Exit::invalid_response(page_message));
+        };
         for item in page {
             if !item.is_object() {
                 return Err(Exit::invalid_response(item_message));
             }
-            items.push(item.clone());
+            items.push(item);
         }
     }
     Ok(items)
