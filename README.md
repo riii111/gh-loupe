@@ -16,6 +16,20 @@ command ruleで`gh-loupe`を許可すれば、個々の`gh api`について許�
 Agentを長時間動かしても、`gh-loupe`経由ではGitHubの更新操作を実行できません。
 承認待ちと許可判断にかかる時間も減らせます。
 
+## Token efficiency
+
+実際のPRを対象に、`gh-loupe`と`gh api`で取得したJSONを比較しました。
+`gh-loupe`では、AI Agentへ渡すトークン数を29〜98%削減できました。
+
+| Scenario | `gh api` | `gh-loupe` | Reduction |
+|---|---:|---:|---:|
+| PR overview | 5,032 | 188 | 96% |
+| Conversation comments | 11,099 | 6,581 | 41% |
+| Review submissions | 30,242 | 21,413 | 29% |
+| 未解決review threadの段階取得 | 55,134 | 982 | 98% |
+
+手書きで未解決threadへ絞ったGraphQLとの比較でも、段階取得のtoken数は53%少なくなりました。
+
 ## Setup
 
 GitHub CLIで認証後、installerを実行すると、binaryとAgent向けSkillがまとめてインストールされます。
