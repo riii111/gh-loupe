@@ -1,0 +1,36 @@
+[
+  [
+    {
+      "node_id": "IC_z",
+      "html_url": "https://example.test/z",
+      "user": {
+        "login": "later"
+      },
+      "body": "later",
+      "created_at": "2026-01-02T00:00:00Z",
+      "updated_at": "2026-01-02T01:00:00Z",
+      "pull_request_review_id": 99,
+      "diff_hunk": "not a conversation field"
+    },
+    {
+      "node_id": "IC_b",
+      "html_url": "https://example.test/b",
+      "user": {
+        "login": "author"
+      },
+      "body": "second by id",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T01:00:00Z"
+    }
+  ],
+  [
+    {
+      "node_id": "IC_a",
+      "html_url": "https://example.test/a",
+      "user": null,
+      "body": "first by id",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T02:00:00Z"
+    }
+  ]
+]

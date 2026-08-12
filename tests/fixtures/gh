@@ -138,18 +138,14 @@ if [ "$1 $2" = "pr checks" ]; then
   fi
   case "${GH_TEST_CHECKS_NEW:-}" in
     success)
-      cat <<'JSON'
-[{"name":"zeta","state":"PENDING","bucket":"pending","link":"https://example.test/z","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"alpha","state":"SUCCESS","bucket":"pass","link":"https://example.test/b","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"},{"name":"alpha","state":"SUCCESS","bucket":"skipping","link":"https://example.test/a","workflow":"CI","startedAt":"2026-08-11T08:00:00Z","completedAt":"2026-08-11T08:05:00Z"}]
-JSON
+      cat "$GH_FIXTURE_DATA/checks-success.json"
       if [ "${GH_TEST_CHECKS_STATUS:-pending}" = unexpected ]; then
         exit 23
       fi
       exit 8
       ;;
     nullable)
-      cat <<'JSON'
-[{"name":"absent","state":"PENDING","bucket":"pending","link":"","workflow":"","startedAt":"0001-01-01T00:00:00Z","completedAt":""},{"name":"present","state":"SUCCESS","bucket":"pass","link":"https://example.test/present","workflow":"CI","startedAt":"2026-08-11T09:00:00Z","completedAt":"2026-08-11T09:05:00Z"}]
-JSON
+      cat "$GH_FIXTURE_DATA/checks-nullable.json"
       exit 0
       ;;
     missing)
@@ -269,14 +265,10 @@ JSON
         printf '{"data":{"node":{"__typename":"PullRequestReviewThread","id":"other-thread"}}}\n'
         ;;
       wrong-pr)
-        cat <<'JSON'
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":false,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":43,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
-JSON
+        cat "$GH_FIXTURE_DATA/thread-wrong-pr.json"
         ;;
       wrong-repo)
-        cat <<'JSON'
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":false,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"other/repo"}},"comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
-JSON
+        cat "$GH_FIXTURE_DATA/thread-wrong-repo.json"
         ;;
       success)
         if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
@@ -329,13 +321,9 @@ JSON
         printf 'dial tcp: lookup api.github.com: no such host\n' >&2
         exit 32
       fi
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-same-a","isResolved":false,"isOutdated":true,"path":null,"line":null,"originalLine":null,"startLine":null,"diffSide":null,"comments":{"nodes":[{"id":"comment-a","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:30:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/threads-page-2.json"
     else
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-later","isResolved":false,"isOutdated":false,"path":"later.rs","line":30,"originalLine":29,"startLine":28,"diffSide":"RIGHT","comments":{"nodes":[{"id":"comment-later","createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T01:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}},{"id":"thread-same-b","isResolved":false,"isOutdated":false,"path":"same.rs","line":12,"originalLine":10,"startLine":null,"diffSide":"LEFT","comments":{"nodes":[{"id":"comment-b1","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:10:00Z"}],"pageInfo":{"hasNextPage":true,"endCursor":"comment-summary-cursor"}}},{"id":"thread-resolved-summary","isResolved":true,"isOutdated":false,"path":"done.rs","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","comments":{"nodes":[{"id":"comment-r1","createdAt":"2025-12-31T00:00:00Z","updatedAt":"2025-12-31T00:10:00Z"}],"pageInfo":{"hasNextPage":true,"endCursor":"resolved-summary-cursor"}}}],"pageInfo":{"hasNextPage":true,"endCursor":"thread-summary-cursor"}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/threads-page-1.json"
     fi
     exit 0
   fi
@@ -366,9 +354,7 @@ JSON
     fi
     record_overview_timing graphql
     if [ -n "${GH_OVERVIEW_TIMING_FILE:-}" ]; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-timing.json"
       exit 0
     fi
     if ! jq -e '.query | contains("title") and ((contains("body") or contains("comments") or contains("reviews")) | not)' <<<"$payload" >/dev/null; then
@@ -376,21 +362,15 @@ JSON
       exit 89
     fi
     if [ "${GH_OVERVIEW_TITLE:-}" = missing ]; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-missing-title.json"
       exit 0
     fi
     if [ "${GH_OVERVIEW_TITLE:-}" = invalid ]; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"title":42,"url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-invalid-title.json"
       exit 0
     fi
     if [ "${GH_OVERVIEW_NULL_FIELDS:-}" = 1 ]; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":null,"isDraft":null,"headRefOid":null,"baseRefOid":null,"reviewDecision":null,"mergeStateStatus":null,"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-null-fields.json"
       exit 0
     fi
     if [ -n "${GH_OVERVIEW_PAGINATION:-}" ]; then
@@ -415,13 +395,9 @@ JSON
       exit 0
     fi
     if jq -e '.variables.cursor == "overview-cursor"' <<<"$payload" >/dev/null; then
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-page-2.json"
     else
-      cat <<'JSON'
-{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true}],"pageInfo":{"hasNextPage":true,"endCursor":"overview-cursor"}}}}}}
-JSON
+      cat "$GH_FIXTURE_DATA/overview-page-1.json"
     fi
     exit 0
   fi
@@ -451,9 +427,7 @@ if [ "$1" = api ] && [[ "$*" == *pulls/42/reviews* ]]; then
       exit 32
       ;;
     success)
-      cat <<'JSON'
-[[{"node_id":"review-z","user":{"login":"zoe"},"state":"COMMENTED","body":"comment","submitted_at":"2026-01-02T00:00:00Z","commit_id":"oid-z"},{"node_id":"review-b","user":{"login":"bob"},"state":"APPROVED","body":"approved","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-b"},{"node_id":"review-null-a","user":{"login":"pending"},"state":"PENDING","body":"pending","submitted_at":null,"commit_id":null},{"node_id":"review-null","user":null,"state":"DISMISSED","body":"","submitted_at":null,"commit_id":null}],[{"node_id":"review-a","user":{"login":"alice"},"state":"CHANGES_REQUESTED","body":"change","submitted_at":"2026-01-01T00:00:00Z","commit_id":"oid-a"},{"node_id":"review-unknown","user":{"login":"future"},"state":"FUTURE_STATE","body":"future","submitted_at":"2025-12-31T00:00:00Z","commit_id":"oid-future"}]]
-JSON
+      cat "$GH_FIXTURE_DATA/reviews-success.json"
       ;;
   esac
   exit 0
@@ -483,9 +457,7 @@ if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/4
       printf '[[{"node_id":"IC_wrong","html_url":42,"user":{"login":"author"},"body":"body","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]]\n'
       ;;
     success)
-      cat <<'JSON'
-[[{"node_id":"IC_z","html_url":"https://example.test/z","user":{"login":"later"},"body":"later","created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T01:00:00Z","pull_request_review_id":99,"diff_hunk":"not a conversation field"},{"node_id":"IC_b","html_url":"https://example.test/b","user":{"login":"author"},"body":"second by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T01:00:00Z"}],[{"node_id":"IC_a","html_url":"https://example.test/a","user":null,"body":"first by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T02:00:00Z"}]]
-JSON
+      cat "$GH_FIXTURE_DATA/comments-success.json"
       ;;
   esac
   exit 0
