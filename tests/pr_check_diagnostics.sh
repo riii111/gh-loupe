@@ -106,12 +106,11 @@ for failures in 0 1 2 10; do
       "$tmpdir/parallel-$failures.json" >/dev/null
   fi
   if [ "$failures" -eq 10 ]; then
-    test "$(cat "$max_round_file")" -eq 3
+    expected_rounds=$(( (failures + 3) / 4 ))
+    test "$(cat "$max_round_file")" -eq "$expected_rounds"
     test "$(cat "$batch_dir/1")" -eq 4
     test "$(cat "$batch_dir/2")" -eq 4
     test "$(cat "$batch_dir/3")" -eq 2
-    # Each synchronized batch sleeps for 40ms; three batches are at most half of 400ms serially.
-    test "$((3 * 40))" -le "$((10 * 40 / 2))"
   fi
 done
 
