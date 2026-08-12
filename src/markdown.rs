@@ -386,6 +386,7 @@ fn html_attribute_mask(bytes: &[u8], protected: &mut [bool]) {
         let mut scan = cursor + 1;
         let mut quote = None;
         let mut quoted_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut malformed = false;
         while scan < bytes.len() {
             match quote {
                 Some(expected) if bytes[scan] == expected => {
@@ -393,8 +394,13 @@ fn html_attribute_mask(bytes: &[u8], protected: &mut [bool]) {
                     quote = None;
                 }
                 None if matches!(bytes[scan], b'"' | b'\'') => {
-                    quoted_ranges.push((scan, scan + 1));
-                    quote = Some(bytes[scan]);
+                    if quote_follows_equals(bytes, cursor, scan) {
+                        quoted_ranges.push((scan, scan + 1));
+                        quote = Some(bytes[scan]);
+                    } else {
+                        malformed = true;
+                        break;
+                    }
                 }
                 None if bytes[scan] == b'>' => {
                     for (start, end) in quoted_ranges {
@@ -407,12 +413,20 @@ fn html_attribute_mask(bytes: &[u8], protected: &mut [bool]) {
             }
             scan += 1;
         }
-        if bytes.get(scan) == Some(&b'>') && quote.is_none() {
+        if !malformed && bytes.get(scan) == Some(&b'>') && quote.is_none() {
             cursor = scan + 1;
         } else {
             cursor += 1;
         }
     }
+}
+
+fn quote_follows_equals(bytes: &[u8], tag_start: usize, quote_start: usize) -> bool {
+    let mut cursor = quote_start;
+    while cursor > tag_start + 1 && matches!(bytes[cursor - 1], b' ' | b'\t' | b'\r' | b'\n') {
+        cursor -= 1;
+    }
+    bytes.get(cursor - 1) == Some(&b'=')
 }
 
 fn html_raw_text_mask(bytes: &[u8], protected: &mut [bool]) {
@@ -422,6 +436,10 @@ fn html_raw_text_mask(bytes: &[u8], protected: &mut [bool]) {
         b"textarea",
         b"title",
         b"xmp",
+        b"iframe",
+        b"noembed",
+        b"noframes",
+        b"plaintext",
     ] {
         let mut cursor = 0;
         while cursor + name.len() + 2 <= bytes.len() {
@@ -593,6 +611,8 @@ mod tests {
         ] {
             assert_eq!(omit_details(body), (expected.to_owned(), true));
         }
+        let body = "<x \"<details><summary>valid</summary>hidden</details>\">";
+        assert_eq!(omit_details(body), ("<x \"\nvalid\n\">".to_owned(), true));
     }
 
     #[test]
@@ -600,6 +620,10 @@ mod tests {
         for body in [
             "<script>\n<details><summary>literal</summary>hidden</details>\n</script>",
             "<![CDATA[\n<details><summary>literal</summary>hidden</details>\n]]>",
+            "<iframe>\n<details><summary>literal</summary>hidden</details>\n</iframe>",
+            "<noembed>\n<details><summary>literal</summary>hidden</details>\n</noembed>",
+            "<noframes>\n<details><summary>literal</summary>hidden</details>\n</noframes>",
+            "<plaintext>\n<details><summary>literal</summary>hidden</details>",
         ] {
             assert_eq!(omit_details(body), (body.to_owned(), false));
         }
