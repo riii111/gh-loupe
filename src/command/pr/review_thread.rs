@@ -7,6 +7,7 @@ where
     I: Iterator<Item = String>,
 {
     let mut include_diff_hunk = false;
+    let mut include_details = false;
     let parsed = super::parse_subcommand_args(
         program,
         values,
@@ -16,6 +17,10 @@ where
         |option, _| match option {
             "--include-diff-hunk" => {
                 include_diff_hunk = true;
+                Ok(true)
+            }
+            "--include-details" => {
+                include_details = true;
                 Ok(true)
             }
             _ => Ok(false),
@@ -39,6 +44,7 @@ where
         action: super::super::Action::Pr(super::Action::ReviewThread {
             review_thread_id,
             include_diff_hunk,
+            include_details,
         }),
         target,
         repo: parsed.repo,
@@ -51,13 +57,19 @@ pub(super) fn execute(
     target: &Target,
     review_thread_id: &str,
     include_diff_hunk: bool,
+    include_details: bool,
 ) -> Result<serde_json::Value> {
-    usecase::pull_request::review_thread::execute(target, review_thread_id, include_diff_hunk)
+    usecase::pull_request::review_thread::execute(
+        target,
+        review_thread_id,
+        include_diff_hunk,
+        include_details,
+    )
 }
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr review-thread [-h] [--repo REPO] [--include-diff-hunk] [--compact] target review_thread_id"
+        "usage: {program} pr review-thread [-h] [--repo REPO] [--include-diff-hunk] [--include-details] [--compact] target review_thread_id"
     )
 }
 
@@ -67,7 +79,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n  review_thread_id    GraphQL review thread node ID\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk include diffHunk on every comment\n  --compact           emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n  review_thread_id    GraphQL review thread node ID\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk include diffHunk on every comment\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n",
         usage(program)
     );
     super::super::write_stdout(&text)

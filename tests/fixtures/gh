@@ -206,6 +206,11 @@ if [ "$1 $2" = "api graphql" ]; then
     exit 0
   fi
   if jq -e '.query | contains("ReviewThreadDetailComments")' <<<"$payload" >/dev/null; then
+    if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
+      comment_a_body='human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply'
+    else
+      comment_a_body='first by id'
+    fi
     if [ "${GH_TEST_THREAD_DETAIL_PAGE_FAILURE:-}" = 1 ]; then
       printf 'simulated thread detail pagination failure\n' >&2
       exit 34
@@ -227,8 +232,8 @@ if [ "$1 $2" = "api graphql" ]; then
 JSON
       exit 0
     fi
-    cat <<'JSON'
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"first by id","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+    cat <<JSON
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"${comment_a_body:-first by id}","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 JSON
     exit 0
   fi
@@ -254,13 +259,22 @@ JSON
 JSON
         ;;
       success)
+        if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
+          comment_z_body='before\n<DETAILS class=\"evidence\">\n<SUMMARY>結論</SUMMARY>\n折り畳み内容\n</DETAILS>\nafter'
+          comment_b_body='second by id'
+          comment_a_body='human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply'
+        else
+          comment_z_body='later'
+          comment_b_body='second by id'
+          comment_a_body='first by id'
+        fi
         detail_end_cursor=thread-detail-comment-cursor
         case "${GH_THREAD_DETAIL_PAGINATION:-}" in
           repeat) detail_end_cursor=thread-detail-repeat-cursor ;;
           cycle) detail_end_cursor=thread-detail-cycle-a ;;
         esac
         cat <<JSON
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"later","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"second by id","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}}}
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}}}
 JSON
         ;;
     esac
