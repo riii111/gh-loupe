@@ -24,7 +24,12 @@ struct Fence {
     byte: u8,
     length: usize,
     blockquote_depth: usize,
-    list_indent: Option<usize>,
+    list_content_column: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct ListPrefix {
+    content_column: usize,
 }
 
 pub fn omit_details(body: &str) -> (String, bool) {
@@ -121,7 +126,6 @@ fn tags(body: &str, protected: &[bool]) -> Vec<Tag> {
             && !protected[cursor]
             && !is_escaped(bytes, cursor)
             && let Some(tag) = parse_tag(bytes, cursor)
-            && (cursor..tag.end).all(|index| !protected[index])
         {
             cursor = tag.end;
             result.push(tag);
@@ -215,20 +219,18 @@ fn code_mask(body: &str) -> Vec<bool> {
     let bytes = body.as_bytes();
     let mut protected = vec![false; bytes.len()];
     let mut cursor = 0;
-    let mut list_content_indent = None;
     let mut list_content_column = None;
     while cursor < bytes.len() {
         let first_line_end = line_end(bytes, cursor);
-        let (container_cursor, _, current_list_indent) =
+        let (container_cursor, _, current_list) =
             container_prefix_end(bytes, cursor, first_line_end);
-        if let Some(indent) = current_list_indent {
-            list_content_indent = current_list_indent;
-            list_content_column = Some(visual_column(bytes, cursor, cursor + indent));
+        if let Some(prefix) = current_list {
+            list_content_column = Some(prefix.content_column);
         }
         let blank_line = is_blank_line(bytes, cursor, first_line_end);
         let line_content_column = visual_column(bytes, cursor, container_cursor)
             + leading_column(bytes, container_cursor, first_line_end);
-        if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_indent) {
+        if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_column) {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
             while cursor < bytes.len() {
@@ -252,15 +254,15 @@ fn code_mask(body: &str) -> Vec<bool> {
         } else {
             cursor = first_line_end;
         }
-        if current_list_indent.is_none()
+        if current_list.is_none()
             && !blank_line
             && list_content_column.is_none_or(|base| line_content_column < base)
         {
-            list_content_indent = None;
             list_content_column = None;
         }
     }
 
+    html_attribute_mask(bytes, &mut protected);
     html_comment_mask(bytes, &mut protected);
 
     let mut cursor = 0;
@@ -295,19 +297,14 @@ fn fence_start(
     bytes: &[u8],
     start: usize,
     end: usize,
-    list_content_indent: Option<usize>,
+    list_content_column: Option<usize>,
 ) -> Option<Fence> {
-    let (mut cursor, blockquote_depth, mut list_indent) = container_prefix_end(bytes, start, end);
-    if cursor == start
-        && list_indent.is_none()
-        && let Some(indent) = list_content_indent
-        && leading_space_count(bytes, start, end) >= indent
-        && bytes
-            .get(start + indent)
-            .is_some_and(|byte| matches!(byte, b'`' | b'~'))
+    let (mut cursor, blockquote_depth, current_list) = container_prefix_end(bytes, start, end);
+    if current_list.is_none()
+        && let Some(content_column) = list_content_column
+        && let Some(candidate) = fence_cursor_at_column(bytes, start, end, content_column)
     {
-        cursor = start + indent;
-        list_indent = Some(indent);
+        cursor = candidate;
     }
     if cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
         return None;
@@ -321,8 +318,19 @@ fn fence_start(
         byte: fence,
         length,
         blockquote_depth,
-        list_indent,
+        list_content_column,
     })
+}
+
+fn fence_cursor_at_column(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    content_column: usize,
+) -> Option<usize> {
+    let cursor = first_nonspace(bytes, start, end);
+    let column = visual_column(bytes, start, cursor);
+    (column >= content_column && column < content_column + 4).then_some(cursor)
 }
 
 fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
@@ -342,15 +350,16 @@ fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
         }
     }
 
-    let leading_spaces = leading_space_count(bytes, cursor, end);
-    cursor += leading_spaces;
-    if fence
-        .list_indent
-        .is_some_and(|indent| cursor - start < indent)
-        || fence.list_indent.is_none() && leading_spaces > 3
-    {
+    let candidate = first_nonspace(bytes, cursor, end);
+    let candidate_column = visual_column(bytes, start, candidate);
+    if let Some(content_column) = fence.list_content_column {
+        if candidate_column < content_column || candidate_column >= content_column + 4 {
+            return false;
+        }
+    } else if leading_column(bytes, cursor, end) > 3 {
         return false;
     }
+    cursor = candidate;
     if is_list_marker(bytes, cursor, end) {
         return false;
     }
@@ -385,6 +394,10 @@ fn is_list_marker(bytes: &[u8], start: usize, end: usize) -> bool {
             .get(cursor + 1..end)
             .and_then(|rest| rest.first())
             .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+}
+
+fn first_nonspace(bytes: &[u8], start: usize, end: usize) -> usize {
+    start + leading_space_count(bytes, start, end)
 }
 
 fn indented_code(
@@ -439,10 +452,14 @@ fn is_blank_line(bytes: &[u8], start: usize, end: usize) -> bool {
         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
 }
 
-fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize, Option<usize>) {
+fn container_prefix_end(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+) -> (usize, usize, Option<ListPrefix>) {
     let mut cursor = start;
     let mut blockquote_depth = 0;
-    let mut list_indent = None;
+    let mut list_prefix = None;
     loop {
         let before_marker = cursor;
         let mut spaces = 0;
@@ -451,13 +468,13 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             spaces += 1;
         }
         if cursor >= end {
-            return (cursor, blockquote_depth, list_indent);
+            return (cursor, blockquote_depth, list_prefix);
         }
         if spaces == 4 {
-            return (before_marker, blockquote_depth, list_indent);
+            return (before_marker, blockquote_depth, list_prefix);
         }
         if matches!(bytes[cursor], b'`' | b'~') {
-            return (cursor, blockquote_depth, list_indent);
+            return (cursor, blockquote_depth, list_prefix);
         }
         if bytes[cursor] == b'>' {
             blockquote_depth += 1;
@@ -471,11 +488,14 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             && cursor + 1 < end
             && matches!(bytes[cursor + 1], b' ' | b'\t')
         {
-            cursor += 1;
+            let marker_end = cursor + 1;
+            cursor = marker_end;
             while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
                 cursor += 1;
             }
-            list_indent = Some(cursor - start);
+            list_prefix = Some(ListPrefix {
+                content_column: list_content_column(bytes, start, marker_end, cursor),
+            });
             continue;
         }
         let digits_start = cursor;
@@ -488,14 +508,62 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize
             && cursor + 1 < end
             && matches!(bytes[cursor + 1], b' ' | b'\t')
         {
-            cursor += 1;
+            let marker_end = cursor + 1;
+            cursor = marker_end;
             while cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
                 cursor += 1;
             }
-            list_indent = Some(cursor - start);
+            list_prefix = Some(ListPrefix {
+                content_column: list_content_column(bytes, start, marker_end, cursor),
+            });
             continue;
         }
-        return (before_marker, blockquote_depth, list_indent);
+        return (before_marker, blockquote_depth, list_prefix);
+    }
+}
+
+fn list_content_column(bytes: &[u8], start: usize, marker_end: usize, padding_end: usize) -> usize {
+    let marker_column = visual_column(bytes, start, marker_end);
+    let padding_column = leading_column(bytes, marker_end, padding_end);
+    if padding_column <= 4 {
+        visual_column(bytes, start, padding_end)
+    } else {
+        marker_column
+    }
+}
+
+fn html_attribute_mask(bytes: &[u8], protected: &mut [bool]) {
+    let mut cursor = 0;
+    while cursor + 1 < bytes.len() {
+        if bytes[cursor] != b'<'
+            || protected[cursor]
+            || is_escaped(bytes, cursor)
+            || !matches!(bytes[cursor + 1], b'!' | b'/' | b'?' | b'A'..=b'Z' | b'a'..=b'z')
+        {
+            cursor += 1;
+            continue;
+        }
+
+        let mut scan = cursor + 1;
+        let mut quote = None;
+        while scan < bytes.len() {
+            match quote {
+                Some(expected) if bytes[scan] == expected => {
+                    protected[scan] = true;
+                    quote = None;
+                }
+                Some(_) => protected[scan] = true,
+                None if matches!(bytes[scan], b'"' | b'\'') => {
+                    protected[scan] = true;
+                    quote = Some(bytes[scan]);
+                }
+                None if bytes[scan] == b'>' => break,
+                None if bytes[scan] == b'<' => break,
+                None => {}
+            }
+            scan += 1;
+        }
+        cursor = scan.saturating_add(1);
     }
 }
 
@@ -591,6 +659,13 @@ mod tests {
     }
 
     #[test]
+    fn leaves_details_text_in_html_attributes_untouched() {
+        let body =
+            r#"<div title="<details><summary>literal</summary>hidden</details>">outside</div>"#;
+        assert_eq!(omit_details(body), (body.to_owned(), false));
+    }
+
+    #[test]
     fn leaves_container_fences_and_escaped_tags_literal() {
         assert_eq!(
             omit_details(
@@ -658,6 +733,8 @@ mod tests {
             "- item\n      <details><summary>literal</summary>hidden</details>",
             ">     <details><summary>literal</summary>hidden</details>",
             " \t<details><summary>literal</summary>hidden</details>",
+            "-     <details><summary>literal</summary>hidden</details>",
+            "-\titem\n    ~~~\n    <details><summary>literal</summary>hidden</details>\n    ~~~",
         ] {
             assert_eq!(omit_details(body), (body.to_owned(), false));
         }
