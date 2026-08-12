@@ -3,14 +3,14 @@ use std::thread;
 use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
-use crate::github::{graphql, rest};
+use crate::github::{checks, graphql};
 use crate::model::Target;
 
 pub fn execute(target: &Target) -> Result<Value> {
     let (graphql_result, required_result, all_result) = thread::scope(|scope| {
         let graphql = scope.spawn(|| graphql::pull_request_overview(target));
-        let required = scope.spawn(|| rest::required_check_buckets(target));
-        let all = scope.spawn(|| rest::all_check_buckets(target));
+        let required = scope.spawn(|| checks::required_check_buckets(target));
+        let all = scope.spawn(|| checks::all_check_buckets(target));
 
         (
             graphql
