@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -813,6 +814,27 @@ struct Progress {
 
 impl Progress {
     fn start(total: usize, quiet: bool) -> Self {
+        Self::start_with_interval(total, quiet, Duration::from_secs(15), None)
+    }
+
+    #[cfg(test)]
+    fn start_for_test(
+        total: usize,
+        interval: Duration,
+    ) -> (Self, std::sync::mpsc::Receiver<usize>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        (
+            Self::start_with_interval(total, false, interval, Some(sender)),
+            receiver,
+        )
+    }
+
+    fn start_with_interval(
+        total: usize,
+        quiet: bool,
+        interval: Duration,
+        report_sender: Option<Sender<usize>>,
+    ) -> Self {
         let completed = Arc::new(AtomicUsize::new(0));
         let state = Arc::new((Mutex::new(false), Condvar::new()));
         if quiet {
@@ -836,7 +858,7 @@ impl Progress {
             let mut finished = lock.lock().expect("lock diagnostic progress");
             loop {
                 let (next_finished, timeout) = wake
-                    .wait_timeout(finished, Duration::from_secs(15))
+                    .wait_timeout(finished, interval)
                     .expect("wait for diagnostic progress");
                 finished = next_finished;
                 if *finished {
@@ -850,6 +872,9 @@ impl Progress {
                         "gh-loupe: diagnostics {done}/{total} complete; {elapsed}s elapsed"
                     )
                     .ok();
+                    if let Some(sender) = &report_sender {
+                        sender.send(done).ok();
+                    }
                 }
             }
         });
@@ -896,6 +921,25 @@ mod tests {
         assert_eq!(claim_next_diagnostic_job(&next_job, &stop, 2), Some(0));
         stop.store(true, Ordering::Release);
         assert_eq!(claim_next_diagnostic_job(&next_job, &stop, 2), None);
+    }
+
+    #[test]
+    fn progress_reports_ordered_completion_at_a_short_test_interval() {
+        let (progress, reports) = Progress::start_for_test(3, Duration::from_millis(10));
+        let completed = [
+            AtomicBool::new(true),
+            AtomicBool::new(false),
+            AtomicBool::new(false),
+        ];
+        let next_completed = AtomicUsize::new(0);
+        mark_ordered_completion(&completed, &next_completed, 3, &progress);
+
+        assert_eq!(
+            reports
+                .recv_timeout(Duration::from_secs(1))
+                .expect("progress report"),
+            1
+        );
     }
 
     #[test]
