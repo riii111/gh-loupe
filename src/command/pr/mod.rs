@@ -5,6 +5,8 @@ mod review_thread;
 mod review_threads;
 mod reviews;
 
+use serde_json::{Map, Value};
+
 use crate::error::{Exit, Result};
 use crate::github;
 use crate::model::CheckDiagnosticsOptions;
@@ -71,28 +73,32 @@ pub(super) fn execute(
             required,
             diagnostics,
         } => checks::execute(&target, required, diagnostics)?,
-        Action::Comments => serde_json::json!({
-            "comments": comments::execute(&target)?,
-        }),
+        Action::Comments => Value::Object(Map::from_iter([(
+            "comments".to_owned(),
+            Value::Array(comments::execute(&target)?),
+        )])),
         Action::Overview => overview::execute(&target)?,
-        Action::Reviews => serde_json::json!({
-            "reviews": reviews::execute(&target)?,
-        }),
+        Action::Reviews => Value::Object(Map::from_iter([(
+            "reviews".to_owned(),
+            Value::Array(reviews::execute(&target)?),
+        )])),
         Action::ReviewThread {
             review_thread_id,
             include_diff_hunk,
             include_details,
-        } => serde_json::json!({
-            "reviewThread": review_thread::execute(
+        } => Value::Object(Map::from_iter([(
+            "reviewThread".to_owned(),
+            review_thread::execute(
                 &target,
                 &review_thread_id,
                 include_diff_hunk,
                 include_details,
             )?,
-        }),
-        Action::ReviewThreads { include_resolved } => serde_json::json!({
-            "reviewThreads": review_threads::execute(&target, include_resolved)?,
-        }),
+        )])),
+        Action::ReviewThreads { include_resolved } => Value::Object(Map::from_iter([(
+            "reviewThreads".to_owned(),
+            Value::Array(review_threads::execute(&target, include_resolved)?),
+        )])),
     };
     Ok(output::success(data))
 }

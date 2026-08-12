@@ -64,7 +64,7 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
             "cursor": cursor_tracker.cursor(),
         });
         let data = super::query(REVIEW_THREADS_QUERY, &variables)?;
-        let pull_request = pagination::value_at(&data, &["repository", "pullRequest"])?;
+        let pull_request = pagination::take_value_at(data, &["repository", "pullRequest"])?;
         if pull_request.is_null() {
             let message = format!(
                 "pull request not found: {}#{}",
@@ -72,9 +72,9 @@ pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
             );
             return Err(Exit::runtime(&RuntimeError::not_found(message)));
         }
-        let connection = pagination::value_at(pull_request, &["reviewThreads"])?;
-        review_threads.extend(pagination::nodes(connection)?.iter().cloned());
-        let Some(_) = cursor_tracker.next(connection)? else {
+        let mut connection = pagination::take_value_at(pull_request, &["reviewThreads"])?;
+        review_threads.extend(pagination::take_nodes(&mut connection)?);
+        let Some(_) = cursor_tracker.next(&connection)? else {
             break;
         };
     }
@@ -103,8 +103,8 @@ fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
     while let Some(cursor) = cursor_tracker.next(&comments)? {
         let variables = json!({"id": id, "cursor": cursor});
         let data = super::query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
-        let page = pagination::value_at(&data, &["node", "comments"])?;
-        let new_nodes = pagination::nodes(page)?.to_vec();
+        let mut page = pagination::take_value_at(data, &["node", "comments"])?;
+        let new_nodes = pagination::take_nodes(&mut page)?;
         comments
             .get_mut("nodes")
             .and_then(Value::as_array_mut)
@@ -115,7 +115,7 @@ fn append_review_thread_comment_pages(review_thread: &mut Value) -> Result<()> {
             .ok_or_else(|| Exit::invalid_response("GitHub comments must be an object"))?
             .insert(
                 "pageInfo".to_owned(),
-                pagination::value_at(page, &["pageInfo"])?.clone(),
+                pagination::take_value_at(page, &["pageInfo"])?,
             );
     }
     let nodes = comments

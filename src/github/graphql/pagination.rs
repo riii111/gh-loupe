@@ -46,6 +46,29 @@ pub(super) fn nodes(connection: &Value) -> Result<&[Value]> {
         .ok_or_else(|| Exit::invalid_response("GitHub connection nodes must be an array"))
 }
 
+pub(super) fn take_value_at(mut value: Value, path: &[&str]) -> Result<Value> {
+    for key in path {
+        value = value
+            .as_object_mut()
+            .and_then(|object| object.shift_remove(*key))
+            .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {key}")))?;
+    }
+    Ok(value)
+}
+
+pub(super) fn take_nodes(connection: &mut Value) -> Result<Vec<Value>> {
+    let nodes = connection
+        .as_object_mut()
+        .and_then(|object| object.shift_remove("nodes"))
+        .ok_or_else(|| Exit::invalid_response("GitHub response omitted nodes"))?;
+    match nodes {
+        Value::Array(nodes) => Ok(nodes),
+        _ => Err(Exit::invalid_response(
+            "GitHub connection nodes must be an array",
+        )),
+    }
+}
+
 pub(super) fn value_at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value> {
     path.iter().try_fold(value, |value, key| {
         value
