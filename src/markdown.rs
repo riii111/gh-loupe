@@ -11,18 +11,30 @@ struct Tag {
     kind: TagKind,
     start: usize,
     end: usize,
+    expanded: bool,
 }
 
 #[derive(Clone, Copy)]
 struct DetailsBlock {
     start: usize,
     end: usize,
+    expanded: bool,
 }
 
 pub fn omit_details(body: &str) -> (String, bool) {
     let protected = code_mask(body);
     let tags = tags(body, &protected);
     let blocks = complete_details_blocks(&tags);
+    let blocks = blocks
+        .iter()
+        .copied()
+        .filter(|block| {
+            !block.expanded
+                && !blocks.iter().any(|ancestor| {
+                    !ancestor.expanded && ancestor.start < block.start && block.end <= ancestor.end
+                })
+        })
+        .collect::<Vec<_>>();
     if blocks.is_empty() {
         return (body.to_owned(), false);
     }
@@ -57,20 +69,25 @@ pub fn omit_details(body: &str) -> (String, bool) {
 }
 
 fn complete_details_blocks(tags: &[Tag]) -> Vec<DetailsBlock> {
-    let mut stack = Vec::new();
+    let mut stack: Vec<(Tag, Vec<DetailsBlock>)> = Vec::new();
     let mut blocks = Vec::new();
     for tag in tags {
         match tag.kind {
-            TagKind::DetailsOpen => stack.push(tag.start),
+            TagKind::DetailsOpen => stack.push((*tag, Vec::new())),
             TagKind::DetailsClose => {
-                if stack.len() == 1 {
-                    let start = stack.pop().expect("stack length is one");
-                    blocks.push(DetailsBlock {
-                        start,
+                if let Some((open, mut children)) = stack.pop() {
+                    let block = DetailsBlock {
+                        start: open.start,
                         end: tag.end,
-                    });
-                } else if !stack.is_empty() {
-                    stack.pop();
+                        expanded: open.expanded,
+                    };
+                    if let Some((_, parent_children)) = stack.last_mut() {
+                        parent_children.push(block);
+                        parent_children.append(&mut children);
+                    } else {
+                        blocks.push(block);
+                        blocks.append(&mut children);
+                    }
                 }
             }
             TagKind::SummaryOpen | TagKind::SummaryClose => {}
@@ -146,12 +163,14 @@ fn parse_tag(bytes: &[u8], start: usize) -> Option<Tag> {
             kind,
             start,
             end: cursor + 1,
+            expanded: false,
         });
     }
     if bytes.get(cursor) == Some(&b'/') {
         return None;
     }
 
+    let attributes_start = cursor;
     let mut quote = None;
     while let Some(byte) = bytes.get(cursor) {
         match (quote, byte) {
@@ -163,6 +182,8 @@ fn parse_tag(bytes: &[u8], start: usize) -> Option<Tag> {
                     kind,
                     start,
                     end: cursor + 1,
+                    expanded: kind == TagKind::DetailsOpen
+                        && has_open_attribute(bytes, attributes_start, cursor),
                 });
             }
             _ => {}
@@ -170,6 +191,59 @@ fn parse_tag(bytes: &[u8], start: usize) -> Option<Tag> {
         cursor += 1;
     }
     None
+}
+
+fn has_open_attribute(bytes: &[u8], start: usize, end: usize) -> bool {
+    let mut cursor = start;
+    while cursor < end {
+        while cursor < end && is_attribute_whitespace(bytes[cursor]) {
+            cursor += 1;
+        }
+        if cursor >= end || bytes[cursor] == b'/' {
+            break;
+        }
+
+        let name_start = cursor;
+        while cursor < end
+            && !is_attribute_whitespace(bytes[cursor])
+            && !matches!(bytes[cursor], b'=' | b'/' | b'>')
+        {
+            cursor += 1;
+        }
+        let name_end = cursor;
+        if bytes[name_start..name_end].eq_ignore_ascii_case(b"open") {
+            return true;
+        }
+
+        while cursor < end && is_attribute_whitespace(bytes[cursor]) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'=') {
+            continue;
+        }
+        cursor += 1;
+        while cursor < end && is_attribute_whitespace(bytes[cursor]) {
+            cursor += 1;
+        }
+        if let Some(quote @ (b'"' | b'\'')) = bytes.get(cursor).copied() {
+            cursor += 1;
+            while cursor < end && bytes[cursor] != quote {
+                cursor += 1;
+            }
+            if cursor < end {
+                cursor += 1;
+            }
+        } else {
+            while cursor < end && !is_attribute_whitespace(bytes[cursor]) {
+                cursor += 1;
+            }
+        }
+    }
+    false
+}
+
+fn is_attribute_whitespace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\r' | b'\n')
 }
 
 fn tag_name(bytes: &[u8], start: usize) -> Option<(TagKind, usize)> {
@@ -273,7 +347,38 @@ mod tests {
     fn handles_multiple_nested_attribute_case_and_japanese_blocks() {
         assert_omitted(
             "<DETAILS open>\n<SUMMARY>外側</SUMMARY>\nouter\n<details data-x='1'>\n<summary>内側</summary>\ninner\n</details>\n</DETAILS>\n<details>\n<summary>二つ目</summary>\n本文\n</details>",
-            "外側\n二つ目",
+            "<DETAILS open>\n<SUMMARY>外側</SUMMARY>\nouter\n内側\n</DETAILS>\n二つ目",
+        );
+    }
+
+    #[test]
+    fn preserves_expanded_details_and_treats_open_as_boolean_attribute() {
+        for body in [
+            "<details open><summary>shown</summary>body</details>",
+            "<details OPEN><summary>shown</summary>body</details>",
+            "<details open=\"\"><summary>shown</summary>body</details>",
+            "<details open=\"false\"><summary>shown</summary>body</details>",
+        ] {
+            assert_eq!(omit_details(body), (body.to_owned(), false));
+        }
+    }
+
+    #[test]
+    fn only_exact_open_attribute_expands_details() {
+        for body in [
+            "<details data-open><summary>hidden</summary>body</details>",
+            "<details notopen><summary>hidden</summary>body</details>",
+            "<details class=\"open\"><summary>hidden</summary>body</details>",
+        ] {
+            assert_omitted(body, "hidden");
+        }
+    }
+
+    #[test]
+    fn closed_outer_details_still_hides_expanded_inner_details() {
+        assert_omitted(
+            "<details><summary>outer</summary><details open><summary>inner</summary>shown</details></details>",
+            "outer",
         );
     }
 
@@ -284,6 +389,11 @@ mod tests {
         assert_eq!(
             omit_details("```foo`bar\n<details><summary>valid</summary>hidden</details>"),
             ("```foo`bar\nvalid".to_owned(), true)
+        );
+        let unclosed_outer = "<details><details><summary>inner</summary>hidden</details>";
+        assert_eq!(
+            omit_details(unclosed_outer),
+            (unclosed_outer.to_owned(), false)
         );
     }
 
