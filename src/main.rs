@@ -1,6 +1,7 @@
 mod command;
 mod error;
 mod github;
+mod markdown;
 mod model;
 mod output;
 mod usecase;

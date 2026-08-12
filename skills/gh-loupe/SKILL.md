@@ -11,9 +11,9 @@ Agentは原則として`--compact`を指定する。
 
 ## Version
 
-Required gh-loupe version: 0.7.0
+Required gh-loupe version: 0.8.0
 
-最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.7.0`以上であることを確認する。
+最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.8.0`以上であることを確認する。
 
 ## Commands
 
@@ -32,6 +32,7 @@ Required gh-loupe version: 0.7.0
 - 目的に対応するcommandから始め、常に`overview`を先に取得しない。
 - `review-threads`は既定で未解決だけを返す。過去の議論が必要な場合だけ`--include-resolved`を加える。
 - `review-thread`は一覧で得たIDへ使う。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
+- `review-thread`は既定で各commentの`<details>`折り畳み内容を省略する。判断に必要な場合だけ`--include-details`を加える。
 - 失敗checkは`--failed-diagnostics`で調べ、annotationだけで不足する場合だけ`--include-failed-logs`を加える。
 - merge可否の判断では`overview`のrequired check集計と`checks.all`を両方確認する。
 

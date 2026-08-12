@@ -242,6 +242,7 @@ fi
 run_cli review-thread-help -- pr review-thread --help
 test ! -s "$tmpdir/review-thread-help.stderr"
 grep -F 'usage: gh-loupe pr review-thread ' "$tmpdir/review-thread-help.stdout" >/dev/null
+grep -F -- '--include-details' "$tmpdir/review-thread-help.stdout" >/dev/null
 if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|thread)' \
   "$tmpdir/review-thread-help.stdout"; then
   exit 1
@@ -688,6 +689,8 @@ assert_argument_error thread-missing-id pr review-thread 42 --repo riii111/dotfi
 assert_argument_error thread-abbreviated-repo pr review-thread 42 thread-detail --rep riii111/dotfiles
 assert_argument_error thread-abbreviated-compact pr review-thread 42 thread-detail --comp
 assert_argument_error thread-abbreviated-diff-hunk pr review-thread 42 thread-detail --incl
+assert_argument_error thread-abbreviated-details pr review-thread 42 thread-detail --include-det
+assert_argument_error thread-details-value pr review-thread 42 thread-detail --include-details=true
 assert_argument_error thread-invalid-target pr review-thread nope thread-detail --repo riii111/dotfiles
 assert_argument_error thread-conflicting-repo \
   pr review-thread https://github.com/riii111/dotfiles/pull/42 thread-detail --repo other/repo
@@ -731,7 +734,8 @@ jq -e '
         "updatedAt": "2026-01-02T00:00:00Z",
         "replyToId": null
       }
-    ]
+    ],
+    "detailsOmitted": false
   } and
   ([.. | objects | keys[]] | any(. == "diffHunk" or . == "databaseId" or . == "resolvedBy" or . == "replyTo" or . == "pullRequest") | not)
 ' "$tmpdir/thread-default.review_thread.stdout" >/dev/null
@@ -744,6 +748,30 @@ jq -e '
   (.data.reviewThread.comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
 ' "$tmpdir/thread-diff-hunk.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-diff-hunk.review_thread.stdout")" -eq 1
+
+run_review_thread thread-details-default GH_TEST_THREAD_DETAILS=1 -- \
+  pr review-thread 42 thread-detail --repo riii111/dotfiles
+jq -e '
+  .data.reviewThread.detailsOmitted == true and
+  [.data.reviewThread.comments[].body] == [
+    "human\n証拠\nreply",
+    "second by id",
+    "before\n結論\nafter"
+  ]
+' "$tmpdir/thread-details-default.review_thread.stdout" >/dev/null
+
+run_review_thread thread-details-included GH_TEST_THREAD_DETAILS=1 -- \
+  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-details --compact
+jq -e '
+  .data.reviewThread.detailsOmitted == false and
+  (.data.reviewThread | keys == ["comments", "detailsOmitted", "diffSide", "id", "isOutdated", "isResolved", "line", "originalLine", "path", "startLine"]) and
+  [.data.reviewThread.comments[].body] == [
+    "human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply",
+    "second by id",
+    "before\n<DETAILS class=\"evidence\">\n<SUMMARY>結論</SUMMARY>\n折り畳み内容\n</DETAILS>\nafter"
+  ]
+' "$tmpdir/thread-details-included.review_thread.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/thread-details-included.review_thread.stdout")" -eq 1
 
 assert_runtime_failure thread-wrong-pr notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-pr -- pr review-thread 42 thread-detail --repo riii111/dotfiles

@@ -22,6 +22,7 @@ pub(super) enum Action {
     ReviewThread {
         review_thread_id: String,
         include_diff_hunk: bool,
+        include_details: bool,
     },
     ReviewThreads {
         include_resolved: bool,
@@ -80,11 +81,13 @@ pub(super) fn execute(
         Action::ReviewThread {
             review_thread_id,
             include_diff_hunk,
+            include_details,
         } => serde_json::json!({
             "reviewThread": review_thread::execute(
                 &target,
                 &review_thread_id,
                 include_diff_hunk,
+                include_details,
             )?,
         }),
         Action::ReviewThreads { include_resolved } => serde_json::json!({

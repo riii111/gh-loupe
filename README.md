@@ -34,6 +34,7 @@ gh-loupe pr overview https://github.com/OWNER/REPO/pull/123
 gh-loupe pr comments https://github.com/OWNER/REPO/pull/123
 gh-loupe pr reviews https://github.com/OWNER/REPO/pull/123
 gh-loupe pr review-threads https://github.com/OWNER/REPO/pull/123
+gh-loupe pr review-thread https://github.com/OWNER/REPO/pull/123 REVIEW_THREAD_ID
 gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
 ```
 
@@ -48,6 +49,9 @@ gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
 
 resolved review threadは既定で除外します。
 必要な場合だけ`--include-resolved`を指定します。
+
+`pr review-thread`は既定で`<details>`の折り畳み内容を省略します。
+内容が判断に必要な場合だけ`--include-details`を指定します。
 
 人間が色付きで確認する場合は`bat`を利用できます。
 
