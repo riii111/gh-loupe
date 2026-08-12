@@ -1,0 +1,54 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "head",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "StatusContext",
+                        "context": "shared",
+                        "isRequired": true,
+                        "state": "FAILURE",
+                        "targetUrl": "https://ci.example.test/shared",
+                        "description": "status"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "databaseId": 102,
+                        "name": "shared",
+                        "isRequired": true,
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "startedAt": "0001-01-01T00:00:00Z",
+                        "completedAt": "0001-01-01T00:00:00Z",
+                        "detailsUrl": "https://ci.example.test/shared",
+                        "checkSuite": {
+                          "workflowRun": {
+                            "event": "PUSH",
+                            "workflow": {
+                              "name": "CI"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

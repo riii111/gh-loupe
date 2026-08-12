@@ -5,6 +5,8 @@ status=0
 trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "$repo_root/tests/assertions.sh"
+export GH_FIXTURE_DATA="$repo_root/tests/fixtures/data/gh-diagnostics"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-diagnostics.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
@@ -31,7 +33,7 @@ run_diagnostics() {
 GH_DIAGNOSTICS_CALLS="$tmpdir/calls" run_diagnostics normal --failed-diagnostics --compact \
   >"$tmpdir/diagnostics.json" 2>"$tmpdir/diagnostics.stderr"
 grep -Fx 'gh-loupe: collecting diagnostics for 2 failed checks' "$tmpdir/diagnostics.stderr" >/dev/null
-jq -e '
+assert_json '
   [.data.checks[].name] == ["actions-failure", "external-cancel", "pass"] and
   [.data.checks[0].annotations[].path] == ["a.rs", "a.rs", "z.rs"] and
   [.data.checks[0].annotations[].startLine] == [1, 2, 9] and
@@ -46,7 +48,7 @@ grep -F -- 'check-runs/100/annotations?per_page=100' "$tmpdir/calls" >/dev/null
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/collision-calls" run_diagnostics status-collision \
   --failed-diagnostics --quiet --compact >"$tmpdir/status-collision.json"
-jq -e '
+assert_json '
   (.data.checks | length) == 2 and
   ([.data.checks[] | select(.workflow == null)][0].annotations == []) and
   ([.data.checks[] | select(.workflow == "CI")][0].annotations[].path == "collision.rs")
@@ -55,14 +57,14 @@ test "$(grep -c 'check-runs/102/annotations' "$tmpdir/collision-calls")" -eq 1
 
 run_diagnostics status-duplicate --failed-diagnostics --quiet --compact \
   >"$tmpdir/status-duplicate.json"
-jq -e '
+assert_json '
   (.data.checks | length) == 2 and
   (.data.checks | all(.name == "duplicate-status" and .annotations == []))
 ' "$tmpdir/status-duplicate.json" >/dev/null
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/check-run-collision-calls" run_diagnostics check-run-collision \
   --failed-diagnostics --quiet --compact >"$tmpdir/check-run-collision.json"
-jq -e '
+assert_json '
   [.data.checks[].name] == ["duplicate", "duplicate"] and
   [.data.checks[].annotations[0].path] == ["first.rs", "second.rs"]
 ' "$tmpdir/check-run-collision.json" >/dev/null
@@ -94,14 +96,15 @@ for failures in 0 1 2 10; do
   test "$(wc -l <"$calls_file" | tr -d ' ')" -eq "$((failures + 1))"
   if [ "$failures" -eq 0 ]; then
     test ! -e "$max_file"
-    jq -e '.data.checks == []' "$tmpdir/parallel-$failures.json" >/dev/null
+    assert_json '.data.checks == []' "$tmpdir/parallel-$failures.json" >/dev/null
   else
     expected_workers="$failures"
     if [ "$expected_workers" -gt 4 ]; then
       expected_workers=4
     fi
     test "$(cat "$max_file")" -eq "$expected_workers"
-    jq -e --argjson failures "$failures" \
+    # shellcheck disable=SC2016
+    assert_json --argjson failures "$failures" \
       '.data.checks | length == $failures and all(.annotations == [])' \
       "$tmpdir/parallel-$failures.json" >/dev/null
   fi
@@ -129,7 +132,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/staggered.stdout"
-jq -e '.error.kind == "githubCli" and .error.message == "simulated staggered failure 2"' \
+assert_json '.error.kind == "githubCli" and .error.message == "simulated staggered failure 2"' \
   "$tmpdir/staggered.stderr" >/dev/null
 test "$(cat "$tmpdir/staggered-active")" -eq 0
 test "$(cat "$tmpdir/staggered-max")" -eq 2
@@ -148,7 +151,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/parallel-error.stdout"
-jq -e '
+assert_json '
   .error.kind == "githubCli" and
   .error.message == "simulated parallel failure 1"
 ' "$tmpdir/parallel-error.stderr" >/dev/null
@@ -168,7 +171,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/parallel-rate-limit.stdout"
-jq -e '
+assert_json '
   .error.kind == "rateLimited" and
   .error.retryAfterSeconds == 45 and
   .error.retryable == true
@@ -178,14 +181,14 @@ test "$(cat "$tmpdir/parallel-rate-limit-max")" -eq 4
 
 run_diagnostics pending-metadata --failed-diagnostics --quiet --compact \
   >"$tmpdir/pending-metadata.json"
-jq -e '
+assert_json '
   .data.checks == [{"name":"pending","state":"IN_PROGRESS","bucket":"pending","link":null,"workflow":null,"startedAt":"2026-08-11T11:00:00Z","completedAt":null}]
 ' "$tmpdir/pending-metadata.json" >/dev/null
 
 run_diagnostics normal --include-failed-logs --quiet --compact \
   >"$tmpdir/logs.json" 2>"$tmpdir/logs.stderr"
 test ! -s "$tmpdir/logs.stderr"
-jq -e '
+assert_json '
   (.data.checks[0].annotations | length) == 3 and
   .data.checks[0].log.truncated == true and
   .data.checks[0].log.omittedLines == 205 and
@@ -197,7 +200,7 @@ jq -e '
 ' "$tmpdir/logs.json" >/dev/null
 
 run_diagnostics large-log --include-failed-logs --quiet --compact >"$tmpdir/large-log.json"
-jq -e '
+assert_json '
   .data.checks[0].log.omittedLines == 10000 and
   .data.checks[0].log.omittedBytes == 2044475 and
   (.data.checks[0].log.text | utf8bytelength) == 65536 and
@@ -205,7 +208,7 @@ jq -e '
 ' "$tmpdir/large-log.json" >/dev/null
 
 run_diagnostics utf8-boundary --include-failed-logs --quiet --compact >"$tmpdir/utf8-boundary.json"
-jq -e '
+assert_json '
   .data.checks[0].log.omittedLines == 0 and
   .data.checks[0].log.omittedBytes == 65538 and
   (.data.checks[0].log.text | utf8bytelength) == 65534 and
@@ -214,14 +217,14 @@ jq -e '
 
 GH_DIAGNOSTICS_REPOSITORY=Owner/Repo run_diagnostics normal \
   --include-failed-logs --quiet --compact >"$tmpdir/mixed-case.json"
-jq -e '
+assert_json '
   (.data.checks[0].annotations | length) == 3 and
   .data.checks[0].log != null
 ' "$tmpdir/mixed-case.json" >/dev/null
 
 run_diagnostics required-filter --required --failed-diagnostics --quiet --compact \
   >"$tmpdir/required-filter.json"
-jq -e '
+assert_json '
   (.data.checks | length) == 1 and
   .data.checks[0].name == "required-failure" and
   (.data.checks[0].annotations | length) == 3
@@ -241,7 +244,8 @@ for mode in graphql-error missing-pr; do
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
-  jq -e --arg kind "$expected_kind" \
+  # shellcheck disable=SC2016
+  assert_json --arg kind "$expected_kind" \
     '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == false' \
     "$tmpdir/$mode.stderr" >/dev/null
 done
@@ -255,7 +259,7 @@ fi
 test "$status" -eq 1
 test ! -s "$tmpdir/non-utf8.stdout"
 test "$(wc -l <"$tmpdir/non-utf8.stderr" | tr -d ' ')" -eq 1
-jq -e '
+assert_json '
   .schemaVersion == 1 and
   .error.kind == "invalidResponse" and
   .error.message == "GitHub returned a non-UTF-8 job log"
@@ -264,7 +268,7 @@ jq -e '
 for mode in job-mismatch job-head-mismatch job-link-repository-mismatch job-metadata-repository-mismatch; do
   GH_DIAGNOSTICS_CALLS="$tmpdir/$mode-calls" run_diagnostics "$mode" \
     --include-failed-logs --quiet --compact >"$tmpdir/$mode.json"
-  jq -e '.data.checks[0].log == null' "$tmpdir/$mode.json" >/dev/null
+  assert_json '.data.checks[0].log == null' "$tmpdir/$mode.json" >/dev/null
   if grep -F -- 'actions/jobs/20/logs' "$tmpdir/$mode-calls" >/dev/null; then
     exit 1
   fi
@@ -278,12 +282,12 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/job-id-mismatch.stdout"
-tail -n 1 "$tmpdir/job-id-mismatch.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
+tail -n 1 "$tmpdir/job-id-mismatch.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
 run_diagnostics no-failures --failed-diagnostics --compact \
   >"$tmpdir/no-failures.json" 2>"$tmpdir/no-failures.stderr"
 test ! -s "$tmpdir/no-failures.stderr"
-jq -e '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
+assert_json '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
   "$tmpdir/no-failures.json" >/dev/null
 
 for mode in pagination-repeat pagination-cycle pagination-missing pagination-empty pagination-wrong-type head-oid-changed; do
@@ -304,7 +308,7 @@ for mode in pagination-repeat pagination-cycle pagination-missing pagination-emp
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
-  jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' \
+  assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' \
     "$tmpdir/$mode.stderr" >/dev/null
   test "$(grep -c 'api graphql' "$calls_file")" -eq "$expected_calls"
 done
@@ -318,7 +322,7 @@ for mode in annotation-failure metadata-failure log-failure; do
   fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
-  tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' >/dev/null
+  tail -n 1 "$tmpdir/$mode.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "githubCli"' >/dev/null
   test "$(grep -c '"schemaVersion":1,"error"' "$tmpdir/$mode.stderr")" -eq 1
 done
 
@@ -330,7 +334,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/annotation-malformed.stdout"
-tail -n 1 "$tmpdir/annotation-malformed.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
+tail -n 1 "$tmpdir/annotation-malformed.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
 for mode in graphql-missing-completed graphql-wrong-completed; do
   if run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
@@ -341,7 +345,7 @@ for mode in graphql-missing-completed graphql-wrong-completed; do
   fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
-  tail -n 1 "$tmpdir/$mode.stderr" | jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
+  tail -n 1 "$tmpdir/$mode.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 done
 
 if GH_DIAGNOSTICS_PID_FILE="$tmpdir/pid" run_diagnostics timeout --include-failed-logs --timeout 1 --compact \
@@ -352,7 +356,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/timeout.stdout"
-tail -n 1 "$tmpdir/timeout.stderr" | jq -e '
+tail -n 1 "$tmpdir/timeout.stderr" | assert_json '
   .error.kind == "timeout" and
   .error.message == "failed check diagnostics timed out after 1 seconds" and
   .error.retryable == true and
@@ -375,7 +379,7 @@ grep -F 'argument --timeout: value cannot be represented as a diagnostic deadlin
   "$tmpdir/unrepresentable-timeout.stderr" >/dev/null
 
 run_diagnostics normal --failed-diagnostics --compact 2>&- >"$tmpdir/closed-progress.json"
-jq -e '.data.checks | length == 3' "$tmpdir/closed-progress.json" >/dev/null
+assert_json '.data.checks | length == 3' "$tmpdir/closed-progress.json" >/dev/null
 
 for args in '--timeout 0' '--timeout nope' '--timeout' '--time 1' '--failed' '--include-failed' '--qui'; do
   # shellcheck disable=SC2086

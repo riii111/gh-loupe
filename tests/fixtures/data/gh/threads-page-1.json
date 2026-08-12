@@ -1,0 +1,85 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "thread-later",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "later.rs",
+              "line": 30,
+              "originalLine": 29,
+              "startLine": 28,
+              "diffSide": "RIGHT",
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "comment-later",
+                    "createdAt": "2026-01-02T00:00:00Z",
+                    "updatedAt": "2026-01-02T01:00:00Z"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": null
+                }
+              }
+            },
+            {
+              "id": "thread-same-b",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "same.rs",
+              "line": 12,
+              "originalLine": 10,
+              "startLine": null,
+              "diffSide": "LEFT",
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "comment-b1",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:10:00Z"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": true,
+                  "endCursor": "comment-summary-cursor"
+                }
+              }
+            },
+            {
+              "id": "thread-resolved-summary",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "done.rs",
+              "line": 4,
+              "originalLine": 4,
+              "startLine": null,
+              "diffSide": "RIGHT",
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "comment-r1",
+                    "createdAt": "2025-12-31T00:00:00Z",
+                    "updatedAt": "2025-12-31T00:10:00Z"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": true,
+                  "endCursor": "resolved-summary-cursor"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "thread-summary-cursor"
+          }
+        }
+      }
+    }
+  }
+}

@@ -104,3 +104,4 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install --no-install-recommends --yes shellcheck
       - run: shellcheck install.sh tests/*.sh tests/fixtures/gh tests/fixtures/gh-diagnostics
+      - run: jq empty tests/fixtures/data/gh/*.json tests/fixtures/data/gh-diagnostics/*.json
