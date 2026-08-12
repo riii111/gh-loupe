@@ -19,6 +19,13 @@ struct DetailsBlock {
     end: usize,
 }
 
+#[derive(Clone, Copy)]
+struct Fence {
+    byte: u8,
+    length: usize,
+    blockquote_depth: usize,
+}
+
 pub fn omit_details(body: &str) -> (String, bool) {
     let protected = code_mask(body);
     let tags = tags(body, &protected);
@@ -37,13 +44,18 @@ pub fn omit_details(body: &str) -> (String, bool) {
                 result.push('\n');
             }
             result.push_str(&body[summary_start..summary_end]);
-            let next_starts_whitespace = body[block.end..]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace);
-            if !body[block.end..].is_empty() && !next_starts_whitespace && !result.ends_with('\n') {
-                result.push('\n');
-            }
+        }
+        let next_starts_whitespace = body[block.end..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace);
+        let result_ends_whitespace = result.chars().last().is_some_and(char::is_whitespace);
+        if !body[block.end..].is_empty()
+            && !result.is_empty()
+            && !next_starts_whitespace
+            && !result_ends_whitespace
+        {
+            result.push('\n');
         }
         cursor = block.end;
     }
@@ -204,13 +216,13 @@ fn code_mask(body: &str) -> Vec<bool> {
     let mut cursor = 0;
     while cursor < bytes.len() {
         let first_line_end = line_end(bytes, cursor);
-        if let Some((fence, length)) = fence_start(bytes, cursor, first_line_end) {
+        if let Some(fence) = fence_start(bytes, cursor, first_line_end) {
             mark(&mut protected, cursor, first_line_end);
             cursor = first_line_end;
             while cursor < bytes.len() {
                 let next_end = line_end(bytes, cursor);
                 mark(&mut protected, cursor, next_end);
-                let is_closing = fence_end(bytes, cursor, next_end, fence, length);
+                let is_closing = fence_end(bytes, cursor, next_end, fence);
                 cursor = next_end;
                 if is_closing {
                     break;
@@ -223,6 +235,8 @@ fn code_mask(body: &str) -> Vec<bool> {
             cursor = first_line_end;
         }
     }
+
+    html_comment_mask(bytes, &mut protected);
 
     let mut cursor = 0;
     while cursor < bytes.len() {
@@ -252,26 +266,30 @@ fn line_end(bytes: &[u8], start: usize) -> usize {
         .map_or(bytes.len(), |offset| start + offset + 1)
 }
 
-fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<(u8, usize)> {
-    let cursor = container_prefix_end(bytes, start, end);
+fn fence_start(bytes: &[u8], start: usize, end: usize) -> Option<Fence> {
+    let (cursor, blockquote_depth) = container_prefix_end(bytes, start, end);
     if cursor >= end || !matches!(bytes[cursor], b'`' | b'~') {
         return None;
     }
     let fence = bytes[cursor];
     let length = run_length(bytes, cursor, fence);
-    (length >= 3).then_some((fence, length))
+    (length >= 3).then_some(Fence {
+        byte: fence,
+        length,
+        blockquote_depth,
+    })
 }
 
-fn fence_end(bytes: &[u8], start: usize, end: usize, fence: u8, length: usize) -> bool {
-    let mut cursor = container_prefix_end(bytes, start, end);
-    if bytes.get(cursor) != Some(&fence) {
+fn fence_end(bytes: &[u8], start: usize, end: usize, fence: Fence) -> bool {
+    let cursor = blockquote_prefix_end(bytes, start, end, fence.blockquote_depth);
+    if bytes.get(cursor) != Some(&fence.byte) {
         return false;
     }
-    let run = run_length(bytes, cursor, fence);
-    if run < length {
+    let run = run_length(bytes, cursor, fence.byte);
+    if run < fence.length {
         return false;
     }
-    cursor += run;
+    let cursor = cursor + run;
     bytes[cursor..end]
         .iter()
         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
@@ -285,8 +303,9 @@ fn indented_code(bytes: &[u8], start: usize, end: usize) -> bool {
     spaces >= 4 || bytes.get(start) == Some(&b'\t')
 }
 
-fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> usize {
+fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize) {
     let mut cursor = start;
+    let mut blockquote_depth = 0;
     loop {
         let before_marker = cursor;
         let mut spaces = 0;
@@ -295,15 +314,16 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> usize {
             spaces += 1;
         }
         if cursor >= end {
-            return cursor;
+            return (cursor, blockquote_depth);
         }
         if spaces == 4 {
-            return before_marker;
+            return (before_marker, blockquote_depth);
         }
         if matches!(bytes[cursor], b'`' | b'~') {
-            return cursor;
+            return (cursor, blockquote_depth);
         }
         if bytes[cursor] == b'>' {
+            blockquote_depth += 1;
             cursor += 1;
             if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
                 cursor += 1;
@@ -336,7 +356,50 @@ fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> usize {
             }
             continue;
         }
-        return before_marker;
+        return (before_marker, blockquote_depth);
+    }
+}
+
+fn blockquote_prefix_end(bytes: &[u8], start: usize, end: usize, depth: usize) -> usize {
+    let mut cursor = start;
+    for _ in 0..depth {
+        let mut spaces = 0;
+        while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+            spaces += 1;
+        }
+        if spaces == 4 || bytes.get(cursor) != Some(&b'>') {
+            return end;
+        }
+        cursor += 1;
+        if cursor < end && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+        }
+    }
+    let mut spaces = 0;
+    while cursor < end && spaces < 4 && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+        spaces += 1;
+    }
+    if spaces == 4 { end } else { cursor }
+}
+
+fn html_comment_mask(bytes: &[u8], protected: &mut [bool]) {
+    let mut cursor = 0;
+    while cursor + 4 <= bytes.len() {
+        if !protected[cursor]
+            && bytes[cursor..].starts_with(b"<!--")
+            && (cursor..cursor + 4).all(|index| !protected[index])
+        {
+            let end = bytes[cursor + 4..]
+                .windows(3)
+                .position(|window| window == b"-->")
+                .map_or(bytes.len(), |offset| cursor + 4 + offset + 3);
+            mark(protected, cursor, end);
+            cursor = end;
+        } else {
+            cursor += 1;
+        }
     }
 }
 
@@ -424,6 +487,28 @@ mod tests {
             ),
             ("\\<details>literal\\</details>\nvalid".to_owned(), true)
         );
+        assert_eq!(
+            omit_details(
+                "```markdown\n- ```\n<details>literal</details>\n```\n<details><summary>valid</summary>hidden</details>"
+            ),
+            (
+                "```markdown\n- ```\n<details>literal</details>\n```\nvalid".to_owned(),
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn leaves_html_comments_literal() {
+        assert_eq!(
+            omit_details(
+                "<!-- <details><summary>literal</summary>hidden</details> -->\n<details><summary>valid</summary>hidden</details>"
+            ),
+            (
+                "<!-- <details><summary>literal</summary>hidden</details> -->\nvalid".to_owned(),
+                true
+            )
+        );
     }
 
     #[test]
@@ -432,6 +517,7 @@ mod tests {
             "before<details><summary>heading</summary>hidden</details>after",
             "before\nheading\nafter",
         );
+        assert_omitted("before<details>hidden</details>after", "before\nafter");
     }
 
     #[test]
