@@ -509,6 +509,21 @@ assert_overview_runtime_error_message overview-graphql-before-check-failures git
   'GitHub GraphQL error: [{"message":"simulated GraphQL failure"}]' \
   GH_TEST_GRAPHQL_ERROR=1 GH_OVERVIEW_REQUIRED_FAILURE=1 GH_OVERVIEW_ALL_FAILURE=1 -- \
   pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-unauthorized authentication false \
+  GH_TEST_GRAPHQL_ERROR=1 GH_TEST_GRAPHQL_ERROR_TYPE=UNAUTHORIZED -- \
+  pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-forbidden authorization false \
+  GH_TEST_GRAPHQL_ERROR=1 GH_TEST_GRAPHQL_ERROR_TYPE=FORBIDDEN -- \
+  pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-not-found notFound false \
+  GH_TEST_GRAPHQL_ERROR=1 GH_TEST_GRAPHQL_ERROR_TYPE=NOT_FOUND -- \
+  pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-rate-limited rateLimited true \
+  GH_TEST_GRAPHQL_ERROR=1 GH_TEST_GRAPHQL_ERROR_TYPE=RATE_LIMITED -- \
+  pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-graphql-unknown githubCli false \
+  GH_TEST_GRAPHQL_ERROR=1 GH_TEST_GRAPHQL_ERROR_TYPE=UNKNOWN -- \
+  pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-graphql-process-failure githubCli false \
   GH_OVERVIEW_GRAPHQL_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-missing notFound false \

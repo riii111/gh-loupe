@@ -261,12 +261,28 @@ fn graphql_response(response: Value) -> Result<QueryResponse> {
 }
 
 pub(super) fn graphql_error(errors: &Value) -> Exit {
+    let kind = errors
+        .as_array()
+        .and_then(|errors| errors.first())
+        .and_then(|error| error.get("type"))
+        .and_then(Value::as_str)
+        .map_or(ErrorKind::GitHubCli, graphql_error_kind);
     Exit::runtime(&RuntimeError {
-        kind: ErrorKind::GitHubCli,
+        kind,
         message: graphql_error_message(errors),
-        retryable: false,
+        retryable: kind == ErrorKind::RateLimited,
         retry_after_seconds: None,
     })
+}
+
+fn graphql_error_kind(error_type: &str) -> ErrorKind {
+    match error_type {
+        "UNAUTHORIZED" => ErrorKind::Authentication,
+        "FORBIDDEN" => ErrorKind::Authorization,
+        "NOT_FOUND" => ErrorKind::NotFound,
+        "RATE_LIMITED" => ErrorKind::RateLimited,
+        _ => ErrorKind::GitHubCli,
+    }
 }
 
 pub(super) fn graphql_error_message(errors: &Value) -> String {

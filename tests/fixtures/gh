@@ -194,7 +194,12 @@ if [ "$1 $2" = "api graphql" ]; then
     exit 91
   fi
   if [ "${GH_TEST_GRAPHQL_ERROR:-}" = 1 ]; then
-    printf '{"errors":[{"message":"simulated GraphQL failure"}]}\n'
+    if [ -n "${GH_TEST_GRAPHQL_ERROR_TYPE:-}" ]; then
+      printf '{"errors":[{"type":"%s","message":"simulated GraphQL failure"}]}\n' \
+        "$GH_TEST_GRAPHQL_ERROR_TYPE"
+    else
+      printf '{"errors":[{"message":"simulated GraphQL failure"}]}\n'
+    fi
     exit 0
   fi
   if [ "${GH_TEST_MISSING_PR:-}" = 1 ]; then

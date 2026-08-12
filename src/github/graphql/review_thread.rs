@@ -166,9 +166,14 @@ fn query(document: &str, variables: &Value) -> Result<Value> {
         super::QueryResponse::Data(data) => Ok(data),
         super::QueryResponse::Errors(errors) => {
             let message = super::graphql_error_message(&errors);
-            if message
-                .to_ascii_lowercase()
-                .contains("could not resolve to a node")
+            let missing_type = errors
+                .as_array()
+                .and_then(|errors| errors.first())
+                .is_some_and(|error| error.get("type").is_none());
+            if missing_type
+                && message
+                    .to_ascii_lowercase()
+                    .contains("could not resolve to a node")
             {
                 return Err(not_found(message));
             }
