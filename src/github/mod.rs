@@ -1,6 +1,6 @@
+pub mod checks;
 mod cli;
 pub mod graphql;
-pub mod pull_request;
 pub mod rest;
 
 use serde_json::Value;

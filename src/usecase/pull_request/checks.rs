@@ -90,7 +90,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         )?;
         checks
     } else {
-        let response = github::pull_request::checks(target, required)?;
+        let response = github::checks::checks(target, required)?;
         let values = response
             .as_array()
             .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid checks response"))?;
@@ -213,7 +213,7 @@ fn collect_one_diagnostic(
     link: Option<&str>,
 ) -> Result<DiagnosticResult> {
     let annotations = match check_run_id {
-        Some(id) => validate_annotations(&github::pull_request::annotations(
+        Some(id) => validate_annotations(&github::checks::annotations(
             context.target,
             id,
             context.deadline,
@@ -676,7 +676,7 @@ fn collect_actions_log(
     let Some(job_id) = link.and_then(|link| actions_job_id(target, link)) else {
         return Ok(Value::Null);
     };
-    let job = github::pull_request::job(target, job_id, deadline, timeout_message)?;
+    let job = github::checks::job(target, job_id, deadline, timeout_message)?;
     let job = job
         .as_object()
         .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid Actions job response"))?;
@@ -693,7 +693,7 @@ fn collect_actions_log(
         return Ok(Value::Null);
     }
 
-    let bytes = github::pull_request::job_log(
+    let bytes = github::checks::job_log(
         target,
         job_id,
         max_bytes,
@@ -737,8 +737,8 @@ fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> 
         .then(|| &value[prefix.len()..])
 }
 
-fn truncate_log(log: github::pull_request::BoundedBytes) -> Result<Value> {
-    let github::pull_request::BoundedBytes {
+fn truncate_log(log: github::checks::BoundedBytes) -> Result<Value> {
+    let github::checks::BoundedBytes {
         bytes,
         total_bytes,
         total_newlines,
@@ -907,7 +907,7 @@ mod tests {
         let total_bytes = input.len() as u64;
         let total_newlines = newline_count(input.as_bytes());
 
-        let log = truncate_log(github::pull_request::BoundedBytes {
+        let log = truncate_log(github::checks::BoundedBytes {
             bytes: input.into_bytes(),
             total_bytes,
             total_newlines,
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn log_within_both_limits_reports_no_omissions() {
         let bytes = b"first\nsecond\n".to_vec();
-        let log = truncate_log(github::pull_request::BoundedBytes {
+        let log = truncate_log(github::checks::BoundedBytes {
             total_bytes: bytes.len() as u64,
             total_newlines: newline_count(&bytes),
             bytes,
@@ -952,7 +952,7 @@ mod tests {
         let retained_start = input.len() - (LOG_BYTE_LIMIT + UTF8_BOUNDARY_BYTES);
         let bytes = input[retained_start..].to_vec();
 
-        let log = truncate_log(github::pull_request::BoundedBytes {
+        let log = truncate_log(github::checks::BoundedBytes {
             bytes,
             total_bytes,
             total_newlines,
