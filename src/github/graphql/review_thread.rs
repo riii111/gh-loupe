@@ -5,7 +5,7 @@ use crate::model::Target;
 
 use super::pagination;
 
-const REVIEW_THREAD_QUERY: &str = r"
+const REVIEW_THREAD_DETAIL_QUERY: &str = r"
 query ReviewThreadDetail($id: ID!) {
   node(id: $id) {
     __typename
@@ -40,7 +40,7 @@ query ReviewThreadDetail($id: ID!) {
 }
 ";
 
-const REVIEW_THREAD_COMMENTS_QUERY: &str = r"
+const REVIEW_THREAD_DETAIL_COMMENTS_QUERY: &str = r"
 query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
   node(id: $id) {
     __typename
@@ -66,16 +66,16 @@ query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
 
 pub fn execute(target: &Target, review_thread_id: &str) -> Result<Value> {
     let variables = json!({"id": review_thread_id});
-    let data = query(REVIEW_THREAD_QUERY, &variables)?;
+    let data = query(REVIEW_THREAD_DETAIL_QUERY, &variables)?;
     review_thread_node(&data, review_thread_id)?;
-    let mut review_thread = pagination::take_value_at(data, &["node"])?;
-    verify_pull_request(&review_thread, target)?;
-    review_thread
+    let mut detail = pagination::take_value_at(data, &["node"])?;
+    verify_pull_request(&detail, target)?;
+    detail
         .as_object_mut()
         .expect("review thread was validated as an object")
         .shift_remove("pullRequest");
-    append_review_thread_comment_pages(&mut review_thread, review_thread_id)?;
-    Ok(review_thread)
+    append_detail_comment_pages(&mut detail, review_thread_id)?;
+    Ok(detail)
 }
 
 fn verify_pull_request(review_thread: &Value, target: &Target) -> Result<()> {
@@ -97,39 +97,22 @@ fn verify_pull_request(review_thread: &Value, target: &Target) -> Result<()> {
     Ok(())
 }
 
-fn append_review_thread_comment_pages(
-    review_thread: &mut Value,
-    review_thread_id: &str,
-) -> Result<()> {
-    let mut comments = review_thread
+fn append_detail_comment_pages(detail: &mut Value, review_thread_id: &str) -> Result<()> {
+    let mut comments = detail
         .as_object_mut()
-        .and_then(|review_thread| review_thread.shift_remove("comments"))
+        .and_then(|detail| detail.shift_remove("comments"))
         .ok_or_else(|| Exit::invalid_response("GitHub review thread omitted comments"))?;
-    let mut cursor_tracker = pagination::CursorTracker::default();
-    while let Some(cursor) = cursor_tracker.next(&comments)? {
+    pagination::append_connection_pages(&mut comments, |cursor| {
         let variables = json!({"id": review_thread_id, "cursor": cursor});
-        let data = query(REVIEW_THREAD_COMMENTS_QUERY, &variables)?;
+        let data = query(REVIEW_THREAD_DETAIL_COMMENTS_QUERY, &variables)?;
         review_thread_node(&data, review_thread_id)?;
-        let mut page = pagination::take_value_at(data, &["node", "comments"])?;
-        let new_nodes = pagination::take_nodes(&mut page)?;
-        comments
-            .get_mut("nodes")
-            .and_then(Value::as_array_mut)
-            .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?
-            .extend(new_nodes);
-        comments
-            .as_object_mut()
-            .ok_or_else(|| Exit::invalid_response("GitHub comments must be an object"))?
-            .insert(
-                "pageInfo".to_owned(),
-                pagination::take_value_at(page, &["pageInfo"])?,
-            );
-    }
+        pagination::take_value_at(data, &["node", "comments"])
+    })?;
     let nodes = comments
         .as_object_mut()
         .and_then(|comments| comments.shift_remove("nodes"))
         .ok_or_else(|| Exit::invalid_response("GitHub comments nodes must be an array"))?;
-    review_thread
+    detail
         .as_object_mut()
         .expect("review thread was validated as an object")
         .insert("comments".to_owned(), nodes);

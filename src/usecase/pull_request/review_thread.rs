@@ -13,23 +13,23 @@ pub fn execute(
     include_diff_hunk: bool,
     include_details: bool,
 ) -> Result<Value> {
-    project_review_thread(
+    project_review_thread_detail(
         graphql::review_thread::execute(target, review_thread_id)?,
         include_diff_hunk,
         include_details,
     )
 }
 
-fn project_review_thread(
-    review_thread: Value,
+fn project_review_thread_detail(
+    detail: Value,
     include_diff_hunk: bool,
     include_details: bool,
 ) -> Result<Value> {
     let mut result = Map::new();
-    let id = required_string_field(&review_thread, "id")?;
+    let id = required_string_field(&detail, "id")?;
     result.insert("id".to_owned(), Value::String(id.to_owned()));
     for field in ["isResolved", "isOutdated"] {
-        let value = required_field(&review_thread, field)?;
+        let value = required_field(&detail, field)?;
         if !value.is_boolean() {
             return Err(Exit::invalid_response(format!(
                 "GitHub field {field} must be a boolean"
@@ -38,10 +38,10 @@ fn project_review_thread(
         result.insert(field.to_owned(), value.clone());
     }
     for field in ["path", "line", "originalLine", "startLine", "diffSide"] {
-        result.insert(field.to_owned(), nullable_location(&review_thread, field)?);
+        result.insert(field.to_owned(), nullable_location(&detail, field)?);
     }
 
-    let comments = required_field(&review_thread, "comments")?
+    let comments = required_field(&detail, "comments")?
         .as_array()
         .ok_or_else(|| Exit::invalid_response("GitHub comments must be an array"))?;
     let projected_comments = comments
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn malformed_required_field_is_rejected_without_projecting_it() {
-        let result = project_review_thread(json!({"id": 42}), false, false);
+        let result = project_review_thread_detail(json!({"id": 42}), false, false);
         let Err(error) = result else {
             panic!("expected an invalid response")
         };
