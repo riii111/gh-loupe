@@ -4,7 +4,7 @@ use crate::error::{Exit, Result};
 use crate::github::graphql;
 use crate::model::Target;
 
-use super::{bool_field, nullable_location, required_field, string_field};
+use super::{nullable_location, string_field};
 
 pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
     let mut review_thread_summaries = graphql::review_threads::execute(target, include_resolved)?
@@ -30,8 +30,9 @@ struct ReviewThreadSummary {
 
 fn project_review_thread(review_thread: Value) -> Result<ReviewThreadSummary> {
     let id = string_field(&review_thread, "id")?.to_owned();
-    let comments = required_field(&review_thread, "comments")?
-        .as_array()
+    let comments = review_thread
+        .get("comments")
+        .and_then(Value::as_array)
         .ok_or_else(|| Exit::invalid_response("GitHub comments must be an array"))?;
     let first_created_at = comments
         .iter()
@@ -70,4 +71,11 @@ fn project_review_thread(review_thread: Value) -> Result<ReviewThreadSummary> {
         id,
         value: Value::Object(value),
     })
+}
+
+fn bool_field(value: &Value, field: &str) -> Result<bool> {
+    value
+        .get(field)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a boolean")))
 }

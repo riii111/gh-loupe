@@ -4,7 +4,7 @@ use crate::error::{Exit, Result};
 use crate::github::rest;
 use crate::model::Target;
 
-use super::{required_field, string_field, string_value};
+use super::{required_field, required_string_field, string_value};
 
 pub fn execute(target: &Target) -> Result<Vec<Value>> {
     let mut comments = rest::pull_request_comments(target)?
@@ -28,7 +28,7 @@ fn project(comment: &Value) -> Result<Value> {
         ("created_at", "createdAt"),
         ("updated_at", "updatedAt"),
     ] {
-        let value = string_field(comment, source)?;
+        let value = required_string_field(comment, source)?;
         result.insert(output.to_owned(), Value::String(value.to_owned()));
     }
     let user = required_field(comment, "user")?;

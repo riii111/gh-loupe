@@ -5,7 +5,7 @@ use crate::github::graphql;
 use crate::markdown;
 use crate::model::Target;
 
-use super::{bool_field, nullable_location, required_field, string_field, string_value};
+use super::{nullable_location, required_field, required_string_field, string_value};
 
 pub fn execute(
     target: &Target,
@@ -26,13 +26,16 @@ fn project_review_thread(
     include_details: bool,
 ) -> Result<Value> {
     let mut result = Map::new();
-    let id = string_field(&review_thread, "id")?;
+    let id = required_string_field(&review_thread, "id")?;
     result.insert("id".to_owned(), Value::String(id.to_owned()));
     for field in ["isResolved", "isOutdated"] {
-        result.insert(
-            field.to_owned(),
-            Value::Bool(bool_field(&review_thread, field)?),
-        );
+        let value = required_field(&review_thread, field)?;
+        if !value.is_boolean() {
+            return Err(Exit::invalid_response(format!(
+                "GitHub field {field} must be a boolean"
+            )));
+        }
+        result.insert(field.to_owned(), value.clone());
     }
     for field in ["path", "line", "originalLine", "startLine", "diffSide"] {
         result.insert(field.to_owned(), nullable_location(&review_thread, field)?);
@@ -68,7 +71,7 @@ fn project_comment(
     let mut result = Map::new();
     let mut details_omitted = false;
     for field in ["id", "url", "body", "createdAt", "updatedAt"] {
-        let value = string_field(comment, field)?;
+        let value = required_string_field(comment, field)?;
         if field == "body" && !include_details {
             let (body, omitted) = markdown::omit_details(value);
             result.insert(field.to_owned(), Value::String(body));
