@@ -7,7 +7,7 @@ where
     I: Iterator<Item = String>,
 {
     let mut include_resolved = false;
-    let parsed = super::parse_subcommand_args(
+    let parsed = super::super::parse_subcommand_args(
         program,
         values,
         1,
@@ -28,7 +28,7 @@ where
             "the following arguments are required: target",
         ));
     };
-    super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
+    super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
         action: super::super::Action::Pr(super::Action::ReviewThreads { include_resolved }),
         target,

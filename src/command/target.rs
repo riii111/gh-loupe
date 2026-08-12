@@ -8,28 +8,35 @@ pub(super) enum Resource {
     Issue,
 }
 
-pub(super) fn resolve_issue_target(target: &str, repo: Option<String>) -> Result<Target> {
-    resolve_target(target, repo, Resource::Issue)
-}
-
-fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Result<Target> {
+pub(super) fn resolve_target(
+    target: &str,
+    repo: Option<String>,
+    resource: Resource,
+    validate_number: fn(&str) -> Option<String>,
+    argument_error: fn(&str, &str) -> Exit,
+    program: &str,
+) -> Result<Target> {
     if let Some((url_repo, number)) = parse_url(target, resource) {
         if !is_repo(url_repo) {
-            let name = resource_name(resource);
-            return Err(Exit::message(format!(
-                "{name} URL must contain a valid OWNER/REPO"
-            )));
+            return Err(argument_error(
+                program,
+                &format!(
+                    "{} URL must contain a valid OWNER/REPO",
+                    resource_name(resource)
+                ),
+            ));
         }
         if repo
             .as_ref()
             .is_some_and(|repo| !repo.eq_ignore_ascii_case(url_repo))
         {
             let resource_name = resource_url_name(resource);
-            return Err(Exit::message(format!(
-                "--repo conflicts with the {resource_name} URL"
-            )));
+            return Err(argument_error(
+                program,
+                &format!("--repo conflicts with the {resource_name} URL"),
+            ));
         }
-        if let Some(number) = positive_number(number) {
+        if let Some(number) = validate_number(number) {
             return Ok(Target {
                 repository: url_repo.to_owned(),
                 number,
@@ -37,23 +44,24 @@ fn resolve_target(target: &str, repo: Option<String>, resource: Resource) -> Res
         }
     }
 
-    let Some(number) = positive_number(target) else {
-        let name = resource_name(resource);
-        return Err(Exit::message(format!(
-            "{name} must be a positive number or GitHub {name} URL"
-        )));
+    let Some(number) = validate_number(target) else {
+        return Err(argument_error(program, resource_number_error(resource)));
     };
-    let repository = resolve_repo(repo)?;
+    let repository = resolve_repo(repo, argument_error, program)?;
     Ok(Target { repository, number })
 }
 
-fn resolve_repo(repo: Option<String>) -> Result<String> {
+fn resolve_repo(
+    repo: Option<String>,
+    argument_error: fn(&str, &str) -> Exit,
+    program: &str,
+) -> Result<String> {
     let repo = match repo {
         Some(repo) => repo,
         None => github::current_repository_runtime()?,
     };
     if !is_repo(&repo) {
-        return Err(Exit::message("--repo must use OWNER/REPO format"));
+        return Err(argument_error(program, "--repo must use OWNER/REPO format"));
     }
     Ok(repo)
 }
@@ -117,5 +125,14 @@ const fn resource_url_name(resource: Resource) -> &'static str {
     match resource {
         Resource::Pr => "pull request",
         Resource::Issue => "issue",
+    }
+}
+
+const fn resource_number_error(resource: Resource) -> &'static str {
+    match resource {
+        Resource::Pr => {
+            "pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL"
+        }
+        Resource::Issue => "issue must be a positive number or GitHub issue URL",
     }
 }

@@ -6,10 +6,14 @@ pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Ar
 where
     I: Iterator<Item = String>,
 {
-    let parsed =
-        super::parse_subcommand_args(program, values, 1, argument_error, print_help, |_, _| {
-            Ok(false)
-        })?;
+    let parsed = super::super::parse_subcommand_args(
+        program,
+        values,
+        1,
+        argument_error,
+        print_help,
+        |_, _| Ok(false),
+    )?;
     let mut positionals = parsed.positionals.into_iter();
     let Some(target) = positionals.next() else {
         return Err(argument_error(
@@ -17,7 +21,7 @@ where
             "the following arguments are required: target",
         ));
     };
-    super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
+    super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
         action: super::super::Action::Pr(super::Action::Overview),
         target,

@@ -227,6 +227,15 @@ grep -F 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,revie
 for subcommand in overview comments reviews review-threads review-thread checks; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
+
+run_cli issue-help -- issue --help
+test ! -s "$tmpdir/issue-help.stderr"
+grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+  "$tmpdir/issue-help.stdout" >/dev/null
+grep -F 'target       Issue number or GitHub issue URL' \
+  "$tmpdir/issue-help.stdout" >/dev/null
+grep -F -- '--repo REPO' "$tmpdir/issue-help.stdout" >/dev/null
+grep -F -- '--compact' "$tmpdir/issue-help.stdout" >/dev/null
 if grep -E '^    (threads|thread|full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
   exit 1
 fi
@@ -269,6 +278,20 @@ grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
 grep -F 'gh-loupe issue: error: unrecognized arguments: --include-resolved' \
   "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
 
+assert_argument_error issue-invalid-target issue 0
+grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+  "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
+grep -F 'gh-loupe issue: error: issue must be a positive number or GitHub issue URL' \
+  "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
+
+assert_argument_error issue-invalid-repo issue 42 --repo invalid
+grep -F 'gh-loupe issue: error: --repo must use OWNER/REPO format' \
+  "$tmpdir/issue-invalid-repo.argument.stderr" >/dev/null
+
+assert_argument_error issue-invalid-url-repo issue https://github.com//dotfiles/issues/42
+grep -F 'gh-loupe issue: error: issue URL must contain a valid OWNER/REPO' \
+  "$tmpdir/issue-invalid-url-repo.argument.stderr" >/dev/null
+
 for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"
   if GH_TEST_CALLS_FILE="$calls_file" PATH="$tmpdir/bin:$PATH" \
@@ -289,10 +312,14 @@ done
 issue_calls_file="$tmpdir/issue.calls"
 run_cli issue-default "GH_TEST_CALLS_FILE=$issue_calls_file" -- issue 42
 test ! -s "$tmpdir/issue-default.stderr"
-jq -e '. == {
-  "issue":{"number":42,"title":"Issue","state":"open","body":"body"},
-  "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
-}' "$tmpdir/issue-default.stdout" >/dev/null
+jq -e '
+  .schemaVersion == 1 and
+  (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+  .data == {
+    "issue":{"number":42,"title":"Issue","state":"open","body":"body"},
+    "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
+  }
+' "$tmpdir/issue-default.stdout" >/dev/null
 test "$(sed -n '1p' "$issue_calls_file")" = 'repo view --json nameWithOwner'
 grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_calls_file" >/dev/null
 grep -Fx \
@@ -320,7 +347,8 @@ assert_runtime_failure issue-error-precedence notFound issue \
 run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
-jq -e '.issue.number == 42 and (.comments | length == 2)' "$tmpdir/issue-url-compact.stdout" >/dev/null
+jq -e '.schemaVersion == 1 and .data.issue.number == 42 and (.data.comments | length == 2)' \
+  "$tmpdir/issue-url-compact.stdout" >/dev/null
 
 if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
   issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
@@ -329,13 +357,16 @@ if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
 else
   issue_status=$?
 fi
-test "$issue_status" -eq 1
+test "$issue_status" -eq 2
 test ! -s "$tmpdir/issue-conflicting-repo.stdout"
-test "$(cat "$tmpdir/issue-conflicting-repo.stderr")" = \
-  '--repo conflicts with the issue URL'
+grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+  "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
+grep -F 'gh-loupe issue: error: --repo conflicts with the issue URL' \
+  "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
 
 run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
-jq -e '.issue.title == "日本語のIssue" and .issue.body == "ずんだ"' "$tmpdir/issue-utf8.stdout" >/dev/null
+jq -e '.data.issue.title == "日本語のIssue" and .data.issue.body == "ずんだ"' \
+  "$tmpdir/issue-utf8.stdout" >/dev/null
 
 assert_runtime_failure issue-missing notFound issue \
   GH_TEST_MISSING_ISSUE=1 -- issue 42
@@ -530,6 +561,10 @@ fi
 test "$comments_status" -eq 2
 test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
+grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--compact] target' \
+  "$tmpdir/comments-invalid.stderr" >/dev/null
+grep -F 'gh-loupe pr comments: error: pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL' \
+  "$tmpdir/comments-invalid.stderr" >/dev/null
 
 calls_file="$tmpdir/comments.calls"
 run_comments comments-default "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=success -- \

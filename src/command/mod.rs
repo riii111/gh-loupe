@@ -32,7 +32,7 @@ pub fn run() -> Result<()> {
     } = parse_args()?;
     let result = match action {
         Action::Pr(action) => pr::execute(action, &target, repo, &program)?,
-        Action::Issue => issue::execute(&target, repo)?,
+        Action::Issue => issue::execute(&target, repo, &program)?,
     };
     let output = if compact {
         serde_json::to_string(&result)
@@ -104,6 +104,105 @@ pub fn argument_error(program: &str, usage: &str, command: &str, message: &str) 
 pub fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a str> {
     let (name, value) = value.split_once('=')?;
     (name == option).then_some(value)
+}
+
+struct SubcommandArgs {
+    positionals: Vec<String>,
+    repo: Option<String>,
+    compact: bool,
+    unrecognized: Vec<String>,
+}
+
+fn parse_subcommand_args<I, F>(
+    program: &str,
+    mut values: I,
+    positional_count: usize,
+    argument_error: fn(&str, &str) -> Exit,
+    print_help: fn(&str) -> Result<()>,
+    mut parse_option: F,
+) -> Result<SubcommandArgs>
+where
+    I: Iterator<Item = String>,
+    F: FnMut(&str, &mut I) -> Result<bool>,
+{
+    let mut positionals = Vec::new();
+    let mut repo = None;
+    let mut compact = false;
+    let mut positional_only = false;
+    let mut unrecognized = Vec::new();
+
+    while let Some(value) = values.next() {
+        if positional_only {
+            if positionals.len() < positional_count {
+                positionals.push(value);
+            } else {
+                unrecognized.push(value);
+            }
+            continue;
+        }
+        if value == "--" {
+            positional_only = true;
+            continue;
+        }
+        if let Some(value) = exact_long_option_value(&value, "--repo") {
+            repo = Some(value.to_owned());
+            continue;
+        }
+        match value.as_str() {
+            "--repo" => {
+                let Some(value) = values.next() else {
+                    return Err(argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                };
+                if value != "-" && value.starts_with('-') {
+                    return Err(argument_error(
+                        program,
+                        "argument --repo: expected one argument",
+                    ));
+                }
+                repo = Some(value);
+            }
+            "--compact" => compact = true,
+            "-h" | "--help" => {
+                print_help(program)?;
+                std::process::exit(0);
+            }
+            option => {
+                if parse_option(option, &mut values)? {
+                    continue;
+                }
+                if option.starts_with('-') || positionals.len() >= positional_count {
+                    unrecognized.push(value);
+                } else {
+                    positionals.push(value);
+                }
+            }
+        }
+    }
+
+    Ok(SubcommandArgs {
+        positionals,
+        repo,
+        compact,
+        unrecognized,
+    })
+}
+
+fn unrecognized_args(
+    program: &str,
+    argument_error: fn(&str, &str) -> Exit,
+    unrecognized: &[String],
+) -> Result<()> {
+    if unrecognized.is_empty() {
+        Ok(())
+    } else {
+        Err(argument_error(
+            program,
+            &format!("unrecognized arguments: {}", unrecognized.join(" ")),
+        ))
+    }
 }
 
 fn displayed_program_name(value: Option<&str>) -> &str {
