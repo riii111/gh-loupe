@@ -50,6 +50,25 @@ assert_argument_error() {
   test -s "$tmpdir/$name.argument.stderr"
 }
 
+assert_argument_error_without_github() {
+  local name="$1"
+  shift
+
+  local calls_file="$tmpdir/$name.calls"
+  local status
+  if env PATH="$tmpdir/bin:$PATH" GH_TEST_CALLS_FILE="$calls_file" "$tmpdir/rust/gh-loupe" "$@" \
+    >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  test "$status" -eq 2
+  test ! -s "$tmpdir/$name.stdout"
+  test -s "$tmpdir/$name.stderr"
+  test ! -e "$calls_file"
+}
+
 run_review_threads() {
   local name="$1"
   shift
@@ -86,7 +105,8 @@ run_review_thread() {
   assert_json '
     .schemaVersion == 1 and
     (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
-    (.data | keys == ["reviewThread"])
+    (.data | keys == ["reviewThreads"]) and
+    (.data.reviewThreads | type == "array")
   ' "$tmpdir/$name.review_thread.stdout" >/dev/null
 }
 
@@ -261,6 +281,8 @@ if grep -Eiq '(^|[[:space:]])pr (threads|thread)([[:space:]]|$)|data\.(threads|t
   "$tmpdir/review-thread-help.stdout"; then
   exit 1
 fi
+grep -F 'review_thread_id    one to 20 GraphQL review thread node IDs' \
+  "$tmpdir/review-thread-help.stdout" >/dev/null
 
 if GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
   "$tmpdir/rust/gh-loupe" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"; then
@@ -823,7 +845,7 @@ assert_argument_error thread-conflicting-repo \
 
 run_review_thread thread-default -- pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_json '
-  .data.reviewThread == {
+  .data.reviewThreads == [{
     "id": "thread-detail",
     "isResolved": false,
     "isOutdated": true,
@@ -862,7 +884,7 @@ assert_json '
       }
     ],
     "detailsOmitted": false
-  } and
+  }] and
   ([.. | objects | keys[]] | any(. == "diffHunk" or . == "databaseId" or . == "resolvedBy" or . == "replyTo" or . == "pullRequest") | not)
 ' "$tmpdir/thread-default.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-default.review_thread.stdout")" -gt 1
@@ -870,16 +892,16 @@ test "$(wc -l <"$tmpdir/thread-default.review_thread.stdout")" -gt 1
 run_review_thread thread-diff-hunk -- \
   pr review-thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk --compact
 assert_json '
-  [.data.reviewThread.comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
-  (.data.reviewThread.comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
+  [.data.reviewThreads[0].comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
+  (.data.reviewThreads[0].comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
 ' "$tmpdir/thread-diff-hunk.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-diff-hunk.review_thread.stdout")" -eq 1
 
 run_review_thread thread-details-default GH_TEST_THREAD_DETAILS=1 -- \
   pr review-thread 42 thread-detail --repo riii111/dotfiles
 assert_json '
-  .data.reviewThread.detailsOmitted == true and
-  [.data.reviewThread.comments[].body] == [
+  .data.reviewThreads[0].detailsOmitted == true and
+  [.data.reviewThreads[0].comments[].body] == [
     "human\n証拠\nreply",
     "second by id",
     "before\n結論\nafter"
@@ -889,15 +911,76 @@ assert_json '
 run_review_thread thread-details-included GH_TEST_THREAD_DETAILS=1 -- \
   pr review-thread 42 thread-detail --repo riii111/dotfiles --include-details --compact
 assert_json '
-  .data.reviewThread.detailsOmitted == false and
-  (.data.reviewThread | keys == ["comments", "detailsOmitted", "diffSide", "id", "isOutdated", "isResolved", "line", "originalLine", "path", "startLine"]) and
-  [.data.reviewThread.comments[].body] == [
+  .data.reviewThreads[0].detailsOmitted == false and
+  (.data.reviewThreads[0] | keys == ["comments", "detailsOmitted", "diffSide", "id", "isOutdated", "isResolved", "line", "originalLine", "path", "startLine"]) and
+  [.data.reviewThreads[0].comments[].body] == [
     "human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply",
     "second by id",
     "before\n<DETAILS class=\"evidence\">\n<SUMMARY>結論</SUMMARY>\n折り畳み内容\n</DETAILS>\nafter"
   ]
 ' "$tmpdir/thread-details-included.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-details-included.review_thread.stdout")" -eq 1
+
+run_review_thread thread-multiple GH_TEST_THREAD_DETAILS=1 -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+assert_json '
+  [.data.reviewThreads[].id] == ["thread-a", "thread-b"] and
+  [.data.reviewThreads[].detailsOmitted] == [true, false] and
+  ([.data.reviewThreads[].comments[] | has("diffHunk")] | all == false)
+' "$tmpdir/thread-multiple.review_thread.stdout" >/dev/null
+
+run_review_thread thread-multiple-options GH_TEST_THREAD_DETAILS=1 -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles --include-details --include-diff-hunk --compact
+assert_json '
+  [.data.reviewThreads[].id] == ["thread-a", "thread-b"] and
+  ([.data.reviewThreads[].detailsOmitted] | all == false) and
+  ([.data.reviewThreads[].comments[] | has("diffHunk")] | all == true)
+' "$tmpdir/thread-multiple-options.review_thread.stdout" >/dev/null
+
+run_review_thread thread-pretty -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+run_review_thread thread-compact -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles --compact
+test "$(jq -c 'del(.observedAt)' "$tmpdir/thread-pretty.review_thread.stdout")" = \
+  "$(jq -c 'del(.observedAt)' "$tmpdir/thread-compact.review_thread.stdout")"
+
+run_review_thread thread-many-one GH_TEST_THREAD_DETAIL_MANY=1 -- \
+  pr review-thread 42 thread-a --repo riii111/dotfiles
+assert_json '.data.reviewThreads[0].comments | length == 101' \
+  "$tmpdir/thread-many-one.review_thread.stdout" >/dev/null
+
+run_review_thread thread-many-multiple GH_TEST_THREAD_DETAIL_MANY=1 -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+assert_json '[.data.reviewThreads[].comments | length] == [101, 101]' \
+  "$tmpdir/thread-many-multiple.review_thread.stdout" >/dev/null
+
+assert_argument_error_without_github thread-empty-id \
+  pr review-thread 42 "" --repo riii111/dotfiles
+assert_argument_error_without_github thread-duplicate-id \
+  pr review-thread 42 thread-a thread-a --repo riii111/dotfiles
+over_limit_ids=()
+for index in $(seq 1 21); do
+  over_limit_ids+=("thread-$index")
+done
+assert_argument_error_without_github thread-over-limit \
+  pr review-thread 42 "${over_limit_ids[@]}" --repo riii111/dotfiles
+assert_argument_error_without_github thread-query-passthrough \
+  pr review-thread 42 thread-a --repo riii111/dotfiles --query arbitrary
+
+payloads_file="$tmpdir/thread-query.payloads"
+run_review_thread thread-query-shape GH_TEST_GRAPHQL_PAYLOADS_FILE="$payloads_file" -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+assert_json -s "
+  length == 3 and
+  .[0].variables.ids == [\"thread-a\", \"thread-b\"] and
+  (.[0].query | contains(\"nodes(ids: \$ids)\")) and
+  ([.[1:][] | .variables | keys] | all(. == [\"cursor\", \"id\"]))
+" "$payloads_file" >/dev/null
+
+assert_runtime_failure thread-second-page-failure githubCli runtime \
+  GH_TEST_THREAD_DETAIL_SECOND_PAGE_FAILURE=1 -- \
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
+grep -F 'thread-b' "$tmpdir/thread-second-page-failure.runtime.stderr" >/dev/null
 
 assert_runtime_failure thread-wrong-pr notFound runtime \
   GH_TEST_THREAD_DETAIL=wrong-pr -- pr review-thread 42 thread-detail --repo riii111/dotfiles

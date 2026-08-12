@@ -34,7 +34,7 @@ gh-loupe pr overview https://github.com/OWNER/REPO/pull/123
 gh-loupe pr comments https://github.com/OWNER/REPO/pull/123
 gh-loupe pr reviews https://github.com/OWNER/REPO/pull/123
 gh-loupe pr review-threads https://github.com/OWNER/REPO/pull/123
-gh-loupe pr review-thread https://github.com/OWNER/REPO/pull/123 REVIEW_THREAD_ID
+gh-loupe pr review-thread https://github.com/OWNER/REPO/pull/123 REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]
 gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
 ```
 
@@ -44,7 +44,7 @@ gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
 | `pr comments` | PR全体へのコメント |
 | `pr reviews` | Approve、Request changesなどのreview submission |
 | `pr review-threads` | 未解決inline reviewの一覧 |
-| `pr review-thread` | inline review一件の全コメント |
+| `pr review-thread` | inline review thread一件以上の全コメント |
 | `pr checks` | 個別checkと失敗診断 |
 
 resolved review threadは既定で除外します。
@@ -52,6 +52,10 @@ resolved review threadは既定で除外します。
 
 `pr review-thread`は既定で`<details>`の折り畳み内容を省略します。
 内容が判断に必要な場合だけ`--include-details`を指定します。
+
+`pr review-thread`は1回につき1〜20件のthread IDを受け取り、`data.reviewThreads`へ指定順で返します。
+成功時の`data.reviewThreads`は、threadが1件でも必ず配列です。
+取得に失敗した場合は、threadを部分的に返さずエラーで終了します。
 
 人間が色付きで確認する場合は`bat`を利用できます。
 

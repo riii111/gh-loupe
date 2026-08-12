@@ -199,6 +199,9 @@ fi
 
 if [ "$1 $2" = "api graphql" ]; then
   payload="$(cat)"
+  if [ -n "${GH_TEST_GRAPHQL_PAYLOADS_FILE:-}" ]; then
+    printf '%s\n' "$payload" >>"$GH_TEST_GRAPHQL_PAYLOADS_FILE"
+  fi
   if jq -e '.variables | has("number")' <<<"$payload" >/dev/null \
     && ! jq -e '.variables.number | type == "number" and . == floor' <<<"$payload" >/dev/null; then
     printf 'GraphQL pull request number must be an integer JSON number\n' >&2
@@ -221,11 +224,75 @@ if [ "$1 $2" = "api graphql" ]; then
     printf '{"errors":[{"message":"Could not resolve to a node with the global id of missing"}]}\n'
     exit 0
   fi
+  if jq -e '.query | contains("nodes(ids: $ids)")' <<<"$payload" >/dev/null; then
+    case "${GH_TEST_THREAD_DETAIL:-success}" in
+      missing)
+        printf '{"data":{"nodes":[null]}}\n'
+        ;;
+      wrong-type)
+        printf '{"data":{"nodes":[{"__typename":"Issue"}]}}\n'
+        ;;
+      wrong-id)
+        printf '{"data":{"nodes":[{"__typename":"PullRequestReviewThread","id":"other-thread"}]}}\n'
+        ;;
+      wrong-pr)
+        jq -c '{data:{nodes:[.data.node]}}' "$GH_FIXTURE_DATA/thread-wrong-pr.json"
+        ;;
+      wrong-repo)
+        jq -c '{data:{nodes:[.data.node]}}' "$GH_FIXTURE_DATA/thread-wrong-repo.json"
+        ;;
+      success)
+        ids_json="$(jq -c '.variables.ids' <<<"$payload")"
+        if [ "$(jq -r 'length' <<<"$ids_json")" -eq 1 ] \
+          && [ "$(jq -r '.[0]' <<<"$ids_json")" = thread-detail ]; then
+          if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
+            comment_z_body='before\n<DETAILS class=\"evidence\">\n<SUMMARY>結論</SUMMARY>\n折り畳み内容\n</DETAILS>\nafter'
+            comment_b_body='second by id'
+            comment_a_body='human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply'
+          else
+            comment_z_body='later'
+            comment_b_body='second by id'
+            comment_a_body='first by id'
+          fi
+          detail_end_cursor=thread-detail-comment-cursor
+          case "${GH_THREAD_DETAIL_PAGINATION:-}" in
+            repeat) detail_end_cursor=thread-detail-repeat-cursor ;;
+            cycle) detail_end_cursor=thread-detail-cycle-a ;;
+          esac
+          cat <<JSON
+{"data":{"nodes":[{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}]}}
+JSON
+        else
+          nodes_json=$(
+            jq -cn --argjson ids "$ids_json" --arg many "${GH_TEST_THREAD_DETAIL_MANY:-}" --arg details "${GH_TEST_THREAD_DETAILS:-}" '
+            def comment($id; $body; $date): {id:$id,url:("https://example.test/" + $id),body:$body,author:null,createdAt:$date,updatedAt:$date,diffHunk:"@@ fixture",replyTo:null};
+            $ids | reverse | map(. as $thread | {__typename:"PullRequestReviewThread",id:$thread,isResolved:false,isOutdated:false,path:("src/" + $thread + ".rs"),line:42,originalLine:39,startLine:null,diffSide:"RIGHT",pullRequest:{number:42,repository:{nameWithOwner:"riii111/dotfiles"}},comments:{nodes:(if $many == "1" then [range(0;100) | . as $index | comment(("comment-" + ($index|tostring));(if $details == "1" and $thread == $ids[0] then "<details>evidence</details>" else "first" end);"2026-01-01T00:00:00Z")] else [comment(("comment-" + $thread + "-first");(if $details == "1" and $thread == $ids[0] then "<details>evidence</details>" else "first" end);"2026-01-01T00:00:00Z")] end),pageInfo:{hasNextPage:true,endCursor:("cursor-" + $thread)}}})
+            '
+          )
+          printf '{"data":{"nodes":%s}}\n' "$nodes_json"
+        fi
+        ;;
+    esac
+    exit 0
+  fi
   if jq -e '.query | contains("ReviewThreadDetailComments")' <<<"$payload" >/dev/null; then
+    thread_id="$(jq -r '.variables.id' <<<"$payload")"
     if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
-      comment_a_body='human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply'
+      case "$thread_id" in
+        thread-detail|thread-a)
+          comment_a_body='human\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply'
+          ;;
+        *)
+          comment_a_body='first by id'
+          ;;
+      esac
     else
       comment_a_body='first by id'
+    fi
+    if [ "${GH_TEST_THREAD_DETAIL_SECOND_PAGE_FAILURE:-}" = 1 ] \
+      && [ "$thread_id" = thread-b ]; then
+      printf 'simulated second review thread pagination failure\n' >&2
+      exit 35
     fi
     if [ "${GH_TEST_THREAD_DETAIL_PAGE_FAILURE:-}" = 1 ]; then
       printf 'simulated thread detail pagination failure\n' >&2
@@ -244,12 +311,17 @@ if [ "$1 $2" = "api graphql" ]; then
       esac
       page_info="{\"hasNextPage\":true,\"endCursor\":\"$next_cursor\"}"
       cat <<JSON
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[],"pageInfo":$page_info}}}}
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"$thread_id","comments":{"nodes":[],"pageInfo":$page_info}}}}
 JSON
       exit 0
     fi
+    if [ "${GH_TEST_THREAD_DETAIL_MANY:-}" = 1 ]; then
+      many_comment="$(jq -cn --arg id "$thread_id" '{id:("comment-" + $id + "-100"),url:("https://example.test/" + $id + "/100"),body:"last",author:null,createdAt:"2026-01-01T00:00:01Z",updatedAt:"2026-01-01T00:00:01Z",diffHunk:"@@ fixture",replyTo:null}')"
+      printf '{"data":{"node":{"__typename":"PullRequestReviewThread","id":"%s","comments":{"nodes":[%s],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}\n' "$thread_id" "$many_comment"
+      exit 0
+    fi
     cat <<JSON
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"${comment_a_body:-first by id}","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"$thread_id","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"${comment_a_body:-first by id}","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 JSON
     exit 0
   fi
