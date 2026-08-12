@@ -5,6 +5,8 @@ use crate::github::graphql;
 use crate::markdown;
 use crate::model::Target;
 
+use super::{nullable_location, required_field, required_string_field, string_value};
+
 pub fn execute(
     target: &Target,
     review_thread_id: &str,
@@ -24,11 +26,8 @@ fn project_review_thread(
     include_details: bool,
 ) -> Result<Value> {
     let mut result = Map::new();
-    let id = required_field(&review_thread, "id")?;
-    if !id.is_string() {
-        return Err(Exit::invalid_response("GitHub field id must be a string"));
-    }
-    result.insert("id".to_owned(), id.clone());
+    let id = required_string_field(&review_thread, "id")?;
+    result.insert("id".to_owned(), Value::String(id.to_owned()));
     for field in ["isResolved", "isOutdated"] {
         let value = required_field(&review_thread, field)?;
         if !value.is_boolean() {
@@ -72,19 +71,13 @@ fn project_comment(
     let mut result = Map::new();
     let mut details_omitted = false;
     for field in ["id", "url", "body", "createdAt", "updatedAt"] {
-        let value = required_field(comment, field)?;
-        if !value.is_string() {
-            return Err(Exit::invalid_response(format!(
-                "GitHub field {field} must be a string"
-            )));
-        }
+        let value = required_string_field(comment, field)?;
         if field == "body" && !include_details {
-            let body = value.as_str().expect("GitHub body was validated");
-            let (body, omitted) = markdown::omit_details(body);
+            let (body, omitted) = markdown::omit_details(value);
             result.insert(field.to_owned(), Value::String(body));
             details_omitted = omitted;
         } else {
-            result.insert(field.to_owned(), value.clone());
+            result.insert(field.to_owned(), Value::String(value.to_owned()));
         }
     }
     let author = required_field(comment, "author")?;
@@ -127,33 +120,6 @@ fn project_comment(
         result.insert("diffHunk".to_owned(), diff_hunk.clone());
     }
     Ok((Value::Object(result), details_omitted))
-}
-
-fn required_field<'a>(value: &'a Value, field: &str) -> Result<&'a Value> {
-    value
-        .get(field)
-        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))
-}
-
-fn nullable_location(value: &Value, field: &str) -> Result<Value> {
-    let value = required_field(value, field)?;
-    let valid = match field {
-        "path" | "diffSide" => value.is_null() || value.is_string(),
-        "line" | "originalLine" | "startLine" => value.is_null() || value.as_i64().is_some(),
-        _ => false,
-    };
-    if !valid {
-        return Err(Exit::invalid_response(format!(
-            "GitHub field {field} has an invalid value"
-        )));
-    }
-    Ok(value.clone())
-}
-
-fn string_value<'a>(value: &'a Value, field: &str) -> &'a str {
-    value[field]
-        .as_str()
-        .expect("projected comment string was validated")
 }
 
 #[cfg(test)]

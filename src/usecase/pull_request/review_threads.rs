@@ -4,6 +4,8 @@ use crate::error::{Exit, Result};
 use crate::github::graphql;
 use crate::model::Target;
 
+use super::{nullable_location, string_field};
+
 pub fn execute(target: &Target, include_resolved: bool) -> Result<Vec<Value>> {
     let mut review_thread_summaries = graphql::review_threads::execute(target, include_resolved)?
         .into_iter()
@@ -71,33 +73,9 @@ fn project_review_thread(review_thread: Value) -> Result<ReviewThreadSummary> {
     })
 }
 
-fn string_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a string")))
-}
-
 fn bool_field(value: &Value, field: &str) -> Result<bool> {
     value
         .get(field)
         .and_then(Value::as_bool)
         .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a boolean")))
-}
-
-fn nullable_location(value: &Value, field: &str) -> Result<Value> {
-    let value = value
-        .get(field)
-        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))?;
-    let valid = match field {
-        "path" | "diffSide" => value.is_null() || value.is_string(),
-        "line" | "originalLine" | "startLine" => value.is_null() || value.as_i64().is_some(),
-        _ => false,
-    };
-    if !valid {
-        return Err(Exit::invalid_response(format!(
-            "GitHub field {field} has an invalid value"
-        )));
-    }
-    Ok(value.clone())
 }

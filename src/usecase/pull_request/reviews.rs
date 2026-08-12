@@ -6,6 +6,8 @@ use crate::error::{Exit, Result};
 use crate::github::rest;
 use crate::model::Target;
 
+use super::string_field;
+
 pub fn execute(target: &Target) -> Result<Vec<Value>> {
     let mut reviews = rest::pull_request_reviews(target)?
         .into_iter()
@@ -60,13 +62,6 @@ fn compare_submitted_at(left: Option<&str>, right: Option<&str>) -> Ordering {
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
-}
-
-fn string_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| Exit::invalid_response(format!("GitHub field {field} must be a string")))
 }
 
 fn nullable_string_field(value: &Value, field: &str) -> Result<Option<String>> {

@@ -4,6 +4,8 @@ use crate::error::{Exit, Result};
 use crate::github::rest;
 use crate::model::Target;
 
+use super::{required_field, required_string_field, string_value};
+
 pub fn execute(target: &Target) -> Result<Vec<Value>> {
     let mut comments = rest::pull_request_comments(target)?
         .iter()
@@ -26,13 +28,8 @@ fn project(comment: &Value) -> Result<Value> {
         ("created_at", "createdAt"),
         ("updated_at", "updatedAt"),
     ] {
-        let value = required_field(comment, source)?;
-        if !value.is_string() {
-            return Err(Exit::invalid_response(format!(
-                "GitHub field {source} must be a string"
-            )));
-        }
-        result.insert(output.to_owned(), value.clone());
+        let value = required_string_field(comment, source)?;
+        result.insert(output.to_owned(), Value::String(value.to_owned()));
     }
     let user = required_field(comment, "user")?;
     let author = match user {
@@ -50,16 +47,4 @@ fn project(comment: &Value) -> Result<Value> {
     };
     result.insert("author".to_owned(), author);
     Ok(Value::Object(result))
-}
-
-fn required_field<'a>(value: &'a Value, field: &str) -> Result<&'a Value> {
-    value
-        .get(field)
-        .ok_or_else(|| Exit::invalid_response(format!("GitHub response omitted {field}")))
-}
-
-fn string_value<'a>(value: &'a Value, field: &str) -> &'a str {
-    value[field]
-        .as_str()
-        .expect("projected comment string was validated")
 }
