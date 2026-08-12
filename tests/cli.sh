@@ -321,9 +321,34 @@ assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   .data == {
-    "issue":{"number":42,"title":"Issue","state":"open","body":"body"},
-    "comments":[{"id":2,"body":"conversation"},{"id":4,"body":"conversation page 2"}]
-  }
+    "repository":"riii111/dotfiles",
+    "issue":{
+      "number":42,
+      "title":"Issue",
+      "url":"https://github.com/riii111/dotfiles/issues/42",
+      "state":"OPEN",
+      "stateReason":null,
+      "body":"body",
+      "author":"author",
+      "labels":["alpha","zeta"],
+      "assignees":["alice","zoe"],
+      "milestone":{"title":"v1","state":"OPEN","dueOn":null},
+      "createdAt":"2026-08-12T00:00:00Z",
+      "updatedAt":"2026-08-12T01:00:00Z",
+      "closedAt":null,
+      "subIssues":{"total":2,"completed":1},
+      "dependencies":{"blockedBy":2,"blocking":1}
+    },
+    "comments":[
+      {"id":"IC_a","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-1","author":null,"body":"first by id","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T02:00:00Z"},
+      {"id":"IC_b","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-2","author":"author","body":"second by id","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T01:00:00Z"},
+      {"id":"IC_z","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-4","author":"later","body":"later","createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T01:00:00Z"}
+    ]
+  } and
+  (.data.issue | keys == ["assignees","author","body","closedAt","createdAt","dependencies","labels","milestone","number","state","stateReason","subIssues","title","updatedAt","url"]) and
+  (.data.comments | all(keys == ["author","body","createdAt","id","updatedAt","url"])) and
+  ([.. | objects | keys[]] | any(. == "repository_url" or . == "labels_url" or . == "comments_url" or . == "reactions" or . == "pull_request" or . == "performed_via_github_app") | not) and
+  ([.. | strings | select(test("^https://api\\.github\\.com/"))] | length == 0)
 ' "$tmpdir/issue-default.stdout" >/dev/null
 test "$(sed -n '1p' "$issue_calls_file")" = 'repo view --json nameWithOwner'
 grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_calls_file" >/dev/null
@@ -352,8 +377,38 @@ assert_runtime_failure issue-error-precedence notFound issue \
 run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
-assert_json '.schemaVersion == 1 and .data.issue.number == 42 and (.data.comments | length == 2)' \
+assert_json '.schemaVersion == 1 and .data.issue.number == 42 and (.data.comments | length == 3)' \
   "$tmpdir/issue-url-compact.stdout" >/dev/null
+
+run_cli issue-pretty-for-compact -- issue 42 --repo riii111/dotfiles
+run_cli issue-compact-for-pretty -- issue 42 --repo riii111/dotfiles --compact
+test "$(jq -c 'del(.observedAt)' "$tmpdir/issue-pretty-for-compact.stdout")" = \
+  "$(jq -c 'del(.observedAt)' "$tmpdir/issue-compact-for-pretty.stdout")"
+
+run_cli issue-nullable GH_TEST_ISSUE_RESPONSE=nullable -- issue 42 --repo riii111/dotfiles
+jq -e '
+  .data.issue == {
+    "number":42,
+    "title":"Issue",
+    "url":"https://github.com/riii111/dotfiles/issues/42",
+    "state":"CLOSED",
+    "stateReason":"NOT_PLANNED",
+    "body":null,
+    "author":null,
+    "labels":[],
+    "assignees":[],
+    "milestone":null,
+    "createdAt":"2026-08-12T00:00:00Z",
+    "updatedAt":"2026-08-12T01:00:00Z",
+    "closedAt":"2026-08-12T02:00:00Z",
+    "subIssues":null,
+    "dependencies":null
+  }
+' "$tmpdir/issue-nullable.stdout" >/dev/null
+
+run_cli issue-missing-summaries GH_TEST_ISSUE_RESPONSE=missing-summary -- issue 42 --repo riii111/dotfiles
+jq -e '.data.issue.subIssues == null and .data.issue.dependencies == null' \
+  "$tmpdir/issue-missing-summaries.stdout" >/dev/null
 
 if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
   issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
@@ -383,6 +438,18 @@ assert_runtime_failure issue-invalid-page invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-page -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-invalid-item invalidResponse issue \
   GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
+assert_runtime_failure issue-malformed invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue 42 --repo riii111/dotfiles
+assert_runtime_failure issue-pr-target invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=pr-marker -- issue 42 --repo riii111/dotfiles
+grep -F 'use the pr commands' "$tmpdir/issue-pr-target.issue.stderr" >/dev/null
+assert_runtime_failure issue-null-pr-target invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=null-pr-marker -- issue 42 --repo riii111/dotfiles
+grep -F 'use the pr commands' "$tmpdir/issue-null-pr-target.issue.stderr" >/dev/null
+assert_runtime_failure issue-comments-missing-field invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=missing-field -- issue 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-wrong-type invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=wrong-type -- issue 42 --repo riii111/dotfiles
 assert_runtime_failure issue-missing-repository-metadata invalidResponse issue \
   GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
 assert_overview_runtime_error overview-stdin-failure githubCli false \

@@ -479,8 +479,20 @@ if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/4
     invalid-item)
       printf '[[42]]\n'
       ;;
+    missing-field)
+      cat <<'JSON'
+[[{"node_id":"IC_missing","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-1","user":{"login":"author"},"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]]
+JSON
+      ;;
+    wrong-type)
+      cat <<'JSON'
+[[{"node_id":"IC_wrong","html_url":42,"user":{"login":"author"},"body":"body","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]]
+JSON
+      ;;
     success)
-      printf '[[{"id":2,"body":"conversation"}],[{"id":4,"body":"conversation page 2"}]]\n'
+      cat <<'JSON'
+[[{"node_id":"IC_z","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-4","user":{"login":"later"},"body":"later","created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T01:00:00Z","id":4,"reactions":{"total_count":2}},{"node_id":"IC_b","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-2","user":{"login":"author"},"body":"second by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T01:00:00Z","id":2}],[{"node_id":"IC_a","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-1","user":null,"body":"first by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T02:00:00Z","id":1}]]
+JSON
       ;;
   esac
   exit 0
@@ -493,10 +505,47 @@ if [ "$1" = api ] && [[ "$*" == *repos/riii111/dotfiles/issues/42* ]]; then
     exit 44
   fi
   if [ "${GH_TEST_UTF8:-}" = 1 ]; then
-    printf '{"number":42,"title":"日本語のIssue","state":"open","body":"ずんだ"}\n'
-  else
-    printf '{"number":42,"title":"Issue","state":"open","body":"body"}\n'
+    cat <<'JSON'
+{"number":42,"title":"日本語のIssue","html_url":"https://github.com/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"ずんだ","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"sub_issues_summary":null,"issue_dependencies_summary":null}
+JSON
+    exit 0
   fi
+  case "${GH_TEST_ISSUE_RESPONSE:-success}" in
+    success)
+      cat <<'JSON'
+{"number":42,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/42","url":"https://api.github.com/repos/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[{"name":"zeta"},{"name":"alpha"}],"assignees":[{"login":"zoe"},{"login":"alice"}],"milestone":{"title":"v1","state":"open","due_on":null,"url":"https://api.github.com/repos/riii111/dotfiles/milestones/1"},"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"sub_issues_summary":{"total":2,"completed":1,"percent_completed":50},"issue_dependencies_summary":{"blocked_by":2,"total_blocked_by":9,"blocking":1,"total_blocking":8},"reactions":{"total_count":99},"performed_via_github_app":null}
+JSON
+      ;;
+    nullable)
+      cat <<'JSON'
+{"number":42,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/42","state":"closed","state_reason":"not_planned","body":null,"user":null,"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":"2026-08-12T02:00:00Z","sub_issues_summary":null,"issue_dependencies_summary":null}
+JSON
+      ;;
+    missing-summary)
+      cat <<'JSON'
+{"number":42,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null}
+JSON
+      ;;
+    malformed)
+      cat <<'JSON'
+{"number":42,"title":42,"html_url":"https://github.com/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null}
+JSON
+      ;;
+    pr-marker)
+      cat <<'JSON'
+{"number":42,"title":"Pull request","html_url":"https://github.com/riii111/dotfiles/pull/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"pull_request":{"html_url":"https://github.com/riii111/dotfiles/pull/42"}}
+JSON
+      ;;
+    null-pr-marker)
+      cat <<'JSON'
+{"number":42,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/42","state":"open","state_reason":null,"body":"body","user":{"login":"author"},"labels":[],"assignees":[],"milestone":null,"created_at":"2026-08-12T00:00:00Z","updated_at":"2026-08-12T01:00:00Z","closed_at":null,"pull_request":null}
+JSON
+      ;;
+    *)
+      printf 'unknown issue response fixture: %s\n' "${GH_TEST_ISSUE_RESPONSE}" >&2
+      exit 90
+      ;;
+  esac
   exit 0
 fi
 
