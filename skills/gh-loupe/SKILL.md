@@ -23,7 +23,7 @@ Required gh-loupe version: 0.8.0
 | PR全体のConversation comment | `gh-loupe pr comments TARGET` |
 | ApproveやRequest changesなどのreview submission | `gh-loupe pr reviews TARGET` |
 | コード行に付いたinline reviewの一覧 | `gh-loupe pr review-threads TARGET` |
-| inline review一件の全comment | `gh-loupe pr review-thread TARGET REVIEW_THREAD_ID` |
+| inline review thread一件以上の全comment | `gh-loupe pr review-thread TARGET REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]` |
 | 個別checkと失敗診断 | `gh-loupe pr checks TARGET` |
 | Issueとそのcomment | `gh-loupe issue TARGET` |
 
@@ -31,8 +31,10 @@ Required gh-loupe version: 0.8.0
 
 - 目的に対応するcommandから始め、常に`overview`を先に取得しない。
 - `review-threads`は既定で未解決だけを返す。過去の議論が必要な場合だけ`--include-resolved`を加える。
-- `review-thread`は一覧で得たIDへ使う。`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
+- `review-thread`は一覧で得た1〜20件のIDへ使う。入力順の配列を返し、`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
+- 成功時の`review-thread`出力は、threadが1件でも`data.reviewThreads`配列を含む。
 - `review-thread`は既定で各commentの`<details>`折り畳み内容を省略する。判断に必要な場合だけ`--include-details`を加える。
+- `review-thread`は全threadの取得が成功した場合だけ出力する。失敗時に部分成功を返さない。
 - 失敗checkは`--failed-diagnostics`で調べ、annotationだけで不足する場合だけ`--include-failed-logs`を加える。
 - merge可否の判断では`overview`のrequired check集計と`checks.all`を両方確認する。
 

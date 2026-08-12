@@ -9,15 +9,14 @@ use super::{nullable_location, required_field, required_string_field, string_val
 
 pub fn execute(
     target: &Target,
-    review_thread_id: &str,
+    review_thread_ids: &[String],
     include_diff_hunk: bool,
     include_details: bool,
-) -> Result<Value> {
-    project_review_thread_detail(
-        graphql::review_thread::execute(target, review_thread_id)?,
-        include_diff_hunk,
-        include_details,
-    )
+) -> Result<Vec<Value>> {
+    graphql::review_thread::execute(target, review_thread_ids)?
+        .into_iter()
+        .map(|detail| project_review_thread_detail(detail, include_diff_hunk, include_details))
+        .collect()
 }
 
 fn project_review_thread_detail(

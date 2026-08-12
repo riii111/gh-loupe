@@ -20,7 +20,7 @@ pub(super) enum Action {
     Overview,
     Reviews,
     ReviewThread {
-        review_thread_id: String,
+        review_thread_ids: Vec<String>,
         include_diff_hunk: bool,
         include_details: bool,
     },
@@ -96,14 +96,14 @@ pub(super) fn execute(
             Value::Array(reviews::execute(&target)?),
         )])),
         Action::ReviewThread {
-            review_thread_id,
+            review_thread_ids,
             include_diff_hunk,
             include_details,
         } => Value::Object(Map::from_iter([(
-            "reviewThread".to_owned(),
+            "reviewThreads".to_owned(),
             review_thread::execute(
                 &target,
-                &review_thread_id,
+                &review_thread_ids,
                 include_diff_hunk,
                 include_details,
             )?,
@@ -133,7 +133,7 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read one review thread\n    checks          read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read review threads\n    checks          read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
     super::write_stdout(&text)
