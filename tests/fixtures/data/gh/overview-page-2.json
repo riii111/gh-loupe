@@ -1,0 +1,28 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 42,
+        "title": "Add pull request title",
+        "url": "https://github.com/riii111/dotfiles/pull/42",
+        "state": "OPEN",
+        "isDraft": false,
+        "headRefOid": "head",
+        "baseRefOid": "base",
+        "reviewDecision": "APPROVED",
+        "mergeStateStatus": "CLEAN",
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+}

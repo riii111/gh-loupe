@@ -5,6 +5,8 @@ set -Eeuo pipefail
 trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "$repo_root/tests/assertions.sh"
+export GH_FIXTURE_DATA="$repo_root/tests/fixtures/data/gh"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-reviews.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
@@ -31,7 +33,8 @@ assert_runtime_error() {
   test "$status" -eq 1
   test ! -s "$tmpdir/$name.stdout"
   test "$(wc -l <"$tmpdir/$name.stderr")" -eq 1
-  jq -e --arg kind "$kind" '
+  # shellcheck disable=SC2016
+  assert_json --arg kind "$kind" '
     .schemaVersion == 1 and
     .error.kind == $kind and
     (.error.message | type == "string") and
@@ -42,7 +45,7 @@ assert_runtime_error() {
 
 run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
-jq -e '
+assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   .data.reviews == [
@@ -65,7 +68,7 @@ test "$(wc -l <"$tmpdir/compact.stdout")" -eq 1
 
 run_reviews empty GH_TEST_REVIEWS=empty "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
-jq -e '.data.reviews == []' "$tmpdir/empty.stdout" >/dev/null
+assert_json '.data.reviews == []' "$tmpdir/empty.stdout" >/dev/null
 
 if env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 0 --repo riii111/dotfiles \
   >"$tmpdir/argument.stdout" 2>"$tmpdir/argument.stderr"; then

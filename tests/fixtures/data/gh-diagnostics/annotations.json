@@ -1,0 +1,30 @@
+[
+  [
+    {
+      "path": "z.rs",
+      "start_line": 9,
+      "end_line": 10,
+      "annotation_level": "failure",
+      "title": "zeta",
+      "message": "later"
+    }
+  ],
+  [
+    {
+      "path": "a.rs",
+      "start_line": 2,
+      "end_line": 2,
+      "annotation_level": "failure",
+      "title": "beta",
+      "message": "same"
+    },
+    {
+      "path": "a.rs",
+      "start_line": 1,
+      "end_line": 1,
+      "annotation_level": "warning",
+      "title": null,
+      "message": "first"
+    }
+  ]
+]

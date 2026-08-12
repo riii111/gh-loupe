@@ -1,0 +1,28 @@
+{
+  "data": {
+    "node": {
+      "__typename": "PullRequestReviewThread",
+      "id": "thread-detail",
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "src/lib.rs",
+      "line": 42,
+      "originalLine": 39,
+      "startLine": null,
+      "diffSide": "RIGHT",
+      "pullRequest": {
+        "number": 42,
+        "repository": {
+          "nameWithOwner": "other/repo"
+        }
+      },
+      "comments": {
+        "nodes": [],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}

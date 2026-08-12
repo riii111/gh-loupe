@@ -1,0 +1,40 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "head",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "databaseId": 104,
+                        "name": "malformed",
+                        "isRequired": true,
+                        "status": "IN_PROGRESS",
+                        "conclusion": null,
+                        "startedAt": "2026-08-11T11:00:00Z",
+                        "detailsUrl": null,
+                        "checkSuite": {
+                          "workflowRun": null
+                        }
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

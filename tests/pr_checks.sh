@@ -5,6 +5,8 @@ set -Eeuo pipefail
 trap 'status=$?; printf "%s:%s: assertion failed (exit %s): %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "$repo_root/tests/assertions.sh"
+export GH_FIXTURE_DATA="$repo_root/tests/fixtures/data/gh"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gh-loupe-pr-checks.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/bin"
@@ -17,7 +19,7 @@ run_checks() {
 }
 
 GH_TEST_ARGS_FILE="$tmpdir/default-args" run_checks success >"$tmpdir/pretty.json"
-jq -e '
+assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   [.data.checks[].name] == ["alpha", "alpha", "zeta"] and
@@ -32,7 +34,7 @@ fi
 GH_TEST_ARGS_FILE="$tmpdir/args" run_checks success --required --compact >"$tmpdir/compact.json"
 test "$(wc -l <"$tmpdir/compact.json" | tr -d ' ')" -eq 1
 grep -Fx -- '--required' "$tmpdir/args" >/dev/null
-jq -e '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
+assert_json '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
 
 if (
   export GH_TEST_CHECKS_STATUS=unexpected
@@ -44,7 +46,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/unexpected-status.stdout"
-jq -e '.schemaVersion == 1 and .error.kind == "githubCli"' \
+assert_json '.schemaVersion == 1 and .error.kind == "githubCli"' \
   "$tmpdir/unexpected-status.stderr" >/dev/null
 
 if GH_TEST_SIGNAL=1 run_checks signal \
@@ -55,11 +57,11 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/signal.stdout"
-jq -e '.schemaVersion == 1 and .error.kind == "githubCli" and .error.message == "GitHub CLI terminated by signal"' \
+assert_json '.schemaVersion == 1 and .error.kind == "githubCli" and .error.message == "GitHub CLI terminated by signal"' \
   "$tmpdir/signal.stderr" >/dev/null
 
 run_checks nullable --compact >"$tmpdir/nullable.json"
-jq -e '
+assert_json '
   .data.checks[0].link == null and
   .data.checks[0].workflow == null and
   .data.checks[0].startedAt == null and
@@ -70,10 +72,10 @@ jq -e '
 ' "$tmpdir/nullable.json" >/dev/null
 
 run_checks no-required --required --compact >"$tmpdir/no-required.json"
-jq -e '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
+assert_json '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
 
 run_checks no-checks --compact >"$tmpdir/no-checks.json"
-jq -e '.data.checks == []' "$tmpdir/no-checks.json" >/dev/null
+assert_json '.data.checks == []' "$tmpdir/no-checks.json" >/dev/null
 
 for mode in missing wrong-type wrong-metadata-type unknown object; do
   if run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
@@ -84,7 +86,7 @@ for mode in missing wrong-type wrong-metadata-type unknown object; do
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
-  jq -e '.schemaVersion == 1 and .error.kind == "invalidResponse" and .error.retryable == false and .error.retryAfterSeconds == null' \
+  assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse" and .error.retryable == false and .error.retryAfterSeconds == null' \
     "$tmpdir/$mode.stderr" >/dev/null
 done
 
@@ -95,7 +97,7 @@ else
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/auth.stdout"
-jq -e '.error.kind == "authentication" and .error.retryable == false' "$tmpdir/auth.stderr" >/dev/null
+assert_json '.error.kind == "authentication" and .error.retryable == false' "$tmpdir/auth.stderr" >/dev/null
 
 for mode in missing-pr missing-repository; do
   if run_checks "$mode" >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
@@ -105,6 +107,6 @@ for mode in missing-pr missing-repository; do
   fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$mode.stdout"
-  jq -e '.error.kind == "notFound" and .error.retryable == false' \
+  assert_json '.error.kind == "notFound" and .error.retryable == false' \
     "$tmpdir/$mode.stderr" >/dev/null
 done
