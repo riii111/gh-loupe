@@ -222,6 +222,7 @@ fn code_mask(body: &str) -> Vec<bool> {
         if current_list_indent.is_some() {
             list_content_indent = current_list_indent;
         }
+        let blank_line = is_blank_line(bytes, cursor, first_line_end);
         let in_list_content = list_content_indent
             .is_some_and(|indent| leading_space_count(bytes, cursor, first_line_end) >= indent);
         if let Some(fence) = fence_start(bytes, cursor, first_line_end, list_content_indent) {
@@ -242,7 +243,7 @@ fn code_mask(body: &str) -> Vec<bool> {
         } else {
             cursor = first_line_end;
         }
-        if current_list_indent.is_none() && !in_list_content {
+        if current_list_indent.is_none() && !in_list_content && !blank_line {
             list_content_indent = None;
         }
     }
@@ -385,6 +386,12 @@ fn leading_space_count(bytes: &[u8], start: usize, end: usize) -> usize {
         .count()
 }
 
+fn is_blank_line(bytes: &[u8], start: usize, end: usize) -> bool {
+    bytes[start..end]
+        .iter()
+        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+}
+
 fn container_prefix_end(bytes: &[u8], start: usize, end: usize) -> (usize, usize, Option<usize>) {
     let mut cursor = start;
     let mut blockquote_depth = 0;
@@ -450,6 +457,7 @@ fn html_comment_mask(bytes: &[u8], protected: &mut [bool]) {
     while cursor + 4 <= bytes.len() {
         if !protected[cursor]
             && bytes[cursor..].starts_with(b"<!--")
+            && !is_escaped(bytes, cursor)
             && (cursor..cursor + 4).all(|index| !protected[index])
         {
             let end = bytes[cursor + 4..]
@@ -570,6 +578,10 @@ mod tests {
                 true
             )
         );
+        assert_eq!(
+            omit_details("\\<!--\n<details><summary>valid</summary>hidden</details>\n-->"),
+            ("\\<!--\nvalid\n-->".to_owned(), true)
+        );
     }
 
     #[test]
@@ -586,6 +598,10 @@ mod tests {
                 "10. ```markdown\n    literal\n    ```\nvalid".to_owned(),
                 true
             )
+        );
+        assert_eq!(
+            omit_details("10. item\n\n    <details><summary>valid</summary>hidden</details>"),
+            ("10. item\n\n    valid".to_owned(), true)
         );
         let body = r"\`
 <details>
