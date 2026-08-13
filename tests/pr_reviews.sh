@@ -45,6 +45,7 @@ assert_runtime_error() {
 
 run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
+# shellcheck disable=SC2016
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
@@ -64,6 +65,7 @@ test "$(cat "$tmpdir/calls")" = \
 
 run_reviews include-details "$GH_LOUPE_BIN" pr reviews \
   42 --repo riii111/dotfiles --include-details --compact
+# shellcheck disable=SC2016
 assert_json '
   ([.data.reviews[].detailsOmitted] | all(. == false)) and
   (.data.reviews | map(select(.id == "review-z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
