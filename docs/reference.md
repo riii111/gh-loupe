@@ -53,6 +53,17 @@ gh-loupe pr reviews TARGET [--include-details]
 
 By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that review body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every review.
 
+## Pull request review threads
+
+```shell
+gh-loupe pr review-threads TARGET [--include-resolved]
+gh-loupe pr review-thread TARGET REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]
+```
+
+`review-threads` returns unresolved threads by default. `--include-resolved` includes resolved threads as well.
+
+`review-thread` accepts 1 through 20 thread IDs, returns them in input order under `data.reviewThreads`, and emits no partial JSON when any requested thread fails. Closed `<details>` blocks in comments are omitted by default; `--include-details` preserves them, and `--include-diff-hunk` adds `diffHunk` to every comment.
+
 ## Search
 
 Search commands are limited to one repository. `--repo OWNER/REPO` selects it explicitly; when omitted, the repository is inferred from the current directory and the command fails if inference is unavailable.
