@@ -46,6 +46,25 @@ assert_json '
 ' "$tmpdir/diagnostics.json" >/dev/null
 grep -F -- 'check-runs/100/annotations?per_page=100' "$tmpdir/calls" >/dev/null
 
+run_diagnostics normal --failed-only --failed-diagnostics --quiet --compact \
+  >"$tmpdir/failed-only.json" 2>"$tmpdir/failed-only.stderr"
+test ! -s "$tmpdir/failed-only.stderr"
+assert_json '
+  .data.summary == {"total":3,"passed":1,"pending":0,"failed":2} and
+  [.data.checks[].name] == ["actions-failure", "external-cancel"] and
+  [.data.checks[].bucket] == ["fail", "cancel"] and
+  ([.data.checks[] | has("annotations")] | all)
+' "$tmpdir/failed-only.json" >/dev/null
+
+run_diagnostics normal --failed-only --include-failed-logs --quiet --compact \
+  >"$tmpdir/failed-only-logs.json"
+assert_json '
+  .data.summary.failed == 2 and
+  (.data.checks | length) == 2 and
+  .data.checks[0].log != null and
+  .data.checks[1].log == null
+' "$tmpdir/failed-only-logs.json" >/dev/null
+
 GH_DIAGNOSTICS_CALLS="$tmpdir/collision-calls" run_diagnostics status-collision \
   --failed-diagnostics --quiet --compact >"$tmpdir/status-collision.json"
 assert_json '
@@ -230,12 +249,20 @@ assert_json '
   (.data.checks[0].annotations | length) == 3
 ' "$tmpdir/required-filter.json" >/dev/null
 
+run_diagnostics required-filter --required --failed-only --failed-diagnostics --quiet --compact \
+  >"$tmpdir/required-failed-only.json"
+assert_json '
+  .data.summary == {"total":1,"passed":0,"pending":0,"failed":1} and
+  (.data.checks | length) == 1 and
+  .data.checks[0].name == "required-failure"
+' "$tmpdir/required-failed-only.json" >/dev/null
+
 for mode in graphql-error missing-pr; do
   case "$mode" in
     graphql-error) expected_kind=githubCli ;;
     missing-pr) expected_kind=notFound ;;
   esac
-  if run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+  if run_diagnostics "$mode" --failed-diagnostics --failed-only --quiet --compact \
     >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
     status=0
   else
@@ -290,6 +317,14 @@ test ! -s "$tmpdir/no-failures.stderr"
 assert_json '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
   "$tmpdir/no-failures.json" >/dev/null
 
+run_diagnostics no-failures --failed-only --failed-diagnostics --quiet --compact \
+  >"$tmpdir/no-failures-failed-only.json" 2>"$tmpdir/no-failures-failed-only.stderr"
+test ! -s "$tmpdir/no-failures-failed-only.stderr"
+assert_json '
+  .data.summary == {"total":1,"passed":1,"pending":0,"failed":0} and
+  .data.checks == []
+' "$tmpdir/no-failures-failed-only.json" >/dev/null
+
 for mode in pagination-repeat pagination-cycle pagination-missing pagination-empty pagination-wrong-type head-oid-changed; do
   case "$mode" in
     pagination-repeat) expected_calls=2 ;;
@@ -337,7 +372,7 @@ test ! -s "$tmpdir/annotation-malformed.stdout"
 tail -n 1 "$tmpdir/annotation-malformed.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
 for mode in graphql-missing-completed graphql-wrong-completed; do
-  if run_diagnostics "$mode" --failed-diagnostics --quiet --compact \
+  if run_diagnostics "$mode" --failed-diagnostics --failed-only --quiet --compact \
     >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
     status=0
   else

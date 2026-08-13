@@ -34,6 +34,15 @@ Each list has this shape:
 
 No Issue or comment body is included in `relations`. A malformed or partial relation response, including a GraphQL error, fails the command without emitting partial JSON.
 
+## Pull request checks
+
+```shell
+gh-loupe pr checks TARGET
+gh-loupe pr checks TARGET --failed-only [--required] [--failed-diagnostics] [--include-failed-logs]
+```
+
+The default output has `data.checks` with the existing check metadata. `--failed-diagnostics` does not change that output to failed-only. With `--failed-only`, the output has `data.summary` and `data.checks`; `summary` contains `total`, `passed`, `pending`, and `failed` for all retrieved checks, while `checks` contains only `fail` and `cancel` buckets. `skipping` counts as `passed` and `cancel` counts as `failed`. `--required` applies to both the summary and returned checks. Zero failures is a successful result with `summary.failed` set to `0` and an empty `checks` array.
+
 ## Search
 
 Search commands are limited to one repository. `--repo OWNER/REPO` selects it explicitly; when omitted, the repository is inferred from the current directory and the command fails if inference is unavailable.

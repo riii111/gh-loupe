@@ -1,13 +1,14 @@
 use std::time::{Duration, Instant};
 
 use crate::error::{Exit, Result};
-use crate::model::{CheckDiagnosticsOptions, Target};
+use crate::model::{CheckDiagnosticsOptions, CheckSelection, Target};
 use crate::usecase;
 
 pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Args>
 where
     I: Iterator<Item = String>,
 {
+    let mut failed_only = false;
     let mut required = false;
     let mut failed_diagnostics = false;
     let mut include_failed_logs = false;
@@ -25,6 +26,7 @@ where
                 return Ok(true);
             }
             match option {
+                "--failed-only" => failed_only = true,
                 "--required" => required = true,
                 "--failed-diagnostics" => failed_diagnostics = true,
                 "--include-failed-logs" => {
@@ -64,6 +66,11 @@ where
         action: super::super::Action::Pr(super::Action::Checks {
             required,
             diagnostics: CheckDiagnosticsOptions {
+                selection: if failed_only {
+                    CheckSelection::FailedOnly
+                } else {
+                    CheckSelection::All
+                },
                 failed_diagnostics,
                 include_failed_logs,
                 timeout_seconds,
@@ -107,7 +114,7 @@ fn parse_timeout(program: &str, value: &str) -> Result<u64> {
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr checks [-h] [--repo REPO] [--required] [--failed-diagnostics] [--include-failed-logs] [--timeout SECONDS] [--quiet] [--compact] target"
+        "usage: {program} pr checks [-h] [--repo REPO] [--failed-only] [--required] [--failed-diagnostics] [--include-failed-logs] [--timeout SECONDS] [--quiet] [--compact] target"
     )
 }
 
@@ -117,7 +124,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n  --compact              emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --failed-only          return the check summary and failed checks only\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n  --compact              emit one-line JSON\n",
         usage(program)
     );
     super::super::write_stdout(&text)
@@ -139,6 +146,7 @@ mod tests {
             "gh-loupe",
             values(&[
                 "--repo=owner/repo",
+                "--failed-only",
                 "--required",
                 "--include-failed-logs",
                 "--timeout=12",
@@ -164,6 +172,7 @@ mod tests {
         };
 
         assert!(required);
+        assert!(matches!(diagnostics.selection, CheckSelection::FailedOnly));
         assert!(diagnostics.failed_diagnostics);
         assert!(diagnostics.include_failed_logs);
         assert_eq!(diagnostics.timeout_seconds, 12);

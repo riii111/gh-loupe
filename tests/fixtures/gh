@@ -262,6 +262,10 @@ if [ "$1 $2" = "pr checks" ]; then
       cat "$GH_FIXTURE_DATA/checks-nullable.json"
       exit 0
       ;;
+    failed)
+      cat "$GH_FIXTURE_DATA/checks-failed.json"
+      exit 0
+      ;;
     missing)
       printf '[{"name":"test","state":"SUCCESS","bucket":"pass","link":"https://example.test/test","workflow":"CI","startedAt":"2026-08-11T10:00:00Z"}]\n'
       exit 0
@@ -276,6 +280,10 @@ if [ "$1 $2" = "pr checks" ]; then
       ;;
     unknown)
       printf '[{"name":"test","state":"SUCCESS","bucket":"mystery","link":"https://example.test/test","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
+      exit 0
+      ;;
+    invalid-with-failure)
+      printf '[{"name":"failed","state":"FAILURE","bucket":"fail","link":"https://example.test/failed","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"},{"name":"unknown","state":"SUCCESS","bucket":"mystery","link":"https://example.test/unknown","workflow":"CI","startedAt":"2026-08-11T10:00:00Z","completedAt":"2026-08-11T10:05:00Z"}]\n'
       exit 0
       ;;
     object)
