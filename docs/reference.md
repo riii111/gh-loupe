@@ -44,7 +44,7 @@ gh-loupe search prs QUERY [--repo OWNER/REPO] [--limit N]
 gh-loupe pr for-commit SHA [--repo OWNER/REPO] [--limit N]
 ```
 
-`search issues` and `search prs` use the fixed GitHub Search issues REST GET endpoint. The command adds `repo:OWNER/REPO` and `is:issue` or `is:pr`; `QUERY` cannot add or override `repo:`, `org:`, `user:`, `is:issue`, or `is:pr`. No global, organization-wide, or user-wide search is exposed.
+`search issues` and `search prs` use the fixed GitHub Search issues REST GET endpoint. The command adds `repo:OWNER/REPO` and `is:issue` or `is:pr`; `QUERY` cannot add or override `repo:`, `org:`, `user:`, `is:issue`, `is:pr`, `type:issue`, or `type:pr`. No global, organization-wide, or user-wide search is exposed.
 
 `--limit` defaults to 20 and accepts 1 through 100. Search output has this shape:
 

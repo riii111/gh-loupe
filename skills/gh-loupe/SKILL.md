@@ -39,7 +39,7 @@ Required gh-loupe version: 0.10.0
 - Issueのタスク開始可否を判断する場合は`issue relations`を使う。`--limit`は各一覧に適用され、既定20、1〜100です。
 - `issue relations`の一覧はGitHub GraphQL connectionの返却順で、独自の並べ替えは行わない。`truncated`がtrueなら`totalCount`の全件は返っていない。
 - Issueのcommentは`issue comments`で全ページ取得し、作成日時、同日時ならIDの昇順で返す。
-- `search issues`と`search prs`は一つのrepositoryだけを対象にし、検索語の`repo:`, `org:`, `user:`, `is:issue`, `is:pr` qualifierを拒否する。`--limit`は既定20、1〜100。
+- `search issues`と`search prs`は一つのrepositoryだけを対象にし、検索語の`repo:`, `org:`, `user:`, `is:issue`, `is:pr`, `type:issue`, `type:pr` qualifierを拒否する。`--limit`は既定20、1〜100。
 - 検索結果は固定summaryだけを返し、`totalCount`、`truncated`、`incompleteResults`を確認する。Issue/PRの種別markerが期待と異なる応答は失敗として扱う。
 - `pr for-commit`は7〜40文字のhex commit SHAだけを受け付け、関連PRを配列で返す。空配列は正常な「関連PRなし」で、検索結果の`pull_request` markerは要求しない。
 - `review-threads`は既定で未解決だけを返す。過去の議論が必要な場合だけ`--include-resolved`を加える。

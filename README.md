@@ -79,7 +79,7 @@ Issueは概要、comment、関係を別々に取得します。
 固定schemaの詳細は[`docs/reference.md`](docs/reference.md)を参照してください。
 
 `search issues`と`search prs`は、cwdまたは`--repo OWNER/REPO`で指定した一つのrepositoryだけを検索します。
-検索語にrepositoryやIssue/PR種別を指定するqualifierは使えません。
+検索語にrepositoryやIssue/PR種別を指定するqualifier（`repo:`、`org:`、`user:`、`is:issue`、`is:pr`、`type:issue`、`type:pr`）は使えません。
 `--limit`は既定20、1〜100で、検索結果には`totalCount`、`truncated`、`incompleteResults`が含まれます。
 `pr for-commit`は7〜40文字のhex commit SHAを受け取り、関連PRを`pullRequests`配列で返します。
 

@@ -122,7 +122,7 @@ fn contains_scope_or_type_qualifier(query: &str) -> bool {
         token.starts_with("repo:")
             || token.starts_with("org:")
             || token.starts_with("user:")
-            || matches!(token, "is:issue" | "is:pr")
+            || matches!(token, "is:issue" | "is:pr" | "type:issue" | "type:pr")
     })
 }
 
@@ -220,6 +220,8 @@ mod tests {
             "user:other keyword",
             "is:issue keyword",
             "is:pr keyword",
+            "type:issue keyword",
+            "type:pr keyword",
             "-repo:owner/repo keyword",
         ] {
             assert!(contains_scope_or_type_qualifier(query));

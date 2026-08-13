@@ -338,7 +338,7 @@ run_cli search-incomplete GH_TEST_SEARCH_RESPONSE=incomplete -- \
 assert_json '.data.truncated == false and .data.incompleteResults == true and .data.issues == []' \
   "$tmpdir/search-incomplete.stdout" >/dev/null
 assert_argument_error_without_github search-scope-and-type \
-  search issues 'repo:other/repo is:pr keyword' --repo riii111/dotfiles
+  search issues 'repo:other/repo is:pr type:issue type:pr keyword' --repo riii111/dotfiles
 
 for response in wrapper missing-total wrong-total wrong-incomplete invalid-item missing-field wrong-field issue-marker missing-nullable wrong-nullable over-total; do
   assert_runtime_failure "search-$response" invalidResponse runtime \
