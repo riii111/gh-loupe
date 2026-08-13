@@ -20,7 +20,7 @@ struct Args {
 
 enum Action {
     Pr(pr::Action),
-    Issue,
+    Issue(issue::Action),
     Search(search::Action),
 }
 
@@ -34,7 +34,7 @@ pub fn run() -> Result<()> {
     } = parse_args()?;
     let result = match action {
         Action::Pr(action) => pr::execute(action, &target, repo, &program)?,
-        Action::Issue => issue::execute(&target, repo, &program)?,
+        Action::Issue(action) => issue::execute(action, &target, repo, &program)?,
         Action::Search(action) => search::execute(action, &target, repo, &program)?,
     };
     let output = if compact {
@@ -220,7 +220,7 @@ fn displayed_program_name(value: Option<&str>) -> &str {
 
 fn print_root_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue,search}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata and comments\n    search    search Issues or pull requests\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
+        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue,search}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata, comments, and relations\n    search    search Issues or pull requests\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
         root_usage(program)
     );
     write_stdout(&text)

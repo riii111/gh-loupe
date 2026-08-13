@@ -171,19 +171,19 @@ if [ "$1" = api ] && [[ "$*" == *'commits/'*'/pulls?per_page='* ]]; then
       printf '[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false}]\n'
       ;;
     missing-draft)
-      printf '[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","pull_request":{}}]\n'
+      printf '[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z"}]\n'
       ;;
     empty)
       printf '[]\n'
       ;;
     multiple)
-      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}}]\n'
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true}]\n'
       ;;
     success)
-      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}}]\n'
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true}]\n'
       ;;
     truncated)
-      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}},{"number":12,"title":"PR three","html_url":"https://github.com/riii111/dotfiles/pull/12","state":"open","updated_at":"2026-08-11T00:00:00Z","draft":false,"pull_request":{}}]\n'
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true},{"number":12,"title":"PR three","html_url":"https://github.com/riii111/dotfiles/pull/12","state":"open","updated_at":"2026-08-11T00:00:00Z","draft":false}]\n'
       ;;
     *)
       printf 'unknown commit response fixture: %s\n' "${GH_TEST_COMMIT_RESPONSE}" >&2
@@ -531,6 +531,59 @@ JSON
     cat <<'JSON'
 {"data":{"node":{"comments":{"nodes":[{"id":"comment-b2","createdAt":"2026-01-01T01:00:00Z","updatedAt":"2026-01-03T00:00:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 JSON
+    exit 0
+  fi
+  if jq -e '.query | contains("subIssues") and contains("blockedBy") and contains("blocking") and contains("parent")' <<<"$payload" >/dev/null; then
+    if [ "${GH_TEST_RELATIONS_GRAPHQL_ERROR:-}" = 1 ]; then
+      printf '{"errors":[{"type":"FORBIDDEN","message":"relations denied"}]}'
+      exit 0
+    fi
+    case "${GH_TEST_RELATIONS_RESPONSE:-success}" in
+      empty)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":null,"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      wrong-repo)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"other/repo","issue":{"number":42,"parent":null,"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      wrong-issue)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":41,"parent":null,"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      missing)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":null,"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      wrong-type)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":null,"subIssues":{"nodes":{},"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      wrong-state-reason)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":7,"title":"Parent","url":"https://github.com/riii111/dotfiles/issues/7","state":"OPEN","stateReason":42,"assignees":{"nodes":[]}},"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      wrong-assignees)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":7,"title":"Parent","url":"https://github.com/riii111/dotfiles/issues/7","state":"OPEN","stateReason":null,"assignees":{"nodes":[42]}},"subIssues":{"nodes":[],"totalCount":0},"blockedBy":{"nodes":[],"totalCount":0},"blocking":{"nodes":[],"totalCount":0}}}}}
+JSON
+        ;;
+      success)
+        cat <<'JSON'
+{"data":{"repository":{"nameWithOwner":"riii111/dotfiles","issue":{"number":42,"parent":{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":7,"title":"Parent","url":"https://github.com/riii111/dotfiles/issues/7","state":"OPEN","stateReason":null,"assignees":{"nodes":[{"login":"parent"}]}},"subIssues":{"nodes":[{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":43,"title":"Child A","url":"https://github.com/riii111/dotfiles/issues/43","state":"OPEN","stateReason":null,"assignees":{"nodes":[]}},{"repository":{"nameWithOwner":"other/repo"},"number":3,"title":"Child B","url":"https://github.com/other/repo/issues/3","state":"CLOSED","stateReason":"NOT_PLANNED","assignees":{"nodes":[{"login":"zoe"},{"login":"alice"}]}},{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":44,"title":"Child C","url":"https://github.com/riii111/dotfiles/issues/44","state":"OPEN","stateReason":null,"assignees":{"nodes":[]}}],"totalCount":3},"blockedBy":{"nodes":[{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":45,"title":"Blocker","url":"https://github.com/riii111/dotfiles/issues/45","state":"OPEN","stateReason":null,"assignees":{"nodes":[]} }],"totalCount":1},"blocking":{"nodes":[{"repository":{"nameWithOwner":"riii111/dotfiles"},"number":46,"title":"Blocked","url":"https://github.com/riii111/dotfiles/issues/46","state":"OPEN","stateReason":null,"assignees":{"nodes":[]} }],"totalCount":1}}}}}
+JSON
+        ;;
+      *)
+        printf 'unknown relations response fixture: %s\n' "${GH_TEST_RELATIONS_RESPONSE}" >&2
+        exit 90
+        ;;
+    esac
     exit 0
   fi
   if jq -e '.query | contains("reviewDecision")' <<<"$payload" >/dev/null; then

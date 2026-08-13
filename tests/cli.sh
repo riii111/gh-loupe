@@ -255,12 +255,18 @@ done
 
 run_cli issue-help -- issue --help
 test ! -s "$tmpdir/issue-help.stderr"
-grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe issue [-h] {overview,comments,relations} ...' \
   "$tmpdir/issue-help.stdout" >/dev/null
-grep -F 'target       Issue number or GitHub issue URL' \
-  "$tmpdir/issue-help.stdout" >/dev/null
-grep -F -- '--repo REPO' "$tmpdir/issue-help.stdout" >/dev/null
-grep -F -- '--compact' "$tmpdir/issue-help.stdout" >/dev/null
+for subcommand in overview comments relations; do
+  grep -E "^    $subcommand  +" "$tmpdir/issue-help.stdout" >/dev/null
+done
+
+run_cli issue-relations-help -- issue relations --help
+test ! -s "$tmpdir/issue-relations-help.stderr"
+grep -Fx 'usage: gh-loupe issue relations [-h] [--repo REPO] [--compact] [--limit N] target' \
+  "$tmpdir/issue-relations-help.stdout" >/dev/null
+grep -Fx '  --limit N    limit each relation list to 1 through 100 items (default: 20)' \
+  "$tmpdir/issue-relations-help.stdout" >/dev/null
 if grep -E '^    (threads|thread|full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
   exit 1
 fi
@@ -364,6 +370,11 @@ assert_json '.data.repository == "riii111/dotfiles" and .data.pullRequests == []
 grep -Fx 'api --method GET repos/riii111/dotfiles/commits/0123456/pulls?per_page=21' \
   "$commit_calls_file" >/dev/null
 
+run_cli for-commit-no-search-marker GH_TEST_COMMIT_RESPONSE=wrong-marker -- \
+  pr for-commit 0123456 --repo riii111/dotfiles
+assert_json '.data.pullRequests[0].number == 1 and .data.truncated == false' \
+  "$tmpdir/for-commit-no-search-marker.stdout" >/dev/null
+
 run_cli for-commit-multiple GH_TEST_COMMIT_RESPONSE=multiple -- \
   pr for-commit 0123456789abcdef0123456789abcdef01234567 --repo riii111/dotfiles
 assert_json '
@@ -382,7 +393,7 @@ assert_json '(.data.pullRequests | length) == 1 and .data.truncated == true' \
 run_cli for-commit-limit-boundaries -- pr for-commit 0123456 --repo riii111/dotfiles --limit 20
 run_cli for-commit-limit-hundred -- pr for-commit 0123456 --repo riii111/dotfiles --limit 100
 
-for response in wrapper invalid-item missing-field wrong-marker missing-draft; do
+for response in wrapper invalid-item missing-field missing-draft; do
   assert_runtime_failure "for-commit-$response" invalidResponse runtime \
     GH_TEST_COMMIT_RESPONSE="$response" -- pr for-commit 0123456 --repo riii111/dotfiles
 done
@@ -422,26 +433,30 @@ grep -F "gh-loupe pr: error: argument subcommand: invalid choice: '42'" "$tmpdir
 
 assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
-assert_argument_error issue-missing-target issue
-assert_argument_error issue-pr-only-option issue 42 --include-resolved
-grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+assert_argument_error issue-missing-subcommand issue
+assert_argument_error issue-pr-only-option issue overview 42 --include-resolved
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
   "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
-grep -F 'gh-loupe issue: error: unrecognized arguments: --include-resolved' \
+grep -F 'gh-loupe issue overview: error: unrecognized arguments: --include-resolved' \
   "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
 
-assert_argument_error issue-invalid-target issue 0
-grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+assert_argument_error issue-invalid-target issue overview 0
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
   "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
-grep -F 'gh-loupe issue: error: issue must be a positive number or GitHub issue URL' \
+grep -F 'gh-loupe issue overview: error: issue must be a positive number or GitHub issue URL' \
   "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
 
-assert_argument_error issue-invalid-repo issue 42 --repo invalid
-grep -F 'gh-loupe issue: error: --repo must use OWNER/REPO format' \
+assert_argument_error issue-invalid-repo issue overview 42 --repo invalid
+grep -F 'gh-loupe issue overview: error: --repo must use OWNER/REPO format' \
   "$tmpdir/issue-invalid-repo.argument.stderr" >/dev/null
 
-assert_argument_error issue-invalid-url-repo issue https://github.com//dotfiles/issues/42
-grep -F 'gh-loupe issue: error: issue URL must contain a valid OWNER/REPO' \
+assert_argument_error issue-invalid-url-repo issue overview https://github.com//dotfiles/issues/42
+grep -F 'gh-loupe issue overview: error: issue URL must contain a valid OWNER/REPO' \
   "$tmpdir/issue-invalid-url-repo.argument.stderr" >/dev/null
+
+assert_argument_error issue-bare-rejected issue 42
+grep -F "argument subcommand: invalid choice: '42'" \
+  "$tmpdir/issue-bare-rejected.argument.stderr" >/dev/null
 
 for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"
@@ -461,77 +476,64 @@ for removed_subcommand in threads thread; do
 done
 
 issue_calls_file="$tmpdir/issue.calls"
-run_cli issue-default "GH_TEST_CALLS_FILE=$issue_calls_file" -- issue 42
+run_cli issue-default "GH_TEST_CALLS_FILE=$issue_calls_file" -- issue overview 42
 test ! -s "$tmpdir/issue-default.stderr"
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
-  .data == {
-    "repository":"riii111/dotfiles",
-    "issue":{
-      "number":42,
-      "title":"Issue",
-      "url":"https://github.com/riii111/dotfiles/issues/42",
-      "state":"OPEN",
-      "stateReason":null,
-      "body":"body",
-      "author":"author",
-      "labels":["alpha","zeta"],
-      "assignees":["alice","zoe"],
-      "milestone":{"title":"v1","state":"OPEN","dueOn":null},
-      "createdAt":"2026-08-12T00:00:00Z",
-      "updatedAt":"2026-08-12T01:00:00Z",
-      "closedAt":null,
-      "subIssues":{"total":2,"completed":1},
-      "dependencies":{"blockedBy":2,"blocking":1}
-    },
-    "comments":[
-      {"id":"IC_a","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-1","author":null,"body":"first by id","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T02:00:00Z"},
-      {"id":"IC_b","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-2","author":"author","body":"second by id","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T01:00:00Z"},
-      {"id":"IC_z","url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-4","author":"later","body":"later","createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T01:00:00Z"}
-    ]
+  (.data | keys == ["issue","repository"]) and
+  .data.repository == "riii111/dotfiles" and
+  .data.issue == {
+    "number":42,
+    "title":"Issue",
+    "url":"https://github.com/riii111/dotfiles/issues/42",
+    "state":"OPEN",
+    "stateReason":null,
+    "body":"body",
+    "author":"author",
+    "labels":["alpha","zeta"],
+    "assignees":["alice","zoe"],
+    "milestone":{"title":"v1","state":"OPEN","dueOn":null},
+    "createdAt":"2026-08-12T00:00:00Z",
+    "updatedAt":"2026-08-12T01:00:00Z",
+    "closedAt":null,
+    "subIssues":{"total":2,"completed":1},
+    "dependencies":{"blockedBy":2,"blocking":1}
   } and
   (.data.issue | keys == ["assignees","author","body","closedAt","createdAt","dependencies","labels","milestone","number","state","stateReason","subIssues","title","updatedAt","url"]) and
-  (.data.comments | all(keys == ["author","body","createdAt","id","updatedAt","url"])) and
   ([.. | objects | keys[]] | any(. == "repository_url" or . == "labels_url" or . == "comments_url" or . == "reactions" or . == "pull_request" or . == "performed_via_github_app") | not) and
   ([.. | strings | select(test("^https://api\\.github\\.com/"))] | length == 0)
 ' "$tmpdir/issue-default.stdout" >/dev/null
 test "$(sed -n '1p' "$issue_calls_file")" = 'repo view --json nameWithOwner'
 grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_calls_file" >/dev/null
-grep -Fx \
-  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100' \
-  "$issue_calls_file" >/dev/null
-test "$(wc -l <"$issue_calls_file")" -eq 3
+test "$(wc -l <"$issue_calls_file")" -eq 2
 
 issue_timing_file="$tmpdir/issue.timing"
-run_cli issue-parallel \
+run_cli issue-overview-timing \
   "GH_TEST_ISSUE_TIMING_FILE=$issue_timing_file" \
-  GH_TEST_ISSUE_DELAY=0.2 GH_TEST_ISSUE_COMMENTS_DELAY=0.2 -- \
-  issue 42 --repo riii111/dotfiles
-test "$(wc -l <"$issue_timing_file")" -eq 4
+  GH_TEST_ISSUE_DELAY=0.2 -- \
+  issue overview 42 --repo riii111/dotfiles
+test "$(wc -l <"$issue_timing_file")" -eq 2
 test "$(sed -n '1p' "$issue_timing_file" | cut -d' ' -f2)" = start
-test "$(sed -n '2p' "$issue_timing_file" | cut -d' ' -f2)" = start
-test "$(sed -n '3p' "$issue_timing_file" | cut -d' ' -f2)" = end
-test "$(sed -n '4p' "$issue_timing_file" | cut -d' ' -f2)" = end
+test "$(sed -n '2p' "$issue_timing_file" | cut -d' ' -f2)" = end
 test "$(grep -c '^issue start$' "$issue_timing_file")" -eq 1
-test "$(grep -c '^issue-comments start$' "$issue_timing_file")" -eq 1
 
 assert_runtime_failure issue-error-precedence notFound issue \
-  GH_TEST_MISSING_ISSUE=1 GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- \
-  issue 42 --repo riii111/dotfiles
+  GH_TEST_MISSING_ISSUE=1 -- \
+  issue overview 42 --repo riii111/dotfiles
 
-run_cli issue-url-compact -- issue https://github.com/riii111/dotfiles/issues/42 --compact
+run_cli issue-url-compact -- issue overview https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-url-compact.stderr"
 test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
-assert_json '.schemaVersion == 1 and .data.issue.number == 42 and (.data.comments | length == 3)' \
+assert_json '.schemaVersion == 1 and .data.issue.number == 42 and (.data | has("comments") | not)' \
   "$tmpdir/issue-url-compact.stdout" >/dev/null
 
-run_cli issue-pretty-for-compact -- issue 42 --repo riii111/dotfiles
-run_cli issue-compact-for-pretty -- issue 42 --repo riii111/dotfiles --compact
+run_cli issue-pretty-for-compact -- issue overview 42 --repo riii111/dotfiles
+run_cli issue-compact-for-pretty -- issue overview 42 --repo riii111/dotfiles --compact
 test "$(jq -c 'del(.observedAt)' "$tmpdir/issue-pretty-for-compact.stdout")" = \
   "$(jq -c 'del(.observedAt)' "$tmpdir/issue-compact-for-pretty.stdout")"
 
-run_cli issue-nullable GH_TEST_ISSUE_RESPONSE=nullable -- issue 42 --repo riii111/dotfiles
+run_cli issue-nullable GH_TEST_ISSUE_RESPONSE=nullable -- issue overview 42 --repo riii111/dotfiles
 jq -e '
   .data.issue == {
     "number":42,
@@ -552,12 +554,12 @@ jq -e '
   }
 ' "$tmpdir/issue-nullable.stdout" >/dev/null
 
-run_cli issue-missing-summaries GH_TEST_ISSUE_RESPONSE=missing-summary -- issue 42 --repo riii111/dotfiles
+run_cli issue-missing-summaries GH_TEST_ISSUE_RESPONSE=missing-summary -- issue overview 42 --repo riii111/dotfiles
 jq -e '.data.issue.subIssues == null and .data.issue.dependencies == null' \
   "$tmpdir/issue-missing-summaries.stdout" >/dev/null
 
 if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" \
-  issue https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
+  issue overview https://github.com/riii111/dotfiles/issues/42 --repo other/repo \
   >"$tmpdir/issue-conflicting-repo.stdout" 2>"$tmpdir/issue-conflicting-repo.stderr"; then
   issue_status=0
 else
@@ -565,49 +567,49 @@ else
 fi
 test "$issue_status" -eq 2
 test ! -s "$tmpdir/issue-conflicting-repo.stdout"
-grep -Fx 'usage: gh-loupe issue [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
   "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
-grep -F 'gh-loupe issue: error: --repo conflicts with the issue URL' \
+grep -F 'gh-loupe issue overview: error: --repo conflicts with the issue URL' \
   "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
 
-run_cli issue-utf8 GH_TEST_UTF8=1 -- issue 42
+run_cli issue-utf8 GH_TEST_UTF8=1 -- issue overview 42
 assert_json '.data.issue.title == "日本語のIssue" and .data.issue.body == "ずんだ"' \
   "$tmpdir/issue-utf8.stdout" >/dev/null
 
 assert_runtime_failure issue-missing notFound issue \
-  GH_TEST_MISSING_ISSUE=1 -- issue 42
+  GH_TEST_MISSING_ISSUE=1 -- issue overview 42
 assert_runtime_failure issue-gh-failure githubCli issue \
-  GH_TEST_FAILURE=1 -- issue 42 --repo riii111/dotfiles
+  GH_TEST_FAILURE=1 -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-invalid-json invalidResponse issue \
-  GH_TEST_INVALID_JSON=1 -- issue 42 --repo riii111/dotfiles
+  GH_TEST_INVALID_JSON=1 -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-invalid-page invalidResponse issue \
-  GH_TEST_ISSUE_COMMENTS=invalid-page -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-invalid-item invalidResponse issue \
-  GH_TEST_ISSUE_COMMENTS=invalid-item -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-malformed invalidResponse issue \
-  GH_TEST_ISSUE_RESPONSE=malformed -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-pr-target invalidResponse issue \
-  GH_TEST_ISSUE_RESPONSE=pr-marker -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=pr-marker -- issue overview 42 --repo riii111/dotfiles
 grep -F 'use the pr commands' "$tmpdir/issue-pr-target.issue.stderr" >/dev/null
 assert_runtime_failure issue-null-pr-target invalidResponse issue \
-  GH_TEST_ISSUE_RESPONSE=null-pr-marker -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=null-pr-marker -- issue overview 42 --repo riii111/dotfiles
 grep -F 'use the pr commands' "$tmpdir/issue-null-pr-target.issue.stderr" >/dev/null
 assert_runtime_failure issue-comments-missing-field invalidResponse issue \
-  GH_TEST_ISSUE_COMMENTS=missing-field -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-comments-wrong-type invalidResponse issue \
-  GH_TEST_ISSUE_COMMENTS=wrong-type -- issue 42 --repo riii111/dotfiles
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-missing-repository-metadata invalidResponse issue \
-  GH_TEST_REPO_METADATA_MISSING=1 -- issue 42
+  GH_TEST_REPO_METADATA_MISSING=1 -- issue overview 42
 assert_overview_runtime_error overview-stdin-failure githubCli false \
   GH_TEST_STDIN_FAILURE=1 -- pr overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-nonzero-valid-json githubCli issue \
-  GH_TEST_NONZERO_VALID_JSON=1 -- issue 42 --repo riii111/dotfiles
+  GH_TEST_NONZERO_VALID_JSON=1 -- issue overview 42 --repo riii111/dotfiles
 assert_runtime_failure issue-rate-limit-resource githubCli issue \
-  GH_TEST_RATE_LIMIT_RESOURCE=1 -- issue 42 --repo riii111/dotfiles
-assert_runtime_failure issue-comments-page-failure githubCli issue \
-  GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- issue 42 --repo riii111/dotfiles
+  GH_TEST_RATE_LIMIT_RESOURCE=1 -- issue overview 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-page-failure invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=malformed -- issue overview 42 --repo riii111/dotfiles
 
-if env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue 42 --repo riii111/dotfiles \
+if env PATH="$tmpdir/missing-gh" "$tmpdir/rust/gh-loupe" issue overview 42 --repo riii111/dotfiles \
   >"$tmpdir/issue-spawn.stdout" 2>"$tmpdir/issue-spawn.stderr"; then
   issue_status=0
 else
@@ -623,6 +625,91 @@ assert_json '
   .error.retryable == false and
   .error.retryAfterSeconds == null
 ' "$tmpdir/issue-spawn.stderr" >/dev/null
+
+issue_comments_calls_file="$tmpdir/issue-comments.calls"
+run_cli issue-comments-default "GH_TEST_CALLS_FILE=$issue_comments_calls_file" -- \
+  issue comments https://github.com/riii111/dotfiles/issues/42 --compact
+test ! -s "$tmpdir/issue-comments-default.stderr"
+assert_json '
+  .schemaVersion == 1 and
+  (.data | keys == ["comments","repository"]) and
+  .data.repository == "riii111/dotfiles" and
+  [.data.comments[].id] == ["IC_a","IC_b","IC_z"] and
+  (.data.comments | all(keys == ["author","body","createdAt","id","updatedAt","url"])) and
+  ([.. | objects | keys[]] | any(. == "reactions" or . == "pull_request" or . == "comments_url") | not)
+' "$tmpdir/issue-comments-default.stdout" >/dev/null
+grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_comments_calls_file" >/dev/null
+grep -Fx 'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100' \
+  "$issue_comments_calls_file" >/dev/null
+test "$(wc -l <"$issue_comments_calls_file")" -eq 2
+
+issue_overview_calls_file="$tmpdir/issue-overview.calls"
+run_cli issue-overview-no-comments "GH_TEST_CALLS_FILE=$issue_overview_calls_file" -- \
+  issue overview 42 --repo riii111/dotfiles
+test "$(grep -c 'issues/42/comments' "$issue_overview_calls_file" || true)" -eq 0
+test "$(grep -c 'issues/42$' "$issue_overview_calls_file")" -eq 1
+
+assert_runtime_failure issue-comments-pr-marker invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=pr-marker -- issue comments 42 --repo riii111/dotfiles
+grep -F 'use the pr commands' "$tmpdir/issue-comments-pr-marker.issue.stderr" >/dev/null
+assert_runtime_failure issue-comments-null-pr-marker invalidResponse issue \
+  GH_TEST_ISSUE_RESPONSE=null-pr-marker -- issue comments 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-invalid-page invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=invalid-page -- issue comments 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-invalid-item invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=invalid-item -- issue comments 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-missing-field invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=missing-field -- issue comments 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-wrong-type invalidResponse issue \
+  GH_TEST_ISSUE_COMMENTS=wrong-type -- issue comments 42 --repo riii111/dotfiles
+assert_runtime_failure issue-comments-page-failure githubCli issue \
+  GH_TEST_ISSUE_COMMENTS_FAILURE=1 -- issue comments 42 --repo riii111/dotfiles
+
+assert_argument_error issue-relations-missing-target issue relations
+assert_argument_error issue-relations-limit-zero issue relations 42 --limit 0
+assert_argument_error issue-relations-limit-high issue relations 42 --limit 101
+assert_argument_error issue-relations-limit-equals issue relations 42 --limit=0
+assert_argument_error issue-relations-abbreviated-limit issue relations 42 --lim 10
+
+run_cli issue-relations-default "GH_TEST_CALLS_FILE=$tmpdir/relations.calls" -- \
+  issue relations 42 --repo riii111/dotfiles --compact
+test ! -s "$tmpdir/issue-relations-default.stderr"
+assert_json '
+  .schemaVersion == 1 and
+  (.data | keys == ["blockedBy","blocking","parent","repository","subIssues"]) and
+  .data.repository == "riii111/dotfiles" and
+  .data.parent.repository == "riii111/dotfiles" and
+  .data.parent.number == 7 and
+  [.data.subIssues.items[].number] == [43,3,44] and
+  .data.subIssues.totalCount == 3 and .data.subIssues.truncated == false and
+  .data.blockedBy.items[0].number == 45 and
+  .data.blocking.items[0].number == 46 and
+  ([.. | objects | keys[]] | any(. == "body" or . == "comments" or . == "reactions" or . == "repository_url") | not)
+' "$tmpdir/issue-relations-default.stdout" >/dev/null
+test "$(grep -c 'api graphql --input -' "$tmpdir/relations.calls")" -eq 1
+
+run_cli issue-relations-limit "GH_TEST_RELATIONS_RESPONSE=success" -- \
+  issue relations 42 --repo riii111/dotfiles --limit=2 --compact
+assert_json '.data.subIssues.totalCount == 3 and .data.subIssues.truncated and (.data.subIssues.items | length == 2)' \
+  "$tmpdir/issue-relations-limit.stdout" >/dev/null
+run_cli issue-relations-empty GH_TEST_RELATIONS_RESPONSE=empty -- \
+  issue relations 42 --repo riii111/dotfiles --limit 1
+assert_json '.data.parent == null and .data.subIssues == {"items":[],"totalCount":0,"truncated":false} and .data.blockedBy.items == [] and .data.blocking.items == []' \
+  "$tmpdir/issue-relations-empty.stdout" >/dev/null
+assert_runtime_failure issue-relations-wrong-repo invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=wrong-repo -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-wrong-issue invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=wrong-issue -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-missing invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=missing -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-wrong-type invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=wrong-type -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-wrong-state-reason invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=wrong-state-reason -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-wrong-assignees invalidResponse runtime \
+  GH_TEST_RELATIONS_RESPONSE=wrong-assignees -- issue relations 42 --repo riii111/dotfiles
+assert_runtime_failure issue-relations-graphql-error authorization runtime \
+  GH_TEST_RELATIONS_GRAPHQL_ERROR=1 -- issue relations 42 --repo riii111/dotfiles
 
 run_overview overview-default -- pr overview 42 --repo riii111/dotfiles
 assert_json '

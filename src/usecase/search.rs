@@ -10,7 +10,7 @@ pub fn issues(repository: &str, query: &str, limit: usize) -> Result<Value> {
 
 pub fn pull_requests(repository: &str, query: &str, limit: usize) -> Result<Value> {
     let response = rest::search_pull_requests(repository, query, limit)?;
-    project_search_response(response, repository, limit, ItemKind::PullRequest)
+    project_search_response(response, repository, limit, ItemKind::PullRequestSearch)
 }
 
 pub fn for_commit(repository: &str, sha: &str, limit: usize) -> Result<Value> {
@@ -20,7 +20,7 @@ pub fn for_commit(repository: &str, sha: &str, limit: usize) -> Result<Value> {
         .ok_or_else(|| Exit::invalid_response("GitHub returned an invalid commit PR response"))?;
     let pull_requests = items
         .iter()
-        .map(|item| project_item(item, ItemKind::PullRequest))
+        .map(|item| project_item(item, ItemKind::PullRequestCommit))
         .collect::<Result<Vec<_>>>()?;
     let truncated = pull_requests.len() > limit || (limit == 100 && pull_requests.len() == limit);
     let pull_requests = pull_requests.into_iter().take(limit).collect();
@@ -38,7 +38,8 @@ pub fn for_commit(repository: &str, sha: &str, limit: usize) -> Result<Value> {
 #[derive(Clone, Copy)]
 enum ItemKind {
     Issue,
-    PullRequest,
+    PullRequestSearch,
+    PullRequestCommit,
 }
 
 fn project_search_response(
@@ -70,7 +71,8 @@ fn project_search_response(
     let items = items.into_iter().take(limit).collect::<Vec<_>>();
     let item_field = match kind {
         ItemKind::Issue => "issues",
-        ItemKind::PullRequest => "pullRequests",
+        ItemKind::PullRequestSearch => "pullRequests",
+        ItemKind::PullRequestCommit => unreachable!("commit items are not search responses"),
     };
 
     Ok(Value::Object(Map::from_iter([
@@ -96,9 +98,9 @@ fn project_item(item: &Value, kind: ItemKind) -> Result<Value> {
         ItemKind::Issue if item.contains_key("pull_request") => Err(Exit::invalid_response(
             "GitHub search returned a pull request for issue search",
         )),
-        ItemKind::PullRequest if !item.contains_key("pull_request") => Err(Exit::invalid_response(
-            "GitHub search returned an issue for pull request search",
-        )),
+        ItemKind::PullRequestSearch if !item.contains_key("pull_request") => Err(
+            Exit::invalid_response("GitHub search returned an issue for pull request search"),
+        ),
         _ => {
             let mut result = Map::new();
             result.insert(
@@ -132,7 +134,7 @@ fn project_item(item: &Value, kind: ItemKind) -> Result<Value> {
                         nullable_string(item, "state_reason", "search item")?,
                     );
                 }
-                ItemKind::PullRequest => {
+                ItemKind::PullRequestSearch | ItemKind::PullRequestCommit => {
                     result.insert(
                         "isDraft".to_owned(),
                         Value::Bool(required_bool(item, "draft", "search item")?),
@@ -262,8 +264,9 @@ mod tests {
             "incomplete_results": true,
             "items": [pull_request(1)]
         });
-        let result = project_search_response(response, "owner/repo", 20, ItemKind::PullRequest)
-            .unwrap_or_else(|_| panic!("valid response"));
+        let result =
+            project_search_response(response, "owner/repo", 20, ItemKind::PullRequestSearch)
+                .unwrap_or_else(|_| panic!("valid response"));
         assert_eq!(result["pullRequests"][0]["isDraft"], false);
         assert_eq!(result["incompleteResults"], true);
         assert_eq!(result["pullRequests"][0].as_object().map(Map::len), Some(6));

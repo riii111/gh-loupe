@@ -58,7 +58,7 @@ where
         _ => Err(pr_argument_error(
             program,
             &format!(
-                "argument subcommand: invalid choice: '{subcommand}' (choose from 'overview', 'comments', 'reviews', 'review-threads', 'review-thread', 'checks')"
+                "argument subcommand: invalid choice: '{subcommand}' (choose from 'overview', 'comments', 'reviews', 'review-threads', 'review-thread', 'checks', 'for-commit')"
             ),
         )),
     }
