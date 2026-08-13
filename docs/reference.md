@@ -34,6 +34,16 @@ Each list has this shape:
 
 No Issue or comment body is included in `relations`. A malformed or partial relation response, including a GraphQL error, fails the command without emitting partial JSON.
 
+## Pull request reviews
+
+```shell
+gh-loupe pr reviews TARGET [--include-details]
+```
+
+`pr reviews` retrieves every REST review page and preserves chronological order by `submittedAt`, then by `id` for equal timestamps. Each review contains only `id`, `author`, `state`, `body`, `submittedAt`, `commitOid`, and `detailsOmitted`.
+
+By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that review body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every review.
+
 ## Search
 
 Search commands are limited to one repository. `--repo OWNER/REPO` selects it explicitly; when omitted, the repository is inferred from the current directory and the command fails if inference is unavailable.

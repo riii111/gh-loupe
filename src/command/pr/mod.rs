@@ -22,7 +22,9 @@ pub(super) enum Action {
     },
     Comments,
     Overview,
-    Reviews,
+    Reviews {
+        include_details: bool,
+    },
     ReviewThread {
         review_thread_ids: Vec<String>,
         include_diff_hunk: bool,
@@ -84,7 +86,7 @@ pub(super) fn execute(
         Action::ForCommit { .. } => for_commit::argument_error,
         Action::Comments => comments::argument_error,
         Action::Overview => overview::argument_error,
-        Action::Reviews => reviews::argument_error,
+        Action::Reviews { .. } => reviews::argument_error,
         Action::ReviewThread { .. } => review_thread::argument_error,
         Action::ReviewThreads { .. } => review_threads::argument_error,
     };
@@ -110,9 +112,9 @@ pub(super) fn execute(
             Value::Array(comments::execute(&target)?),
         )])),
         Action::Overview => overview::execute(&target)?,
-        Action::Reviews => Value::Object(Map::from_iter([(
+        Action::Reviews { include_details } => Value::Object(Map::from_iter([(
             "reviews".to_owned(),
-            Value::Array(reviews::execute(&target)?),
+            Value::Array(reviews::execute(&target, include_details)?),
         )])),
         Action::ReviewThread {
             review_thread_ids,
