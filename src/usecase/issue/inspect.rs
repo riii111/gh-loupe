@@ -1,43 +1,34 @@
-use std::thread;
-
 use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github::rest;
 use crate::model::Target;
 
-pub fn execute(target: &Target) -> Result<Value> {
-    let (issue_result, comments_result) = thread::scope(|scope| {
-        let issue = scope.spawn(|| rest::issue(target));
-        let comments = scope.spawn(|| rest::issue_comments(target));
-
-        (
-            issue.join().expect("issue worker must not panic"),
-            comments
-                .join()
-                .expect("issue comments worker must not panic"),
-        )
-    });
-
-    let issue = project_issue(&issue_result?)?;
-    let comments = project_comments(comments_result?)?;
-
+pub fn overview(target: &Target) -> Result<Value> {
+    let issue = project_issue(&rest::issue(target)?)?;
     let mut result = Map::new();
     result.insert(
         "repository".to_owned(),
         Value::String(target.repository.clone()),
     );
     result.insert("issue".to_owned(), issue);
+    Ok(Value::Object(result))
+}
+
+pub fn comments(target: &Target) -> Result<Value> {
+    reject_pull_request(&rest::issue(target)?)?;
+    let comments = project_comments(rest::issue_comments(target)?)?;
+    let mut result = Map::new();
+    result.insert(
+        "repository".to_owned(),
+        Value::String(target.repository.clone()),
+    );
     result.insert("comments".to_owned(), Value::Array(comments));
     Ok(Value::Object(result))
 }
 
 fn project_issue(issue: &Value) -> Result<Value> {
-    if issue.get("pull_request").is_some() {
-        return Err(Exit::invalid_response(
-            "GitHub target is a pull request; use the pr commands",
-        ));
-    }
+    reject_pull_request(issue)?;
 
     let mut result = Map::new();
     result.insert("number".to_owned(), required_u64(issue, "number")?);
@@ -77,6 +68,15 @@ fn project_issue(issue: &Value) -> Result<Value> {
     result.insert("subIssues".to_owned(), project_sub_issues(issue)?);
     result.insert("dependencies".to_owned(), project_dependencies(issue)?);
     Ok(Value::Object(result))
+}
+
+fn reject_pull_request(issue: &Value) -> Result<()> {
+    if issue.get("pull_request").is_some() {
+        return Err(Exit::invalid_response(
+            "GitHub target is a pull request; use the pr commands",
+        ));
+    }
+    Ok(())
 }
 
 fn project_comments(comments: Vec<Value>) -> Result<Vec<Value>> {
