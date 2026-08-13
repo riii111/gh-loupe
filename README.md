@@ -1,14 +1,36 @@
 # gh-loupe
 
-GitHubの定型的な読み取りを安全に行い、AI Agentに渡す情報量を抑えるread-only CLIです。
+GitHubの情報を必要な分だけ安全に取得し、AI Agentのトークン消費を抑えるread-only CLIです。
 
 <!-- Documentation boundary: README explains value and entry points; the Skill explains retrieval choices; command and schema details belong in docs/reference.md and --help. Do not duplicate every option when adding commands. -->
 
 ## Why
 
-`gh api`をそのままAgentに許可すると、読み取りだけに制限しにくく、承認を繰り返すと長時間のtaskが止まります。
-`gh-loupe`は開発で使うGitHubの読み取り操作を固定commandにまとめ、更新操作を提供しません。
-そのため、command ruleで`gh-loupe`を許可しつつ、Agentが必要な情報だけを段階的に取得できます。
+AI Agentに`gh`でGitHubを操作させる場合、`gh api`をそのまま許可すると、読み取りだけを許可するcommand ruleを書くのが難しくなります。
+任意の操作は許可したくない。
+しかし、実行のたびに承認を求めれば、頻繁に作業が止まります。
+
+Claude CodeのautoモードやCodexのApprove for meのように、AI Agent自身にcommandの許可を判断させる機能もあります。
+これらは便利ですが、Loop Engineeringで長時間taskを任せる場合、GitHub操作のたびにAIへ判断を委ねるより、実行できる操作をあらかじめ読み取りだけに絞る方が安全です。
+
+`gh-loupe`は、そのために、開発中によく使うGitHubの読み取り操作だけを提供します。
+command ruleで`gh-loupe`を許可すれば、個々の`gh api`について許可を判断する必要がありません。
+Agentを長時間動かしても、`gh-loupe`経由ではGitHubの更新操作を実行できません。
+承認待ちと許可判断にかかる時間も減らせます。
+
+## Token efficiency
+
+実際のPRを対象に、`gh-loupe`と`gh api`で取得したJSONを比較しました。
+`gh-loupe`では、AI Agentへ渡すトークン数を29〜98%削減できました。
+
+| Scenario | `gh api` | `gh-loupe` | Reduction |
+|---|---:|---:|---:|
+| PR overview | 5,032 | 188 | 96% |
+| Conversation comments | 11,099 | 6,581 | 41% |
+| Review submissions | 30,242 | 21,413 | 29% |
+| 未解決review threadの段階取得 | 55,134 | 982 | 98% |
+
+手書きで未解決threadへ絞ったGraphQLとの比較でも、段階取得のtoken数は53%少なくなりました。
 
 ## Install
 
@@ -50,16 +72,5 @@ gh-loupe pr checks --failed-only --failed-diagnostics --compact "$PR"
 | `issue comments` | IssueのConversation comment |
 | `issue relations` | Issueの親子・依存関係 |
 | `search issues` / `search prs` | repository内のIssue/PR検索 |
-
-## Token efficiency
-
-実際のPRで`gh api`と比較したtoken数の実測です。`gh-loupe`では29〜98%削減できました。
-
-| Scenario | `gh api` | `gh-loupe` | Reduction |
-|---|---:|---:|---:|
-| PR overview | 5,032 | 188 | 96% |
-| Conversation comments | 11,099 | 6,581 | 41% |
-| Review submissions | 30,242 | 21,413 | 29% |
-| 未解決review threadの段階取得 | 55,134 | 982 | 98% |
 
 詳細なcommand仕様とJSON schemaは[`docs/reference.md`](docs/reference.md)および各commandの`--help`を参照してください。
