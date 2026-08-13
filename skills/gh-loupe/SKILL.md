@@ -11,9 +11,9 @@ Agentは原則として`--compact`を指定する。
 
 ## Version
 
-Required gh-loupe version: 0.10.0
+Required gh-loupe version: 0.11.0
 
-最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.10.0`以上であることを確認する。
+最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.11.0`以上であることを確認する。
 
 ## Commands
 
