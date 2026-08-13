@@ -47,7 +47,10 @@ fn closed_stdout_does_not_panic_for_help_or_normal_output() {
     ));
     let path = std::env::join_paths(paths).expect("join PATH");
 
-    for arguments in [["--help"].as_slice(), ["issue", "42"].as_slice()] {
+    for arguments in [
+        ["--help"].as_slice(),
+        ["issue", "overview", "42"].as_slice(),
+    ] {
         let (reader, writer) = UnixStream::pair().expect("create stdout socket pair");
         drop(reader);
         let writer: OwnedFd = writer.into();

@@ -1,6 +1,6 @@
 ---
 name: gh-loupe
-description: GitHubのPR/Issue状態、CI、Conversation comments、review submissions、inline review threadsを`gh-loupe`で必要な分だけ読み取る。PR/Issue確認、レビュー準備、CI調査、未解決inline reviewの確認で使う。
+description: GitHubのPR/Issue状態、Conversation comments、関係Issue、CI、review submissions、inline review threadsを`gh-loupe`で必要な分だけ読み取る。PR/Issue確認、レビュー準備、CI調査、未解決inline reviewの確認で使う。
 ---
 
 # GitHub read
@@ -11,9 +11,9 @@ Agentは原則として`--compact`を指定する。
 
 ## Version
 
-Required gh-loupe version: 0.9.0
+Required gh-loupe version: 0.10.0
 
-最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.9.0`以上であることを確認する。
+最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.10.0`以上であることを確認する。
 
 ## Commands
 
@@ -25,11 +25,17 @@ Required gh-loupe version: 0.9.0
 | コード行に付いたinline reviewの一覧 | `gh-loupe pr review-threads TARGET` |
 | inline review thread一件以上の全comment | `gh-loupe pr review-thread TARGET REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]` |
 | 個別checkと失敗診断 | `gh-loupe pr checks TARGET` |
-| Issueとそのcomment | `gh-loupe issue TARGET` |
+| Issueの概要と件数要約 | `gh-loupe issue overview TARGET` |
+| IssueのConversation comment | `gh-loupe issue comments TARGET` |
+| Issueの親子・依存関係 | `gh-loupe issue relations TARGET [--limit N]` |
 
 ## Retrieval policy
 
 - 目的に対応するcommandから始め、常に`overview`を先に取得しない。
+- Issueの本文と件数要約だけが必要なら`issue overview`を使う。Conversation commentは取得されない。
+- Issueのタスク開始可否を判断する場合は`issue relations`を使う。`--limit`は各一覧に適用され、既定20、1〜100です。
+- `issue relations`の一覧はGitHub GraphQL connectionの返却順で、独自の並べ替えは行わない。`truncated`がtrueなら`totalCount`の全件は返っていない。
+- Issueのcommentは`issue comments`で全ページ取得し、作成日時、同日時ならIDの昇順で返す。
 - `review-threads`は既定で未解決だけを返す。過去の議論が必要な場合だけ`--include-resolved`を加える。
 - `review-thread`は一覧で得た1〜20件のIDへ使う。入力順の配列を返し、`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
 - 成功時の`review-thread`出力は、threadが1件でも`data.reviewThreads`配列を含む。
