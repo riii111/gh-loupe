@@ -43,6 +43,16 @@ gh-loupe pr checks TARGET --failed-only [--required] [--failed-diagnostics] [--i
 
 The default output has `data.checks` with the existing check metadata. `--failed-diagnostics` does not change that output to failed-only. With `--failed-only`, the output has `data.summary` and `data.checks`; `summary` contains `total`, `passed`, `pending`, and `failed` for all retrieved checks, while `checks` contains only `fail` and `cancel` buckets. `skipping` counts as `passed` and `cancel` counts as `failed`. `--required` applies to both the summary and returned checks. Zero failures is a successful result with `summary.failed` set to `0` and an empty `checks` array.
 
+## Pull request reviews
+
+```shell
+gh-loupe pr reviews TARGET [--include-details]
+```
+
+`pr reviews` retrieves every REST review page and preserves chronological order by `submittedAt`, then by `id` for equal timestamps. Each review contains only `id`, `author`, `state`, `body`, `submittedAt`, `commitOid`, and `detailsOmitted`.
+
+By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that review body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every review.
+
 ## Search
 
 Search commands are limited to one repository. `--repo OWNER/REPO` selects it explicitly; when omitted, the repository is inferred from the current directory and the command fails if inference is unavailable.

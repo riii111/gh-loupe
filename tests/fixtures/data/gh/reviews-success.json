@@ -6,7 +6,7 @@
         "login": "zoe"
       },
       "state": "COMMENTED",
-      "body": "comment",
+      "body": "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply",
       "submitted_at": "2026-01-02T00:00:00Z",
       "commit_id": "oid-z"
     },
@@ -16,7 +16,7 @@
         "login": "bob"
       },
       "state": "APPROVED",
-      "body": "approved",
+      "body": "before\n`<details>inline</details>`\n\n```markdown\n<details><summary>fenced</summary>fenced</details>\n```\n\n<!-- <details><summary>comment</summary>comment</details> -->\n<details open><summary>open</summary>shown</details>\n<details>\n<summary>incomplete</summary>\nnot closed\n<details data-x=\"unterminated\ninvalid",
       "submitted_at": "2026-01-01T00:00:00Z",
       "commit_id": "oid-b"
     },

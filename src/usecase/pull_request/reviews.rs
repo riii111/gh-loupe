@@ -4,14 +4,15 @@ use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github::rest;
+use crate::markdown;
 use crate::model::Target;
 
 use super::string_field;
 
-pub fn execute(target: &Target) -> Result<Vec<Value>> {
+pub fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
     let mut reviews = rest::pull_request_reviews(target)?
         .into_iter()
-        .map(project)
+        .map(|review| project(review, include_details))
         .collect::<Result<Vec<_>>>()?;
     reviews.sort_by(|left, right| {
         compare_submitted_at(left.submitted_at.as_deref(), right.submitted_at.as_deref())
@@ -26,7 +27,7 @@ struct Review {
     value: Value,
 }
 
-fn project(review: Value) -> Result<Review> {
+fn project(review: Value, include_details: bool) -> Result<Review> {
     let id = string_field(&review, "node_id")?.to_owned();
     let submitted_at = nullable_string_field(&review, "submitted_at")?;
     let mut value = Map::new();
@@ -36,10 +37,13 @@ fn project(review: Value) -> Result<Review> {
         "state".to_owned(),
         Value::String(string_field(&review, "state")?.to_owned()),
     );
-    value.insert(
-        "body".to_owned(),
-        Value::String(string_field(&review, "body")?.to_owned()),
-    );
+    let body = string_field(&review, "body")?;
+    let (body, details_omitted) = if include_details {
+        (body.to_owned(), false)
+    } else {
+        markdown::omit_details(body)
+    };
+    value.insert("body".to_owned(), Value::String(body));
     value.insert(
         "submittedAt".to_owned(),
         submitted_at.clone().map_or(Value::Null, Value::String),
@@ -48,6 +52,7 @@ fn project(review: Value) -> Result<Review> {
         "commitOid".to_owned(),
         nullable_string_field(&review, "commit_id")?.map_or(Value::Null, Value::String),
     );
+    value.insert("detailsOmitted".to_owned(), Value::Bool(details_omitted));
     Ok(Review {
         id,
         submitted_at,

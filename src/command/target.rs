@@ -51,6 +51,17 @@ pub(super) fn resolve_target(
     Ok(Target { repository, number })
 }
 
+pub(super) fn is_target_like(
+    target: &str,
+    resource: Resource,
+    validate_number: fn(&str) -> Option<String>,
+) -> bool {
+    if let Some((url_repo, number)) = parse_url(target, resource) {
+        return is_repo(url_repo) && validate_number(number).is_some();
+    }
+    validate_number(target).is_some()
+}
+
 pub(super) fn resolve_repo(
     repo: Option<String>,
     argument_error: fn(&str, &str) -> Exit,

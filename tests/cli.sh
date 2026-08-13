@@ -69,6 +69,41 @@ assert_argument_error_without_github() {
   test ! -e "$calls_file"
 }
 
+assert_target_guidance() {
+  local name="$1"
+  local resource="$2"
+  local target="$3"
+  local calls_file="$tmpdir/$name.calls"
+  local status
+  if env PATH="$tmpdir/bin:$PATH" GH_TEST_CALLS_FILE="$calls_file" \
+    "$tmpdir/rust/gh-loupe" "$resource" "$target" \
+    >"$tmpdir/$name.stdout" 2>"$tmpdir/$name.stderr"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  test "$status" -eq 2
+  test ! -s "$tmpdir/$name.stdout"
+  test ! -e "$calls_file"
+
+  local expected
+  case "$resource" in
+    pr)
+      expected="$(printf 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...\ngh-loupe pr: error: a subcommand is required\n\nTry:\n  gh-loupe pr overview %s\n  gh-loupe pr comments %s\n  gh-loupe pr reviews %s\n  gh-loupe pr review-threads %s\n  gh-loupe pr checks %s' \
+        "$target" "$target" "$target" "$target" "$target")"
+      ;;
+    issue)
+      expected="$(printf 'usage: gh-loupe issue [-h] {overview,comments,relations} ...\ngh-loupe issue: error: a subcommand is required\n\nTry:\n  gh-loupe issue overview %s\n  gh-loupe issue comments %s\n  gh-loupe issue relations %s' \
+        "$target" "$target" "$target")"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  test "$(cat "$tmpdir/$name.stderr")" = "$expected"
+}
+
 run_review_threads() {
   local name="$1"
   shift
@@ -419,17 +454,37 @@ fi
 grep -F 'review_thread_id    one to 20 GraphQL review thread node IDs' \
   "$tmpdir/review-thread-help.stdout" >/dev/null
 
-if GH_TEST_CALLS_FILE="$tmpdir/bare-pr.calls" PATH="$tmpdir/bin:$PATH" \
-  "$tmpdir/rust/gh-loupe" pr 42 >"$tmpdir/bare-pr.stdout" 2>"$tmpdir/bare-pr.stderr"; then
-  bare_status=0
-else
-  bare_status=$?
-fi
-test "$bare_status" -eq 2
-test ! -s "$tmpdir/bare-pr.stdout"
-test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...' "$tmpdir/bare-pr.stderr" >/dev/null
-grep -F "gh-loupe pr: error: argument subcommand: invalid choice: '42'" "$tmpdir/bare-pr.stderr" >/dev/null
+assert_target_guidance bare-pr-number pr 42
+assert_target_guidance bare-pr-url pr https://github.com/riii111/dotfiles/pull/42
+assert_target_guidance bare-issue-number issue 42
+assert_target_guidance bare-issue-url issue https://github.com/riii111/dotfiles/issues/42
+
+for invalid_target in typo 0 000 -1 \
+  https://git.example.com/riii111/dotfiles/pull/42 \
+  https://github.com/riii111/dotfiles/pull/42?tab=conversation \
+  https://github.com/riii111/dotfiles/pull/42#discussion \
+  https://github.com/riii111/dotfiles/pull/42/extra \
+  https://github.com/riii111/dotfiles/issues/42 \
+  https://github.com//dotfiles/pull/42; do
+  assert_argument_error_without_github "bare-pr-invalid-${#invalid_target}" pr "$invalid_target"
+  grep -F "argument subcommand: invalid choice: '$invalid_target'" \
+    "$tmpdir/bare-pr-invalid-${#invalid_target}.stderr" >/dev/null
+done
+assert_argument_error_without_github bare-pr-range-outside pr 2147483648
+grep -F "argument subcommand: invalid choice: '2147483648'" \
+  "$tmpdir/bare-pr-range-outside.stderr" >/dev/null
+
+for invalid_target in typo 0 000 -1 \
+  https://git.example.com/riii111/dotfiles/issues/42 \
+  https://github.com/riii111/dotfiles/issues/42?tab=conversation \
+  https://github.com/riii111/dotfiles/issues/42#discussion \
+  https://github.com/riii111/dotfiles/issues/42/extra \
+  https://github.com/riii111/dotfiles/pull/42 \
+  https://github.com//dotfiles/issues/42; do
+  assert_argument_error_without_github "bare-issue-invalid-${#invalid_target}" issue "$invalid_target"
+  grep -F "argument subcommand: invalid choice: '$invalid_target'" \
+    "$tmpdir/bare-issue-invalid-${#invalid_target}.stderr" >/dev/null
+done
 
 assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
@@ -453,10 +508,6 @@ grep -F 'gh-loupe issue overview: error: --repo must use OWNER/REPO format' \
 assert_argument_error issue-invalid-url-repo issue overview https://github.com//dotfiles/issues/42
 grep -F 'gh-loupe issue overview: error: issue URL must contain a valid OWNER/REPO' \
   "$tmpdir/issue-invalid-url-repo.argument.stderr" >/dev/null
-
-assert_argument_error issue-bare-rejected issue 42
-grep -F "argument subcommand: invalid choice: '42'" \
-  "$tmpdir/issue-bare-rejected.argument.stderr" >/dev/null
 
 for removed_subcommand in threads thread; do
   calls_file="$tmpdir/removed-$removed_subcommand.calls"

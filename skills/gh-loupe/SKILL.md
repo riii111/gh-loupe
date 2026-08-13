@@ -46,6 +46,7 @@ Required gh-loupe version: 0.10.0
 - `review-thread`は一覧で得た1〜20件のIDへ使う。入力順の配列を返し、`diffHunk`が必要な場合だけ`--include-diff-hunk`を加える。
 - 成功時の`review-thread`出力は、threadが1件でも`data.reviewThreads`配列を含む。
 - `review-thread`は既定で各commentの`<details>`折り畳み内容を省略する。判断に必要な場合だけ`--include-details`を加える。
+- `pr reviews`は既定で各review bodyの閉じた`<details>`折り畳み内容を省略し、reviewごとに`detailsOmitted`を返す。原文が必要な場合だけ`--include-details`を加える。`--include-details=true`のような値付き指定は使わない。
 - `review-thread`は全threadの取得が成功した場合だけ出力する。失敗時に部分成功を返さない。
 - 失敗checkは`--failed-diagnostics`で調べ、annotationだけで不足する場合だけ`--include-failed-logs`を加える。
 - `--failed-only`は全checkを検証・集計したうえで、`fail`または`cancel`のcheckだけを返す。`--failed-diagnostics`単独では全checkを返す。

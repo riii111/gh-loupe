@@ -45,22 +45,34 @@ assert_runtime_error() {
 
 run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
+# shellcheck disable=SC2016
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   .data.reviews == [
-    {"id":"review-unknown","author":"future","state":"FUTURE_STATE","body":"future","submittedAt":"2025-12-31T00:00:00Z","commitOid":"oid-future"},
-    {"id":"review-a","author":"alice","state":"CHANGES_REQUESTED","body":"change","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-a"},
-    {"id":"review-b","author":"bob","state":"APPROVED","body":"approved","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-b"},
-    {"id":"review-z","author":"zoe","state":"COMMENTED","body":"comment","submittedAt":"2026-01-02T00:00:00Z","commitOid":"oid-z"},
-    {"id":"review-null","author":null,"state":"DISMISSED","body":"","submittedAt":null,"commitOid":null},
-    {"id":"review-null-a","author":"pending","state":"PENDING","body":"pending","submittedAt":null,"commitOid":null}
+    {"id":"review-unknown","author":"future","state":"FUTURE_STATE","body":"future","submittedAt":"2025-12-31T00:00:00Z","commitOid":"oid-future","detailsOmitted":false},
+    {"id":"review-a","author":"alice","state":"CHANGES_REQUESTED","body":"change","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-a","detailsOmitted":false},
+    {"id":"review-b","author":"bob","state":"APPROVED","body":"before\n`<details>inline</details>`\n\n```markdown\n<details><summary>fenced</summary>fenced</details>\n```\n\n<!-- <details><summary>comment</summary>comment</details> -->\n<details open><summary>open</summary>shown</details>\n<details>\n<summary>incomplete</summary>\nnot closed\n<details data-x=\"unterminated\ninvalid","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-b","detailsOmitted":false},
+    {"id":"review-z","author":"zoe","state":"COMMENTED","body":"comment\n証拠\nreply","submittedAt":"2026-01-02T00:00:00Z","commitOid":"oid-z","detailsOmitted":true},
+    {"id":"review-null","author":null,"state":"DISMISSED","body":"","submittedAt":null,"commitOid":null,"detailsOmitted":false},
+    {"id":"review-null-a","author":"pending","state":"PENDING","body":"pending","submittedAt":null,"commitOid":null,"detailsOmitted":false}
   ] and
-  (.data.reviews | all(keys == ["author","body","commitOid","id","state","submittedAt"])) and
+  (.data.reviews | all(keys == ["author","body","commitOid","detailsOmitted","id","state","submittedAt"])) and
   ([.. | objects | keys[]] | any(. == "comments" or . == "diffHunk" or . == "path") | not)
 ' "$tmpdir/success.stdout" >/dev/null
 test "$(cat "$tmpdir/calls")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/pulls/42/reviews?per_page=100'
+
+run_reviews include-details "$GH_LOUPE_BIN" pr reviews \
+  42 --repo riii111/dotfiles --include-details --compact
+# shellcheck disable=SC2016
+assert_json '
+  ([.data.reviews[].detailsOmitted] | all(. == false)) and
+  (.data.reviews | map(select(.id == "review-z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
+  (.data.reviews | map(select(.id == "review-b"))[0].body) == "before\n`<details>inline</details>`\n\n```markdown\n<details><summary>fenced</summary>fenced</details>\n```\n\n<!-- <details><summary>comment</summary>comment</details> -->\n<details open><summary>open</summary>shown</details>\n<details>\n<summary>incomplete</summary>\nnot closed\n<details data-x=\"unterminated\ninvalid" and
+  (.data.reviews | all(keys == ["author","body","commitOid","detailsOmitted","id","state","submittedAt"]))
+' "$tmpdir/include-details.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/include-details.stdout")" -eq 1
 
 run_reviews compact "$GH_LOUPE_BIN" pr reviews \
   https://github.com/riii111/dotfiles/pull/42 --compact
@@ -80,6 +92,17 @@ test "$argument_status" -eq 2
 test ! -s "$tmpdir/argument.stdout"
 grep -F 'gh-loupe pr reviews: error:' "$tmpdir/argument.stderr" >/dev/null
 
+if env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles \
+  --include-details=true >"$tmpdir/include-details-value.stdout" 2>"$tmpdir/include-details-value.stderr"; then
+  include_details_value_status=0
+else
+  include_details_value_status=$?
+fi
+test "$include_details_value_status" -eq 2
+test ! -s "$tmpdir/include-details-value.stdout"
+grep -F 'gh-loupe pr reviews: error: unrecognized arguments: --include-details=true' \
+  "$tmpdir/include-details-value.stderr" >/dev/null
+
 assert_runtime_error invalid-response invalidResponse \
   GH_TEST_REVIEWS=invalid-page "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 assert_runtime_error invalid-field invalidResponse \
@@ -90,5 +113,7 @@ assert_runtime_error page-failure network \
   GH_TEST_REVIEWS=page-failure "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 
 run_reviews help "$GH_LOUPE_BIN" pr reviews --help
-grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--compact] target' \
+grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--include-details] [--compact] target' \
+  "$tmpdir/help.stdout" >/dev/null
+grep -F -- '--include-details   include folded <details> content (omitted by default)' \
   "$tmpdir/help.stdout" >/dev/null

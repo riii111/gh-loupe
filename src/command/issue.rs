@@ -26,6 +26,15 @@ where
             print_help(program)?;
             std::process::exit(0);
         }
+        target
+            if super::target::is_target_like(
+                target,
+                super::target::Resource::Issue,
+                super::target::positive_number,
+            ) =>
+        {
+            Err(missing_subcommand_error(program, target))
+        }
         _ => Err(issue_argument_error(
             program,
             &format!(
@@ -72,6 +81,16 @@ fn usage(program: &str) -> String {
 
 fn issue_argument_error(program: &str, message: &str) -> Exit {
     super::argument_error(program, &usage(program), "issue", message)
+}
+
+fn missing_subcommand_error(program: &str, target: &str) -> Exit {
+    Exit {
+        message: format!(
+            "{}\n{program} issue: error: a subcommand is required\n\nTry:\n  {program} issue overview {target}\n  {program} issue comments {target}\n  {program} issue relations {target}",
+            usage(program)
+        ),
+        code: 2,
+    }
 }
 
 fn print_help(program: &str) -> Result<()> {

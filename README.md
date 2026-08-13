@@ -46,7 +46,7 @@ cd gh-loupe
 ```bash
 gh-loupe pr overview https://github.com/OWNER/REPO/pull/123
 gh-loupe pr comments https://github.com/OWNER/REPO/pull/123
-gh-loupe pr reviews https://github.com/OWNER/REPO/pull/123
+gh-loupe pr reviews https://github.com/OWNER/REPO/pull/123 [--include-details]
 gh-loupe pr review-threads https://github.com/OWNER/REPO/pull/123
 gh-loupe pr review-thread https://github.com/OWNER/REPO/pull/123 REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]
 gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
@@ -89,6 +89,9 @@ resolved review threadは既定で除外します。
 
 `pr review-thread`は既定で`<details>`の折り畳み内容を省略します。
 内容が判断に必要な場合だけ`--include-details`を指定します。
+
+`pr reviews`も既定でreview bodyの閉じた`<details>`を省略し、各reviewに`detailsOmitted`を返します。
+原文が必要な場合だけ`--include-details`を指定します。
 
 `pr review-thread`は1回につき1〜20件のthread IDを受け取り、`data.reviewThreads`へ指定順で返します。
 成功時の`data.reviewThreads`は、threadが1件でも必ず配列です。

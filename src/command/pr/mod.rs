@@ -22,7 +22,9 @@ pub(super) enum Action {
     },
     Comments,
     Overview,
-    Reviews,
+    Reviews {
+        include_details: bool,
+    },
     ReviewThread {
         review_thread_ids: Vec<String>,
         include_diff_hunk: bool,
@@ -55,6 +57,15 @@ where
             print_help(program)?;
             std::process::exit(0);
         }
+        target
+            if super::target::is_target_like(
+                target,
+                super::target::Resource::Pr,
+                positive_pr_number,
+            ) =>
+        {
+            Err(missing_subcommand_error(program, target))
+        }
         _ => Err(pr_argument_error(
             program,
             &format!(
@@ -75,7 +86,7 @@ pub(super) fn execute(
         Action::ForCommit { .. } => for_commit::argument_error,
         Action::Comments => comments::argument_error,
         Action::Overview => overview::argument_error,
-        Action::Reviews => reviews::argument_error,
+        Action::Reviews { .. } => reviews::argument_error,
         Action::ReviewThread { .. } => review_thread::argument_error,
         Action::ReviewThreads { .. } => review_threads::argument_error,
     };
@@ -101,9 +112,9 @@ pub(super) fn execute(
             Value::Array(comments::execute(&target)?),
         )])),
         Action::Overview => overview::execute(&target)?,
-        Action::Reviews => Value::Object(Map::from_iter([(
+        Action::Reviews { include_details } => Value::Object(Map::from_iter([(
             "reviews".to_owned(),
-            Value::Array(reviews::execute(&target)?),
+            Value::Array(reviews::execute(&target, include_details)?),
         )])),
         Action::ReviewThread {
             review_thread_ids,
@@ -139,6 +150,16 @@ fn usage(program: &str) -> String {
 
 fn pr_argument_error(program: &str, message: &str) -> Exit {
     super::argument_error(program, &usage(program), "pr", message)
+}
+
+fn missing_subcommand_error(program: &str, target: &str) -> Exit {
+    Exit {
+        message: format!(
+            "{}\n{program} pr: error: a subcommand is required\n\nTry:\n  {program} pr overview {target}\n  {program} pr comments {target}\n  {program} pr reviews {target}\n  {program} pr review-threads {target}\n  {program} pr checks {target}",
+            usage(program)
+        ),
+        code: 2,
+    }
 }
 
 fn print_help(program: &str) -> Result<()> {
