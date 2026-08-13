@@ -263,8 +263,10 @@ done
 
 run_cli issue-relations-help -- issue relations --help
 test ! -s "$tmpdir/issue-relations-help.stderr"
-grep -F 'usage: gh-loupe issue relations ' "$tmpdir/issue-relations-help.stdout" >/dev/null
-grep -F -- '--limit N' "$tmpdir/issue-relations-help.stdout" >/dev/null
+grep -Fx 'usage: gh-loupe issue relations [-h] [--repo REPO] [--compact] [--limit N] target' \
+  "$tmpdir/issue-relations-help.stdout" >/dev/null
+grep -Fx '  --limit N    limit each relation list to 1 through 100 items (default: 20)' \
+  "$tmpdir/issue-relations-help.stdout" >/dev/null
 if grep -E '^    (threads|thread|full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
   exit 1
 fi

@@ -60,12 +60,7 @@ where
 
 fn print_help(program: &str) -> Result<()> {
     super::super::write_stdout(&format!(
-        "{}\n  --limit N    limit each relation list to 1 through 100 items (default: 20)\n\nThe relation order is GitHub's connection order.\n",
-        super::target_help(
-            program,
-            "relations",
-            "Relations do not include Issue bodies or comments."
-        )
+        "usage: {program} issue relations [-h] [--repo REPO] [--compact] [--limit N] target\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n  --limit N    limit each relation list to 1 through 100 items (default: 20)\n\nRelations do not include Issue bodies or comments.\nThe relation order is GitHub's connection order.\n"
     ))
 }
 
