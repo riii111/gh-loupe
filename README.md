@@ -50,6 +50,7 @@ gh-loupe pr reviews https://github.com/OWNER/REPO/pull/123 [--include-details]
 gh-loupe pr review-threads https://github.com/OWNER/REPO/pull/123
 gh-loupe pr review-thread https://github.com/OWNER/REPO/pull/123 REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]
 gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
+gh-loupe pr checks https://github.com/OWNER/REPO/pull/123 --failed-only --failed-diagnostics
 gh-loupe issue overview https://github.com/OWNER/REPO/issues/123
 gh-loupe issue comments https://github.com/OWNER/REPO/issues/123
 gh-loupe issue relations https://github.com/OWNER/REPO/issues/123 --limit 20
@@ -65,7 +66,7 @@ gh-loupe pr for-commit SHA --repo OWNER/REPO --limit 20
 | `pr reviews` | Approve、Request changesなどのreview submission |
 | `pr review-threads` | 未解決inline reviewの一覧 |
 | `pr review-thread` | inline review thread一件以上の全コメント |
-| `pr checks` | 個別checkと失敗診断 |
+| `pr checks` | 個別checkと失敗診断。`--failed-only`では全体集計と`fail`/`cancel`だけを返す |
 | `issue overview` | Issue本文、状態、sub-issue・依存関係の件数要約 |
 | `issue comments` | IssueのConversation comment |
 | `issue relations` | 親Issue、sub-issue、blockedBy、blockingの一覧 |

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "pending",
+    "state": "IN_PROGRESS",
+    "bucket": "pending",
+    "link": "https://example.test/pending",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T10:00:00Z",
+    "completedAt": ""
+  },
+  {
+    "name": "passing",
+    "state": "SUCCESS",
+    "bucket": "pass",
+    "link": "https://example.test/passing",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T08:00:00Z",
+    "completedAt": "2026-08-11T08:05:00Z"
+  },
+  {
+    "name": "cancelled",
+    "state": "CANCELLED",
+    "bucket": "cancel",
+    "link": "https://example.test/cancelled",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T09:00:00Z",
+    "completedAt": "2026-08-11T09:05:00Z"
+  },
+  {
+    "name": "skipped",
+    "state": "SKIPPED",
+    "bucket": "skipping",
+    "link": "https://example.test/skipped",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T07:00:00Z",
+    "completedAt": "2026-08-11T07:05:00Z"
+  },
+  {
+    "name": "failed",
+    "state": "FAILURE",
+    "bucket": "fail",
+    "link": "https://example.test/failed",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T11:00:00Z",
+    "completedAt": "2026-08-11T11:05:00Z"
+  }
+]

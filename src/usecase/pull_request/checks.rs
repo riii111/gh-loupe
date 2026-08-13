@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github;
-use crate::model::{CheckDiagnosticsOptions, Target};
+use crate::model::{CheckDiagnosticsOptions, CheckSelection, Target};
 
 use self::diagnostics::{collect_diagnostics, diagnostic_deadline};
 use self::validation::{validate_check, validate_check_contexts};
@@ -168,7 +168,7 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         ),
         code: 2,
     })?;
-    let checks = if diagnostics_requested {
+    let mut checks = if diagnostics_requested {
         let (head_oid, contexts) =
             github::graphql::pull_request_check_contexts(target, deadline, &timeout_message)?;
         let mut checks = validate_check_contexts(&contexts, required)?;
@@ -195,12 +195,40 @@ pub fn execute(target: &Target, required: bool, options: CheckDiagnosticsOptions
         checks
     };
 
+    let failed_only = matches!(options.selection, CheckSelection::FailedOnly);
+    let summary = failed_only.then(|| summarize_checks(&checks));
+    if failed_only {
+        checks.retain(|check| matches!(check.bucket, CheckBucket::Fail | CheckBucket::Cancel));
+    }
+
     let mut result = Map::new();
+    if let Some(summary) = summary {
+        result.insert("summary".to_owned(), summary);
+    }
     result.insert(
         "checks".to_owned(),
         Value::Array(checks.into_iter().map(Check::into_value).collect()),
     );
     Ok(Value::Object(result))
+}
+
+fn summarize_checks(checks: &[Check]) -> Value {
+    let mut passed = 0;
+    let mut pending = 0;
+    let mut failed = 0;
+    for check in checks {
+        match check.bucket {
+            CheckBucket::Pass | CheckBucket::Skipping => passed += 1,
+            CheckBucket::Pending => pending += 1,
+            CheckBucket::Fail | CheckBucket::Cancel => failed += 1,
+        }
+    }
+    Value::Object(Map::from_iter([
+        ("total".to_owned(), Value::from(checks.len())),
+        ("passed".to_owned(), Value::from(passed)),
+        ("pending".to_owned(), Value::from(pending)),
+        ("failed".to_owned(), Value::from(failed)),
+    ]))
 }
 
 #[cfg(test)]
@@ -226,6 +254,42 @@ mod tests {
         assert_eq!(bucket("STALE"), CheckBucket::Pending);
         assert_eq!(bucket("STARTUP_FAILURE"), CheckBucket::Pending);
         assert!(CheckBucket::from_state("UNKNOWN").is_err());
+    }
+
+    #[test]
+    fn failed_only_summary_counts_skipping_as_passed_and_cancel_as_failed() {
+        let checks = vec![
+            check_with_bucket(CheckBucket::Pass),
+            check_with_bucket(CheckBucket::Skipping),
+            check_with_bucket(CheckBucket::Pending),
+            check_with_bucket(CheckBucket::Fail),
+            check_with_bucket(CheckBucket::Cancel),
+        ];
+
+        assert_eq!(
+            summarize_checks(&checks),
+            serde_json::json!({
+                "total": 5,
+                "passed": 2,
+                "pending": 1,
+                "failed": 2,
+            })
+        );
+    }
+
+    fn check_with_bucket(bucket: CheckBucket) -> Check {
+        Check {
+            name: "check".to_owned(),
+            state: "SUCCESS".to_owned(),
+            bucket,
+            link: None,
+            workflow: None,
+            started_at: None,
+            completed_at: None,
+            check_run_id: None,
+            annotations: None,
+            log: None,
+        }
     }
 
     fn bucket(state: &str) -> CheckBucket {

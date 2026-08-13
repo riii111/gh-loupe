@@ -5,8 +5,15 @@ pub struct Target {
 
 #[derive(Clone, Copy)]
 pub struct CheckDiagnosticsOptions {
+    pub selection: CheckSelection,
     pub failed_diagnostics: bool,
     pub include_failed_logs: bool,
     pub timeout_seconds: u64,
     pub quiet: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum CheckSelection {
+    All,
+    FailedOnly,
 }

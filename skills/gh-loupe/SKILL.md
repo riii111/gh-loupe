@@ -24,7 +24,7 @@ Required gh-loupe version: 0.10.0
 | ApproveやRequest changesなどのreview submission | `gh-loupe pr reviews TARGET` |
 | コード行に付いたinline reviewの一覧 | `gh-loupe pr review-threads TARGET` |
 | inline review thread一件以上の全comment | `gh-loupe pr review-thread TARGET REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]` |
-| 個別checkと失敗診断 | `gh-loupe pr checks TARGET` |
+| 個別checkと失敗診断 | `gh-loupe pr checks TARGET [--failed-only]` |
 | Issueの概要と件数要約 | `gh-loupe issue overview TARGET` |
 | IssueのConversation comment | `gh-loupe issue comments TARGET` |
 | Issueの親子・依存関係 | `gh-loupe issue relations TARGET [--limit N]` |
@@ -49,6 +49,8 @@ Required gh-loupe version: 0.10.0
 - `pr reviews`は既定で各review bodyの閉じた`<details>`折り畳み内容を省略し、reviewごとに`detailsOmitted`を返す。原文が必要な場合だけ`--include-details`を加える。`--include-details=true`のような値付き指定は使わない。
 - `review-thread`は全threadの取得が成功した場合だけ出力する。失敗時に部分成功を返さない。
 - 失敗checkは`--failed-diagnostics`で調べ、annotationだけで不足する場合だけ`--include-failed-logs`を加える。
+- `--failed-only`は全checkを検証・集計したうえで、`fail`または`cancel`のcheckだけを返す。`--failed-diagnostics`単独では全checkを返す。
+- `--failed-only`の`data.summary`は`total`、`passed`、`pending`、`failed`を含み、`skipping`はpassed、`cancel`はfailedに集計する。`--required`を併用した場合はrequired checkだけを集計する。
 - merge可否の判断では`overview`のrequired check集計と`checks.all`を両方確認する。
 
 ## Boundaries

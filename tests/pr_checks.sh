@@ -36,6 +36,40 @@ test "$(wc -l <"$tmpdir/compact.json" | tr -d ' ')" -eq 1
 grep -Fx -- '--required' "$tmpdir/args" >/dev/null
 assert_json '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
 
+run_checks failed --failed-only --compact >"$tmpdir/failed-only.json"
+assert_json '
+  .data.summary == {"total":5,"passed":2,"pending":1,"failed":2} and
+  [.data.checks[].name] == ["cancelled", "failed"] and
+  [.data.checks[].bucket] == ["cancel", "fail"]
+' "$tmpdir/failed-only.json" >/dev/null
+
+GH_TEST_ARGS_FILE="$tmpdir/failed-only-required-args" \
+  run_checks failed --failed-only --required --compact >"$tmpdir/failed-only-required.json"
+if grep -Fx -- '--failed-only' "$tmpdir/failed-only-required-args" >/dev/null; then
+  exit 1
+fi
+grep -Fx -- '--required' "$tmpdir/failed-only-required-args" >/dev/null
+assert_json '.data.summary.failed == 2 and (.data.checks | length) == 2' \
+  "$tmpdir/failed-only-required.json" >/dev/null
+
+run_checks success --failed-only --compact >"$tmpdir/failed-only-empty.json"
+assert_json '.data.summary == {"total":3,"passed":2,"pending":1,"failed":0} and .data.checks == []' \
+  "$tmpdir/failed-only-empty.json" >/dev/null
+
+if run_checks invalid-with-failure --failed-only \
+  >"$tmpdir/failed-only-invalid.stdout" 2>"$tmpdir/failed-only-invalid.stderr"; then
+  status=0
+else
+  status=$?
+fi
+test "$status" -eq 1
+test ! -s "$tmpdir/failed-only-invalid.stdout"
+assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' \
+  "$tmpdir/failed-only-invalid.stderr" >/dev/null
+
+"$GH_LOUPE_BIN" pr checks --help >"$tmpdir/help.stdout"
+grep -F -- '--failed-only' "$tmpdir/help.stdout" >/dev/null
+
 if (
   export GH_TEST_CHECKS_STATUS=unexpected
   run_checks success \
@@ -90,7 +124,7 @@ for mode in missing wrong-type wrong-metadata-type unknown object; do
     "$tmpdir/$mode.stderr" >/dev/null
 done
 
-if run_checks authentication >"$tmpdir/auth.stdout" 2>"$tmpdir/auth.stderr"; then
+if run_checks authentication --failed-only >"$tmpdir/auth.stdout" 2>"$tmpdir/auth.stderr"; then
   status=0
 else
   status=$?
