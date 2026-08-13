@@ -240,7 +240,7 @@ run_comments() {
 
 run_cli root-help -- --help
 test ! -s "$tmpdir/root-help.stderr"
-grep -F 'usage: gh-loupe [-h] [--version] {pr,issue} ...' "$tmpdir/root-help.stdout" >/dev/null
+grep -F 'usage: gh-loupe [-h] [--version] {pr,issue,search} ...' "$tmpdir/root-help.stdout" >/dev/null
 
 run_cli root-version -- --version
 test ! -s "$tmpdir/root-version.stderr"
@@ -248,8 +248,8 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-loupe $GH_LOUPE_PACKAGE_VERSIO
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview comments reviews review-threads review-thread checks; do
+grep -F 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview comments reviews review-threads review-thread checks for-commit; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
 
@@ -264,6 +264,130 @@ grep -F -- '--compact' "$tmpdir/issue-help.stdout" >/dev/null
 if grep -E '^    (threads|thread|full|legacy)  +' "$tmpdir/pr-help.stdout" >/dev/null; then
   exit 1
 fi
+
+run_cli search-help -- search --help
+test ! -s "$tmpdir/search-help.stderr"
+grep -F 'usage: gh-loupe search [-h] {issues,prs} ...' "$tmpdir/search-help.stdout" >/dev/null
+for subcommand in issues prs; do
+  grep -E "^    $subcommand  +" "$tmpdir/search-help.stdout" >/dev/null
+done
+run_cli search-issues-help -- search issues --help
+grep -F 'usage: gh-loupe search issues [-h] [--repo REPO] [--compact] [--limit N] query' \
+  "$tmpdir/search-issues-help.stdout" >/dev/null
+grep -F -- '--limit N' "$tmpdir/search-issues-help.stdout" >/dev/null
+run_cli for-commit-help -- pr for-commit --help
+grep -F 'usage: gh-loupe pr for-commit [-h] [--repo REPO] [--compact] [--limit N] sha' \
+  "$tmpdir/for-commit-help.stdout" >/dev/null
+
+assert_argument_error_without_github search-missing-query search issues
+assert_argument_error_without_github search-empty-query search issues '' --repo riii111/dotfiles
+assert_argument_error_without_github search-invalid-repo search issues keyword --repo https://github.com/riii111/dotfiles
+assert_argument_error_without_github search-limit-zero search issues keyword --limit 0 --repo riii111/dotfiles
+assert_argument_error_without_github search-limit-high search issues keyword --limit 101 --repo riii111/dotfiles
+assert_argument_error_without_github search-limit-equals-zero search issues keyword --limit=0 --repo riii111/dotfiles
+assert_argument_error_without_github search-abbreviated-limit search issues keyword --lim 10 --repo riii111/dotfiles
+
+search_calls_file="$tmpdir/search.calls"
+run_cli search-issues-default "GH_TEST_CALLS_FILE=$search_calls_file" -- \
+  search issues keyword --repo riii111/dotfiles --compact
+assert_json '
+  .schemaVersion == 1 and
+  (.data | keys == ["incompleteResults","issues","repository","totalCount","truncated"]) and
+  .data.repository == "riii111/dotfiles" and
+  [.data.issues[].number] == [1,2] and
+  [.data.issues[].state] == ["OPEN","CLOSED"] and
+  (.data.issues | all(keys == ["number","state","stateReason","title","updatedAt","url"])) and
+  ([.. | objects | keys[]] | any(. == "body" or . == "labels" or . == "comments" or . == "pull_request") | not) and
+  .data.totalCount == 2 and .data.truncated == false and .data.incompleteResults == false
+' "$tmpdir/search-issues-default.stdout" >/dev/null
+grep -Fx 'api --method GET search/issues?q=keyword%20repo%3Ariii111%2Fdotfiles%20is%3Aissue&per_page=21' \
+  "$search_calls_file" >/dev/null
+
+run_cli search-prs-default -- search prs keyword --repo riii111/dotfiles
+assert_json '
+  .data.repository == "riii111/dotfiles" and
+  [.data.pullRequests[].number] == [10,11] and
+  [.data.pullRequests[].isDraft] == [false,true] and
+  (.data.pullRequests | all(keys == ["isDraft","number","state","title","updatedAt","url"])) and
+  .data.totalCount == 2 and .data.truncated == false and .data.incompleteResults == false
+' "$tmpdir/search-prs-default.stdout" >/dev/null
+
+run_cli search-inferred-repo "GH_TEST_CALLS_FILE=$tmpdir/search-inferred.calls" -- \
+  search issues keyword --compact
+test "$(sed -n '1p' "$tmpdir/search-inferred.calls")" = 'repo view --json nameWithOwner'
+grep -F 'repo%3Ariii111%2Fdotfiles%20is%3Aissue' "$tmpdir/search-inferred.calls" >/dev/null
+
+run_cli search-limit-one -- search issues keyword --repo riii111/dotfiles --limit 1
+assert_json '(.data.issues | length) == 1 and .data.truncated == true' \
+  "$tmpdir/search-limit-one.stdout" >/dev/null
+run_cli search-limit-boundaries -- search issues keyword --repo riii111/dotfiles --limit 20
+run_cli search-limit-hundred -- search issues keyword --repo riii111/dotfiles --limit 100
+
+run_cli search-truncated GH_TEST_SEARCH_RESPONSE=truncated -- \
+  search issues keyword --repo riii111/dotfiles --limit 2
+assert_json '.data.totalCount == 3 and .data.truncated == true and (.data.issues | length == 2)' \
+  "$tmpdir/search-truncated.stdout" >/dev/null
+run_cli search-incomplete GH_TEST_SEARCH_RESPONSE=incomplete -- \
+  search issues keyword --repo riii111/dotfiles
+assert_json '.data.truncated == false and .data.incompleteResults == true and .data.issues == []' \
+  "$tmpdir/search-incomplete.stdout" >/dev/null
+assert_argument_error_without_github search-scope-and-type \
+  search issues 'repo:other/repo is:pr keyword' --repo riii111/dotfiles
+
+for response in wrapper missing-total wrong-total wrong-incomplete invalid-item missing-field wrong-field issue-marker missing-nullable wrong-nullable over-total; do
+  assert_runtime_failure "search-$response" invalidResponse runtime \
+    GH_TEST_SEARCH_RESPONSE="$response" -- search issues keyword --repo riii111/dotfiles
+done
+assert_runtime_failure search-pr-marker invalidResponse runtime \
+  GH_TEST_SEARCH_RESPONSE=pr-marker -- search prs keyword --repo riii111/dotfiles
+assert_runtime_failure search-missing-draft invalidResponse runtime \
+  GH_TEST_SEARCH_RESPONSE=missing-draft -- search prs keyword --repo riii111/dotfiles
+assert_runtime_failure search-wrong-draft invalidResponse runtime \
+  GH_TEST_SEARCH_RESPONSE=wrong-draft -- search prs keyword --repo riii111/dotfiles
+assert_runtime_failure search-invalid-json invalidResponse runtime \
+  GH_TEST_SEARCH_RESPONSE=invalid-json -- search issues keyword --repo riii111/dotfiles
+assert_runtime_failure search-failure githubCli runtime \
+  GH_TEST_SEARCH_RESPONSE=failure -- search issues keyword --repo riii111/dotfiles
+
+assert_argument_error_without_github for-commit-missing-sha pr for-commit
+assert_argument_error_without_github for-commit-short-sha pr for-commit 012345 --repo riii111/dotfiles
+assert_argument_error_without_github for-commit-ref pr for-commit main --repo riii111/dotfiles
+assert_argument_error_without_github for-commit-non-hex pr for-commit 012345g --repo riii111/dotfiles
+assert_argument_error_without_github for-commit-limit-zero pr for-commit 0123456 --limit 0 --repo riii111/dotfiles
+assert_argument_error_without_github for-commit-limit-high pr for-commit 0123456 --limit 101 --repo riii111/dotfiles
+
+commit_calls_file="$tmpdir/commit.calls"
+run_cli for-commit-empty "GH_TEST_CALLS_FILE=$commit_calls_file" GH_TEST_COMMIT_RESPONSE=empty -- \
+  pr for-commit 0123456 --repo riii111/dotfiles --compact
+assert_json '.data.repository == "riii111/dotfiles" and .data.pullRequests == [] and .data.truncated == false' \
+  "$tmpdir/for-commit-empty.stdout" >/dev/null
+grep -Fx 'api --method GET repos/riii111/dotfiles/commits/0123456/pulls?per_page=21' \
+  "$commit_calls_file" >/dev/null
+
+run_cli for-commit-multiple GH_TEST_COMMIT_RESPONSE=multiple -- \
+  pr for-commit 0123456789abcdef0123456789abcdef01234567 --repo riii111/dotfiles
+assert_json '
+  [.data.pullRequests[].number] == [10,11] and
+  [.data.pullRequests[].isDraft] == [false,true] and
+  (.data.pullRequests | all(keys == ["isDraft","number","state","title","updatedAt","url"])) and
+  .data.truncated == false
+' "$tmpdir/for-commit-multiple.stdout" >/dev/null
+run_cli for-commit-truncated GH_TEST_COMMIT_RESPONSE=truncated -- \
+  pr for-commit 0123456 --repo riii111/dotfiles --limit 2
+assert_json '.data.truncated == true and (.data.pullRequests | length == 2)' \
+  "$tmpdir/for-commit-truncated.stdout" >/dev/null
+run_cli for-commit-limit-one -- pr for-commit 0123456 --repo riii111/dotfiles --limit 1
+assert_json '(.data.pullRequests | length) == 1 and .data.truncated == true' \
+  "$tmpdir/for-commit-limit-one.stdout" >/dev/null
+run_cli for-commit-limit-boundaries -- pr for-commit 0123456 --repo riii111/dotfiles --limit 20
+run_cli for-commit-limit-hundred -- pr for-commit 0123456 --repo riii111/dotfiles --limit 100
+
+for response in wrapper invalid-item missing-field wrong-marker missing-draft; do
+  assert_runtime_failure "for-commit-$response" invalidResponse runtime \
+    GH_TEST_COMMIT_RESPONSE="$response" -- pr for-commit 0123456 --repo riii111/dotfiles
+done
+assert_runtime_failure for-commit-failure githubCli runtime \
+  GH_TEST_COMMIT_RESPONSE=failure -- pr for-commit 0123456 --repo riii111/dotfiles
 
 run_cli review-threads-help -- pr review-threads --help
 test ! -s "$tmpdir/review-threads-help.stderr"
@@ -293,7 +417,7 @@ fi
 test "$bare_status" -eq 2
 test ! -s "$tmpdir/bare-pr.stdout"
 test ! -e "$tmpdir/bare-pr.calls"
-grep -Fx 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks} ...' "$tmpdir/bare-pr.stderr" >/dev/null
+grep -Fx 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...' "$tmpdir/bare-pr.stderr" >/dev/null
 grep -F "gh-loupe pr: error: argument subcommand: invalid choice: '42'" "$tmpdir/bare-pr.stderr" >/dev/null
 
 assert_argument_error root-missing-resource

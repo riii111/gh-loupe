@@ -1,5 +1,6 @@
 mod checks;
 mod comments;
+mod for_commit;
 mod overview;
 mod review_thread;
 mod review_threads;
@@ -15,6 +16,9 @@ pub(super) enum Action {
     Checks {
         required: bool,
         diagnostics: CheckDiagnosticsOptions,
+    },
+    ForCommit {
+        limit: usize,
     },
     Comments,
     Overview,
@@ -41,6 +45,7 @@ where
     };
     match subcommand.as_str() {
         "checks" => checks::parse_args(program, remaining),
+        "for-commit" => for_commit::parse_args(program, remaining),
         "comments" => comments::parse_args(program, remaining),
         "overview" => overview::parse_args(program, remaining),
         "reviews" => reviews::parse_args(program, remaining),
@@ -67,12 +72,16 @@ pub(super) fn execute(
 ) -> Result<serde_json::Value> {
     let argument_error: fn(&str, &str) -> Exit = match &action {
         Action::Checks { .. } => checks::argument_error,
+        Action::ForCommit { .. } => for_commit::argument_error,
         Action::Comments => comments::argument_error,
         Action::Overview => overview::argument_error,
         Action::Reviews => reviews::argument_error,
         Action::ReviewThread { .. } => review_thread::argument_error,
         Action::ReviewThreads { .. } => review_threads::argument_error,
     };
+    if let Action::ForCommit { limit } = &action {
+        return for_commit::execute(target_value, repo, *limit, program);
+    }
     let target = super::target::resolve_target(
         target_value,
         repo,
@@ -86,6 +95,7 @@ pub(super) fn execute(
             required,
             diagnostics,
         } => checks::execute(&target, required, diagnostics)?,
+        Action::ForCommit { .. } => unreachable!("for-commit returns before resolving a PR target"),
         Action::Comments => Value::Object(Map::from_iter([(
             "comments".to_owned(),
             Value::Array(comments::execute(&target)?),
@@ -123,7 +133,7 @@ fn positive_pr_number(value: &str) -> Option<String> {
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr [-h] {{overview,comments,reviews,review-threads,review-thread,checks}} ..."
+        "usage: {program} pr [-h] {{overview,comments,reviews,review-threads,review-thread,checks,for-commit}} ..."
     )
 }
 
@@ -133,7 +143,7 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read review threads\n    checks          read individual checks and optional diagnostics\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks,for-commit}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read review threads\n    checks          read individual checks and optional diagnostics\n    for-commit      find pull requests associated with a commit SHA\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
     super::write_stdout(&text)

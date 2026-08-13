@@ -72,6 +72,52 @@ pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
     )
 }
 
+pub fn search_issues(repository: &str, query: &str, limit: usize) -> Result<Value> {
+    search(repository, query, "issue", limit)
+}
+
+pub fn search_pull_requests(repository: &str, query: &str, limit: usize) -> Result<Value> {
+    search(repository, query, "pr", limit)
+}
+
+pub fn pull_requests_for_commit(repository: &str, sha: &str, limit: usize) -> Result<Value> {
+    let per_page = limit.saturating_add(1).min(100);
+    let endpoint = format!("repos/{repository}/commits/{sha}/pulls?per_page={per_page}");
+    cli::json_runtime(["api", "--method", "GET", &endpoint], None)
+}
+
+fn search(repository: &str, query: &str, kind: &str, limit: usize) -> Result<Value> {
+    let per_page = limit.saturating_add(1).min(100);
+    let query = format!("{query} repo:{repository} is:{kind}");
+    let endpoint = format!(
+        "search/issues?q={}&per_page={per_page}",
+        percent_encode(&query)
+    );
+    cli::json_runtime(["api", "--method", "GET", &endpoint], None)
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(hex_digit(byte >> 4));
+            encoded.push(hex_digit(byte & 0x0f));
+        }
+    }
+    encoded
+}
+
+fn hex_digit(value: u8) -> char {
+    match value {
+        0..=9 => (b'0' + value) as char,
+        10..=15 => (b'A' + value - 10) as char,
+        _ => unreachable!("hex digit is four bits"),
+    }
+}
+
 fn flatten_pages(
     pages: Value,
     response_message: &str,

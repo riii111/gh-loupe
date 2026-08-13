@@ -79,6 +79,120 @@ if [ "$1 $2" = "repo view" ]; then
   exit 0
 fi
 
+if [ "$1" = api ] && [[ "$*" == *'search/issues?q='* ]]; then
+  case "${GH_TEST_SEARCH_RESPONSE:-success}" in
+    failure)
+      printf 'search failed\n' >&2
+      exit 27
+      ;;
+    invalid-json)
+      printf 'not json\n'
+      exit 0
+      ;;
+    wrapper)
+      printf '[]\n'
+      ;;
+    missing-total)
+      printf '{"incomplete_results":false,"items":[]}\n'
+      ;;
+    wrong-total)
+      printf '{"total_count":"1","incomplete_results":false,"items":[]}\n'
+      ;;
+    wrong-incomplete)
+      printf '{"total_count":0,"incomplete_results":0,"items":[]}\n'
+      ;;
+    invalid-item)
+      printf '{"total_count":1,"incomplete_results":false,"items":[42]}\n'
+      ;;
+    missing-field)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1}]}\n'
+      ;;
+    wrong-field)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":"1","title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z"}]}\n'
+      ;;
+    issue-marker)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z","pull_request":null}]}\n'
+      ;;
+    pr-marker)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z","draft":false}]}\n'
+      ;;
+    missing-nullable)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","updated_at":"2026-08-13T00:00:00Z"}]}\n'
+      ;;
+    wrong-nullable)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"Issue","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","state_reason":false,"updated_at":"2026-08-13T00:00:00Z"}]}\n'
+      ;;
+    missing-draft)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","pull_request":{}}]}\n'
+      ;;
+    wrong-draft)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":null,"pull_request":{}}]}\n'
+      ;;
+    over-total)
+      printf '{"total_count":1,"incomplete_results":false,"items":[{"number":1},{"number":2}]}\n'
+      ;;
+    incomplete)
+      printf '{"total_count":1,"incomplete_results":true,"items":[] }\n'
+      ;;
+    truncated)
+      printf '{"total_count":3,"incomplete_results":false,"items":[{"number":1,"title":"One","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z"},{"number":2,"title":"Two","html_url":"https://github.com/riii111/dotfiles/issues/2","state":"closed","state_reason":"completed","updated_at":"2026-08-13T00:00:00Z"},{"number":3,"title":"Three","html_url":"https://github.com/riii111/dotfiles/issues/3","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z"}]}\n'
+      ;;
+    success)
+      if [[ "$*" == *'%20is%3Apr&per_page='* ]]; then
+        printf '{"total_count":2,"incomplete_results":false,"items":[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{"url":"https://api.github.com/repos/riii111/dotfiles/pulls/10"}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{"url":"https://api.github.com/repos/riii111/dotfiles/pulls/11"}}]}\n'
+      else
+        printf '{"total_count":2,"incomplete_results":false,"items":[{"number":1,"title":"Issue one","html_url":"https://github.com/riii111/dotfiles/issues/1","state":"open","state_reason":null,"updated_at":"2026-08-13T00:00:00Z"},{"number":2,"title":"Issue two","html_url":"https://github.com/riii111/dotfiles/issues/2","state":"closed","state_reason":"completed","updated_at":"2026-08-12T00:00:00Z"}]}\n'
+      fi
+      ;;
+    *)
+      printf 'unknown search response fixture: %s\n' "${GH_TEST_SEARCH_RESPONSE}" >&2
+      exit 90
+      ;;
+  esac
+  exit 0
+fi
+
+if [ "$1" = api ] && [[ "$*" == *'commits/'*'/pulls?per_page='* ]]; then
+  case "${GH_TEST_COMMIT_RESPONSE:-success}" in
+    failure)
+      printf 'commit lookup failed\n' >&2
+      exit 28
+      ;;
+    wrapper)
+      printf '{"pullRequests":[]}\n'
+      ;;
+    invalid-item)
+      printf '[42]\n'
+      ;;
+    missing-field)
+      printf '[{"number":1}]\n'
+      ;;
+    wrong-marker)
+      printf '[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false}]\n'
+      ;;
+    missing-draft)
+      printf '[{"number":1,"title":"PR","html_url":"https://github.com/riii111/dotfiles/pull/1","state":"open","updated_at":"2026-08-13T00:00:00Z","pull_request":{}}]\n'
+      ;;
+    empty)
+      printf '[]\n'
+      ;;
+    multiple)
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}}]\n'
+      ;;
+    success)
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}}]\n'
+      ;;
+    truncated)
+      printf '[{"number":10,"title":"PR one","html_url":"https://github.com/riii111/dotfiles/pull/10","state":"open","updated_at":"2026-08-13T00:00:00Z","draft":false,"pull_request":{}},{"number":11,"title":"PR two","html_url":"https://github.com/riii111/dotfiles/pull/11","state":"closed","updated_at":"2026-08-12T00:00:00Z","draft":true,"pull_request":{}},{"number":12,"title":"PR three","html_url":"https://github.com/riii111/dotfiles/pull/12","state":"open","updated_at":"2026-08-11T00:00:00Z","draft":false,"pull_request":{}}]\n'
+      ;;
+    *)
+      printf 'unknown commit response fixture: %s\n' "${GH_TEST_COMMIT_RESPONSE}" >&2
+      exit 90
+      ;;
+  esac
+  exit 0
+fi
+
 if [ "$1 $2" = "pr checks" ]; then
   if [[ " $* " == *" --json bucket "* ]]; then
     if [ "$*" = "pr checks 42 --repo riii111/dotfiles --required --json bucket" ]; then
