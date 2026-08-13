@@ -53,6 +53,9 @@ gh-loupe pr checks https://github.com/OWNER/REPO/pull/123
 gh-loupe issue overview https://github.com/OWNER/REPO/issues/123
 gh-loupe issue comments https://github.com/OWNER/REPO/issues/123
 gh-loupe issue relations https://github.com/OWNER/REPO/issues/123 --limit 20
+gh-loupe search issues "keyword" --repo OWNER/REPO --limit 20
+gh-loupe search prs "keyword" --repo OWNER/REPO --limit 20
+gh-loupe pr for-commit SHA --repo OWNER/REPO --limit 20
 ```
 
 | Command | 取得内容 |
@@ -66,11 +69,19 @@ gh-loupe issue relations https://github.com/OWNER/REPO/issues/123 --limit 20
 | `issue overview` | Issue本文、状態、sub-issue・依存関係の件数要約 |
 | `issue comments` | IssueのConversation comment |
 | `issue relations` | 親Issue、sub-issue、blockedBy、blockingの一覧 |
+| `search issues` | 一つのrepositoryに限定したIssue検索 |
+| `search prs` | 一つのrepositoryに限定したPR検索 |
+| `pr for-commit` | commit SHAに関連するPRの逆引き |
 
 Issueは概要、comment、関係を別々に取得します。
 `issue relations`の`--limit`は各一覧の最大件数で、既定20、1〜100です。
 一覧はGitHubの返却順を維持し、`totalCount`と`truncated`で打ち切りを判別できます。
 固定schemaの詳細は[`docs/reference.md`](docs/reference.md)を参照してください。
+
+`search issues`と`search prs`は、cwdまたは`--repo OWNER/REPO`で指定した一つのrepositoryだけを検索します。
+検索語にrepositoryやIssue/PR種別を指定するqualifier（`repo:`、`org:`、`user:`、`is:issue`、`is:pr`、`type:issue`、`type:pr`）は使えません。
+`--limit`は既定20、1〜100で、検索結果には`totalCount`、`truncated`、`incompleteResults`が含まれます。
+`pr for-commit`は7〜40文字のhex commit SHAを受け取り、関連PRを`pullRequests`配列で返します。
 
 resolved review threadは既定で除外します。
 必要な場合だけ`--include-resolved`を指定します。

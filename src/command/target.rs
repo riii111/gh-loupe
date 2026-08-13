@@ -51,7 +51,7 @@ pub(super) fn resolve_target(
     Ok(Target { repository, number })
 }
 
-fn resolve_repo(
+pub(super) fn resolve_repo(
     repo: Option<String>,
     argument_error: fn(&str, &str) -> Exit,
     program: &str,

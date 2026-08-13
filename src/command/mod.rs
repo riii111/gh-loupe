@@ -1,5 +1,6 @@
 mod issue;
 mod pr;
+mod search;
 mod target;
 
 use std::env;
@@ -20,6 +21,7 @@ struct Args {
 enum Action {
     Pr(pr::Action),
     Issue(issue::Action),
+    Search(search::Action),
 }
 
 pub fn run() -> Result<()> {
@@ -33,6 +35,7 @@ pub fn run() -> Result<()> {
     let result = match action {
         Action::Pr(action) => pr::execute(action, &target, repo, &program)?,
         Action::Issue(action) => issue::execute(action, &target, repo, &program)?,
+        Action::Search(action) => search::execute(action, &target, repo, &program)?,
     };
     let output = if compact {
         serde_json::to_string(&result)
@@ -74,15 +77,18 @@ fn parse_args() -> Result<Args> {
     match resource_value.as_str() {
         "pr" => pr::parse(&program, values),
         "issue" => issue::parse(&program, values),
+        "search" => search::parse(&program, values),
         other => Err(root_argument_error(
             &program,
-            &format!("argument resource: invalid choice: '{other}' (choose from 'pr', 'issue')"),
+            &format!(
+                "argument resource: invalid choice: '{other}' (choose from 'pr', 'issue', 'search')"
+            ),
         )),
     }
 }
 
 fn root_usage(program: &str) -> String {
-    format!("usage: {program} [-h] [--version] {{pr,issue}} ...")
+    format!("usage: {program} [-h] [--version] {{pr,issue,search}} ...")
 }
 
 fn root_argument_error(program: &str, message: &str) -> Exit {
@@ -214,7 +220,7 @@ fn displayed_program_name(value: Option<&str>) -> &str {
 
 fn print_root_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata, comments, and relations\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
+        "{}\n\nRead fixed GitHub PR and Issue metadata without mutations.\n\npositional arguments:\n  {{pr,issue,search}}\n    pr        read pull request metadata and review data\n    issue     read issue metadata, comments, and relations\n    search    search Issues or pull requests\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version and exit\n",
         root_usage(program)
     );
     write_stdout(&text)
