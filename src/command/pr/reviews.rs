@@ -8,18 +8,42 @@ where
     I: Iterator<Item = String>,
 {
     let mut include_details = false;
+    let mut limit = None;
     let parsed = super::super::parse_subcommand_args(
         program,
         values,
         1,
         argument_error,
         print_help,
-        |option, _| match option {
+        |option, values| match option {
             "--include-details" => {
                 include_details = true;
                 Ok(true)
             }
-            _ => Ok(false),
+            option => {
+                if let Some(value) = super::super::exact_long_option_value(option, "--limit") {
+                    limit = Some(parse_limit(value, program)?);
+                    return Ok(true);
+                }
+                if option == "--limit" {
+                    let Some(value) = values.next() else {
+                        return Err(argument_error(
+                            program,
+                            "argument --limit: expected one argument",
+                        ));
+                    };
+                    if value != "-" && value.starts_with('-') {
+                        return Err(argument_error(
+                            program,
+                            "argument --limit: expected one argument",
+                        ));
+                    }
+                    limit = Some(parse_limit(&value, program)?);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
         },
     )?;
     let mut positionals = parsed.positionals.into_iter();
@@ -31,7 +55,10 @@ where
     };
     super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
-        action: super::super::Action::Pr(super::Action::Reviews { include_details }),
+        action: super::super::Action::Pr(super::Action::Reviews {
+            include_details,
+            limit,
+        }),
         target,
         repo: parsed.repo,
         compact: parsed.compact,
@@ -39,12 +66,36 @@ where
     })
 }
 
-pub(super) fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
-    usecase::pull_request::reviews::execute(target, include_details)
+pub(super) fn execute(
+    target: &Target,
+    include_details: bool,
+    limit: Option<usize>,
+) -> Result<serde_json::Value> {
+    let result = usecase::pull_request::reviews::execute(target, include_details, limit)?;
+    let mut data = serde_json::Map::new();
+    data.insert("reviews".to_owned(), Value::Array(result.reviews));
+    if limit.is_some() {
+        data.insert("totalCount".to_owned(), Value::from(result.total_count));
+        data.insert("truncated".to_owned(), Value::Bool(result.truncated));
+    }
+    Ok(Value::Object(data))
 }
 
 fn usage(program: &str) -> String {
-    format!("usage: {program} pr reviews [-h] [--repo REPO] [--include-details] [--compact] target")
+    format!(
+        "usage: {program} pr reviews [-h] [--repo REPO] [--include-details] [--compact] [--limit N] target"
+    )
+}
+
+fn parse_limit(value: &str, program: &str) -> Result<usize> {
+    let limit = value.parse::<usize>().ok();
+    if !limit.is_some_and(|limit| (1..=100).contains(&limit)) {
+        return Err(argument_error(
+            program,
+            "argument --limit: must be between 1 and 100",
+        ));
+    }
+    Ok(limit.expect("limit was validated"))
 }
 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
@@ -53,7 +104,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n  --limit N           return the latest 1 through 100 reviews\n",
         usage(program)
     );
     super::super::write_stdout(&text)

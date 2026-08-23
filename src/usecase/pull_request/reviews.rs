@@ -9,7 +9,13 @@ use crate::model::Target;
 
 use super::string_field;
 
-pub fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
+pub struct ReviewList {
+    pub reviews: Vec<Value>,
+    pub total_count: usize,
+    pub truncated: bool,
+}
+
+pub fn execute(target: &Target, include_details: bool, limit: Option<usize>) -> Result<ReviewList> {
     let mut reviews = rest::pull_request_reviews(target)?
         .into_iter()
         .map(|review| project(review, include_details))
@@ -18,7 +24,16 @@ pub fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
         compare_submitted_at(left.submitted_at.as_deref(), right.submitted_at.as_deref())
             .then_with(|| left.id.cmp(&right.id))
     });
-    Ok(reviews.into_iter().map(|review| review.value).collect())
+    let total_count = reviews.len();
+    if let Some(limit) = limit {
+        let start = total_count.saturating_sub(limit);
+        reviews.drain(..start);
+    }
+    Ok(ReviewList {
+        truncated: reviews.len() < total_count,
+        reviews: reviews.into_iter().map(|review| review.value).collect(),
+        total_count,
+    })
 }
 
 struct Review {

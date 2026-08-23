@@ -24,6 +24,7 @@ pub(super) enum Action {
     Overview,
     Reviews {
         include_details: bool,
+        limit: Option<usize>,
     },
     ReviewThread {
         review_thread_ids: Vec<String>,
@@ -112,10 +113,10 @@ pub(super) fn execute(
             Value::Array(comments::execute(&target)?),
         )])),
         Action::Overview => overview::execute(&target)?,
-        Action::Reviews { include_details } => Value::Object(Map::from_iter([(
-            "reviews".to_owned(),
-            Value::Array(reviews::execute(&target, include_details)?),
-        )])),
+        Action::Reviews {
+            include_details,
+            limit,
+        } => reviews::execute(&target, include_details, limit)?,
         Action::ReviewThread {
             review_thread_ids,
             include_diff_hunk,
