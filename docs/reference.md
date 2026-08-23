@@ -58,10 +58,12 @@ By default, closed `<details>` blocks in `body` are omitted using the same Markd
 ## Pull request reviews
 
 ```shell
-gh-loupe pr reviews TARGET [--include-details]
+gh-loupe pr reviews TARGET [--include-details] [--limit N]
 ```
 
 `pr reviews` retrieves every REST review page and preserves chronological order by `submittedAt`, then by `id` for equal timestamps. Each review contains only `id`, `author`, `state`, `body`, `submittedAt`, `commitOid`, and `detailsOmitted`.
+
+`--limit` accepts 1 through 100 and returns the latest reviews in the same chronological order. The limited response also contains `totalCount` for all review submissions and `truncated`, which is true only when a review submission was not returned. Without `--limit`, all reviews are returned with the existing response shape. Reviews with a null `submittedAt` remain in the result and retain their existing ordering.
 
 By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that review body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every review.
 
