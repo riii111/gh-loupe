@@ -7,17 +7,40 @@ use crate::model::Target;
 
 use super::{required_field, required_string_field, string_value};
 
-pub fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
-    let mut comments = rest::pull_request_comments(target)?
+pub struct CommentList {
+    pub comments: Vec<Value>,
+    pub total_count: usize,
+    pub truncated: bool,
+}
+
+pub fn execute(
+    target: &Target,
+    include_details: bool,
+    limit: Option<usize>,
+    since: Option<&str>,
+) -> Result<CommentList> {
+    let mut comments = rest::pull_request_comments(target, since)?
         .iter()
         .map(|comment| project(comment, include_details))
         .collect::<Result<Vec<_>>>()?;
+    if let Some(since) = since {
+        comments.retain(|comment| string_value(comment, "updatedAt") > since);
+    }
     comments.sort_by(|left, right| {
         string_value(left, "createdAt")
             .cmp(string_value(right, "createdAt"))
             .then_with(|| string_value(left, "id").cmp(string_value(right, "id")))
     });
-    Ok(comments)
+    let total_count = comments.len();
+    if let Some(limit) = limit {
+        let start = total_count.saturating_sub(limit);
+        comments.drain(..start);
+    }
+    Ok(CommentList {
+        truncated: comments.len() < total_count,
+        comments,
+        total_count,
+    })
 }
 
 fn project(comment: &Value, include_details: bool) -> Result<Value> {

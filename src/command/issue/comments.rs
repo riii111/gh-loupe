@@ -7,18 +7,62 @@ where
     I: Iterator<Item = String>,
 {
     let mut include_details = false;
+    let mut limit = None;
+    let mut since = None;
     let parsed = super::super::parse_subcommand_args(
         program,
         values,
         1,
         argument_error,
         print_help,
-        |option, _| match option {
+        |option, values| match option {
             "--include-details" => {
                 include_details = true;
                 Ok(true)
             }
-            _ => Ok(false),
+            option => {
+                if let Some(value) = super::super::exact_long_option_value(option, "--limit") {
+                    limit = Some(parse_limit(value, program)?);
+                    return Ok(true);
+                }
+                if option == "--limit" {
+                    let Some(value) = values.next() else {
+                        return Err(argument_error(
+                            program,
+                            "argument --limit: expected one argument",
+                        ));
+                    };
+                    if value != "-" && value.starts_with('-') {
+                        return Err(argument_error(
+                            program,
+                            "argument --limit: expected one argument",
+                        ));
+                    }
+                    limit = Some(parse_limit(&value, program)?);
+                    return Ok(true);
+                }
+                if let Some(value) = super::super::exact_long_option_value(option, "--since") {
+                    since = Some(parse_since(value, program)?);
+                    return Ok(true);
+                }
+                if option == "--since" {
+                    let Some(value) = values.next() else {
+                        return Err(argument_error(
+                            program,
+                            "argument --since: expected one argument",
+                        ));
+                    };
+                    if value != "-" && value.starts_with('-') {
+                        return Err(argument_error(
+                            program,
+                            "argument --since: expected one argument",
+                        ));
+                    }
+                    since = Some(parse_since(&value, program)?);
+                    return Ok(true);
+                }
+                Ok(false)
+            }
         },
     )?;
     let mut positionals = parsed.positionals.into_iter();
@@ -30,28 +74,60 @@ where
     };
     super::super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
     Ok(super::super::Args {
-        action: super::super::Action::Issue(super::Action::Comments { include_details }),
+        action: super::super::Action::Issue(super::Action::Comments {
+            include_details,
+            limit,
+            since,
+        }),
         target,
         repo: parsed.repo,
         program: program.to_owned(),
     })
 }
 
-pub(super) fn execute(target: &Target, include_details: bool) -> Result<serde_json::Value> {
-    usecase::issue::inspect::comments(target, include_details)
+pub(super) fn execute(
+    target: &Target,
+    include_details: bool,
+    limit: Option<usize>,
+    since: Option<&str>,
+) -> Result<serde_json::Value> {
+    usecase::issue::inspect::comments(target, include_details, limit, since)
 }
 
 fn print_help(program: &str) -> Result<()> {
     super::super::write_stdout(&format!(
-        "usage: {program} issue comments [-h] [--repo REPO] [--include-details] target\n\npositional arguments:\n  target              Issue number or GitHub issue URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n\nIssue conversation comments are returned in chronological order.\n"
+        "usage: {program} issue comments [-h] [--repo REPO] [--include-details] [--limit N] [--since TIMESTAMP] target\n\npositional arguments:\n  target              Issue number or GitHub issue URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --limit N           return the latest 1 through 100 comments\n  --since TIMESTAMP   return comments updated after TIMESTAMP\n\nIssue conversation comments are returned in chronological order.\n"
     ))
 }
 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
     super::super::argument_error(
         program,
-        &format!("usage: {program} issue comments [-h] [--repo REPO] [--include-details] target"),
+        &format!(
+            "usage: {program} issue comments [-h] [--repo REPO] [--include-details] [--limit N] [--since TIMESTAMP] target"
+        ),
         "issue comments",
         message,
     )
+}
+
+fn parse_limit(value: &str, program: &str) -> Result<usize> {
+    let limit = value.parse::<usize>().ok();
+    if !limit.is_some_and(|limit| (1..=100).contains(&limit)) {
+        return Err(argument_error(
+            program,
+            "argument --limit: must be between 1 and 100",
+        ));
+    }
+    Ok(limit.expect("limit was validated"))
+}
+
+fn parse_since(value: &str, program: &str) -> Result<String> {
+    if value.is_empty() {
+        return Err(argument_error(
+            program,
+            "argument --since: must not be empty",
+        ));
+    }
+    Ok(value.to_owned())
 }

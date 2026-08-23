@@ -764,7 +764,8 @@ if [ "$1" = api ] && [[ "$*" == *pulls/42/reviews* ]]; then
   exit 0
 fi
 
-if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100" ] \
+if [ "$1" = api ] \
+  && [[ "$*" == 'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'* ]] \
   && { [ -n "${GH_PR_COMMENTS:-}" ] || [ -n "${GH_PR_COMMENTS_FAILURE:-}" ]; }; then
   if [ "${GH_PR_COMMENTS_FAILURE:-}" = 1 ]; then
     printf '[[{"node_id":"partial"}]]\n'
@@ -794,7 +795,8 @@ if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/4
   exit 0
 fi
 
-if [ "$*" = "api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100" ]; then
+if [ "$1" = api ] \
+  && [[ "$*" == 'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'* ]]; then
   record_issue_timing issue-comments "${GH_TEST_ISSUE_COMMENTS_DELAY:-0}"
   if [ "${GH_TEST_ISSUE_COMMENTS_FAILURE:-}" = 1 ]; then
     printf 'simulated issue comments failure\n' >&2
