@@ -681,6 +681,7 @@ issue_comments_calls_file="$tmpdir/issue-comments.calls"
 run_cli issue-comments-default "GH_TEST_CALLS_FILE=$issue_comments_calls_file" -- \
   issue comments https://github.com/riii111/dotfiles/issues/42 --compact
 test ! -s "$tmpdir/issue-comments-default.stderr"
+# shellcheck disable=SC2016
 assert_json '
   .schemaVersion == 1 and
   (.data | keys == ["comments","repository"]) and
@@ -983,6 +984,7 @@ grep -F 'gh-loupe pr comments: error: pr must be a positive number within GitHub
 calls_file="$tmpdir/comments.calls"
 run_comments comments-default "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=success -- \
   pr comments 42 --repo riii111/dotfiles
+# shellcheck disable=SC2016
 assert_json '
   .data.comments == [
     {
