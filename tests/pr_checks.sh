@@ -18,25 +18,25 @@ run_checks() {
     "$GH_LOUPE_BIN" pr checks 42 --repo riii111/dotfiles "${@:2}"
 }
 
-GH_TEST_ARGS_FILE="$tmpdir/default-args" run_checks success >"$tmpdir/pretty.json"
+GH_TEST_ARGS_FILE="$tmpdir/default-args" run_checks success >"$tmpdir/default.json"
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
   [.data.checks[].name] == ["alpha", "alpha", "zeta"] and
   [.data.checks[0:2][].link] == ["https://example.test/a", "https://example.test/b"] and
   (.data.checks[] | keys == ["bucket", "completedAt", "link", "name", "startedAt", "state", "workflow"])
-' "$tmpdir/pretty.json" >/dev/null
-test "$(wc -l <"$tmpdir/pretty.json" | tr -d ' ')" -gt 1
+' "$tmpdir/default.json" >/dev/null
+test "$(wc -l <"$tmpdir/default.json" | tr -d ' ')" -eq 1
 if grep -Fx -- '--required' "$tmpdir/default-args" >/dev/null; then
   exit 1
 fi
 
-GH_TEST_ARGS_FILE="$tmpdir/args" run_checks success --required --compact >"$tmpdir/compact.json"
-test "$(wc -l <"$tmpdir/compact.json" | tr -d ' ')" -eq 1
+GH_TEST_ARGS_FILE="$tmpdir/args" run_checks success --required >"$tmpdir/required.json"
+test "$(wc -l <"$tmpdir/required.json" | tr -d ' ')" -eq 1
 grep -Fx -- '--required' "$tmpdir/args" >/dev/null
-assert_json '.data.checks | length == 3' "$tmpdir/compact.json" >/dev/null
+assert_json '.data.checks | length == 3' "$tmpdir/required.json" >/dev/null
 
-run_checks failed --failed-only --compact >"$tmpdir/failed-only.json"
+run_checks failed --failed-only >"$tmpdir/failed-only.json"
 assert_json '
   .data.summary == {"total":5,"passed":2,"pending":1,"failed":2} and
   [.data.checks[].name] == ["cancelled", "failed"] and
@@ -44,7 +44,7 @@ assert_json '
 ' "$tmpdir/failed-only.json" >/dev/null
 
 GH_TEST_ARGS_FILE="$tmpdir/failed-only-required-args" \
-  run_checks failed --failed-only --required --compact >"$tmpdir/failed-only-required.json"
+  run_checks failed --failed-only --required >"$tmpdir/failed-only-required.json"
 if grep -Fx -- '--failed-only' "$tmpdir/failed-only-required-args" >/dev/null; then
   exit 1
 fi
@@ -52,7 +52,7 @@ grep -Fx -- '--required' "$tmpdir/failed-only-required-args" >/dev/null
 assert_json '.data.summary.failed == 2 and (.data.checks | length) == 2' \
   "$tmpdir/failed-only-required.json" >/dev/null
 
-run_checks success --failed-only --compact >"$tmpdir/failed-only-empty.json"
+run_checks success --failed-only >"$tmpdir/failed-only-empty.json"
 assert_json '.data.summary == {"total":3,"passed":2,"pending":1,"failed":0} and .data.checks == []' \
   "$tmpdir/failed-only-empty.json" >/dev/null
 
@@ -94,7 +94,7 @@ test ! -s "$tmpdir/signal.stdout"
 assert_json '.schemaVersion == 1 and .error.kind == "githubCli" and .error.message == "GitHub CLI terminated by signal"' \
   "$tmpdir/signal.stderr" >/dev/null
 
-run_checks nullable --compact >"$tmpdir/nullable.json"
+run_checks nullable >"$tmpdir/nullable.json"
 assert_json '
   .data.checks[0].link == null and
   .data.checks[0].workflow == null and
@@ -105,10 +105,10 @@ assert_json '
   .data.checks[1].completedAt == "2026-08-11T09:05:00Z"
 ' "$tmpdir/nullable.json" >/dev/null
 
-run_checks no-required --required --compact >"$tmpdir/no-required.json"
+run_checks no-required --required >"$tmpdir/no-required.json"
 assert_json '.data.checks == []' "$tmpdir/no-required.json" >/dev/null
 
-run_checks no-checks --compact >"$tmpdir/no-checks.json"
+run_checks no-checks >"$tmpdir/no-checks.json"
 assert_json '.data.checks == []' "$tmpdir/no-checks.json" >/dev/null
 
 for mode in missing wrong-type wrong-metadata-type unknown object; do

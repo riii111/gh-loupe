@@ -64,7 +64,7 @@ test "$(cat "$tmpdir/calls")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/pulls/42/reviews?per_page=100'
 
 run_reviews include-details "$GH_LOUPE_BIN" pr reviews \
-  42 --repo riii111/dotfiles --include-details --compact
+  42 --repo riii111/dotfiles --include-details
 # shellcheck disable=SC2016
 assert_json '
   ([.data.reviews[].detailsOmitted] | all(. == false)) and
@@ -74,9 +74,9 @@ assert_json '
 ' "$tmpdir/include-details.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/include-details.stdout")" -eq 1
 
-run_reviews compact "$GH_LOUPE_BIN" pr reviews \
-  https://github.com/riii111/dotfiles/pull/42 --compact
-test "$(wc -l <"$tmpdir/compact.stdout")" -eq 1
+run_reviews url "$GH_LOUPE_BIN" pr reviews \
+  https://github.com/riii111/dotfiles/pull/42
+test "$(wc -l <"$tmpdir/url.stdout")" -eq 1
 
 run_reviews empty GH_TEST_REVIEWS=empty "$GH_LOUPE_BIN" \
   pr reviews 42 --repo riii111/dotfiles
@@ -113,7 +113,7 @@ assert_runtime_error page-failure network \
   GH_TEST_REVIEWS=page-failure "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 
 run_reviews help "$GH_LOUPE_BIN" pr reviews --help
-grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--include-details] [--compact] target' \
+grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--include-details] target' \
   "$tmpdir/help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
   "$tmpdir/help.stdout" >/dev/null

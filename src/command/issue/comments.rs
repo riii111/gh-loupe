@@ -6,19 +6,17 @@ pub(super) fn parse_args<I>(program: &str, values: I) -> Result<super::super::Ar
 where
     I: Iterator<Item = String>,
 {
-    let (target, repo, compact) =
-        super::parse_target_args(program, values, argument_error, |program| {
-            super::super::write_stdout(&super::target_help(
-                program,
-                "comments",
-                "Issue conversation comments are returned in chronological order.\n",
-            ))
-        })?;
+    let (target, repo) = super::parse_target_args(program, values, argument_error, |program| {
+        super::super::write_stdout(&super::target_help(
+            program,
+            "comments",
+            "Issue conversation comments are returned in chronological order.\n",
+        ))
+    })?;
     Ok(super::super::Args {
         action: super::super::Action::Issue(super::Action::Comments),
         target,
         repo,
-        compact,
         program: program.to_owned(),
     })
 }

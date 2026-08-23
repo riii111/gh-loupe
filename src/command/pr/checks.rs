@@ -79,7 +79,6 @@ where
         }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -114,7 +113,7 @@ fn parse_timeout(program: &str, value: &str) -> Result<u64> {
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr checks [-h] [--repo REPO] [--failed-only] [--required] [--failed-diagnostics] [--include-failed-logs] [--timeout SECONDS] [--quiet] [--compact] target"
+        "usage: {program} pr checks [-h] [--repo REPO] [--failed-only] [--required] [--failed-diagnostics] [--include-failed-logs] [--timeout SECONDS] [--quiet] target"
     )
 }
 
@@ -124,7 +123,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --failed-only          return the check summary and failed checks only\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n  --compact              emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target                 PR number or GitHub pull request URL\n\noptions:\n  -h, --help             show this help message and exit\n  --repo REPO            OWNER/REPO; inferred from cwd when omitted\n  --failed-only          return the check summary and failed checks only\n  --required             only return required checks\n  --failed-diagnostics   include annotations for failed checks\n  --include-failed-logs  include annotations and bounded logs for failed checks\n  --timeout SECONDS      diagnostic timeout (default: 90)\n  --quiet                suppress diagnostic progress\n",
         usage(program)
     );
     super::super::write_stdout(&text)
@@ -151,7 +150,6 @@ mod tests {
                 "--include-failed-logs",
                 "--timeout=12",
                 "--quiet",
-                "--compact",
                 "42",
             ]),
         )
@@ -164,7 +162,6 @@ mod tests {
                 }),
             target,
             repo,
-            compact,
             program,
         } = args
         else {
@@ -179,7 +176,6 @@ mod tests {
         assert!(diagnostics.quiet);
         assert_eq!(target, "42");
         assert_eq!(repo.as_deref(), Some("owner/repo"));
-        assert!(compact);
         assert_eq!(program, "gh-loupe");
     }
 
