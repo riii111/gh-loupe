@@ -53,14 +53,13 @@ where
         action: super::super::Action::Issue(super::Action::Relations { limit }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
 
 fn print_help(program: &str) -> Result<()> {
     super::super::write_stdout(&format!(
-        "usage: {program} issue relations [-h] [--repo REPO] [--compact] [--limit N] target\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n  --limit N    limit each relation list to 1 through 100 items (default: 20)\n\nRelations do not include Issue bodies or comments.\nThe relation order is GitHub's connection order.\n"
+        "usage: {program} issue relations [-h] [--repo REPO] [--limit N] target\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    limit each relation list to 1 through 100 items (default: 20)\n\nRelations do not include Issue bodies or comments.\nThe relation order is GitHub's connection order.\n"
     ))
 }
 
@@ -82,9 +81,7 @@ pub(super) fn execute(target: &Target, limit: i32) -> Result<serde_json::Value> 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
     super::super::argument_error(
         program,
-        &format!(
-            "usage: {program} issue relations [-h] [--repo REPO] [--compact] [--limit N] target"
-        ),
+        &format!("usage: {program} issue relations [-h] [--repo REPO] [--limit N] target"),
         "issue relations",
         message,
     )

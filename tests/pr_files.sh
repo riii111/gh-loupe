@@ -56,7 +56,7 @@ jq -s -e '
   (.[0].query | [contains("patch"), contains("diffHunk"), contains("body"), contains("contents")] | any | not)
 ' "$tmpdir/default.payloads" >/dev/null
 
-run_files limit-one "$GH_LOUPE_BIN" pr files 42 --repo riii111/dotfiles --limit 1 --compact
+run_files limit-one "$GH_LOUPE_BIN" pr files 42 --repo riii111/dotfiles --limit 1
 assert_json '
   (.data.files | length) == 1 and
   .data.files[0].path == "src/new.rs" and
@@ -87,7 +87,7 @@ run_files last-page-cursor GH_TEST_PR_FILES=last-page-cursor "$GH_LOUPE_BIN" \
 assert_json '.data.files == [{"path":"last.txt","status":"ADDED","additions":1,"deletions":0}] and .data.truncated == false' \
   "$tmpdir/last-page-cursor.stdout" >/dev/null
 
-run_files url "$GH_LOUPE_BIN" pr files https://github.com/riii111/dotfiles/pull/42 --compact
+run_files url "$GH_LOUPE_BIN" pr files https://github.com/riii111/dotfiles/pull/42
 test "$(wc -l <"$tmpdir/url.stdout" | tr -d ' ')" -eq 1
 
 assert_argument_error limit-zero pr files 42 --repo riii111/dotfiles --limit 0
@@ -97,7 +97,7 @@ assert_argument_error missing-limit-value pr files 42 --repo riii111/dotfiles --
 assert_argument_error unrecognized-limit-value pr files 42 --repo riii111/dotfiles --limit=true
 
 run_files help "$GH_LOUPE_BIN" pr files --help
-grep -Fx 'usage: gh-loupe pr files [-h] [--repo REPO] [--limit N] [--compact] target' \
+grep -Fx 'usage: gh-loupe pr files [-h] [--repo REPO] [--limit N] target' \
   "$tmpdir/help.stdout" >/dev/null
 grep -Fx '  --limit N    return at most N files, from 1 through 100 (default: 20)' \
   "$tmpdir/help.stdout" >/dev/null

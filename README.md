@@ -45,16 +45,16 @@ cd gh-loupe
 
 ## Usage
 
-Agentから使う場合は、既定の整形JSONより`--compact`を優先してください。最初から本文や全コメントを取得せず、必要な段階まで進めます。
+成功時のJSONは常に一行で出力されます。最初から本文や全コメントを取得せず、必要な段階まで進めます。
 
 ```bash
 PR=https://github.com/OWNER/REPO/pull/123
 
-gh-loupe pr overview --compact "$PR"
-gh-loupe pr review-threads --compact "$PR"
-gh-loupe pr review-thread --compact "$PR" REVIEW_THREAD_ID
-gh-loupe pr checks --failed-only --compact "$PR"
-gh-loupe pr checks --failed-only --failed-diagnostics --compact "$PR"
+gh-loupe pr overview "$PR"
+gh-loupe pr review-threads "$PR"
+gh-loupe pr review-thread "$PR" REVIEW_THREAD_ID
+gh-loupe pr checks --failed-only "$PR"
+gh-loupe pr checks --failed-only --failed-diagnostics "$PR"
 ```
 
 主なcommandは次のとおりです。全commandとoptionは`gh-loupe --help`で確認できます。

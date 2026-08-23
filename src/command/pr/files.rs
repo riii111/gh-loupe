@@ -53,7 +53,6 @@ where
         action: super::super::Action::Pr(super::Action::Files { limit }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -74,7 +73,7 @@ pub(super) fn execute(target: &Target, limit: usize) -> Result<serde_json::Value
 }
 
 fn usage(program: &str) -> String {
-    format!("usage: {program} pr files [-h] [--repo REPO] [--limit N] [--compact] target")
+    format!("usage: {program} pr files [-h] [--repo REPO] [--limit N] target")
 }
 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
@@ -83,7 +82,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target       PR number or GitHub pull request URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N files, from 1 through 100 (default: 20)\n  --compact    emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target       PR number or GitHub pull request URL\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N files, from 1 through 100 (default: 20)\n",
         usage(program)
     );
     super::super::write_stdout(&text)
@@ -103,14 +102,13 @@ mod tests {
     fn parser_accepts_limit_and_common_options() {
         let args = parse_args(
             "gh-loupe",
-            values(&["--repo=owner/repo", "--limit=7", "--compact", "42"]),
+            values(&["--repo=owner/repo", "--limit=7", "42"]),
         )
         .unwrap_or_else(|_| panic!("parse files arguments"));
         let Args {
             action: RootAction::Pr(Action::Files { limit }),
             target,
             repo,
-            compact,
             ..
         } = args
         else {
@@ -120,7 +118,6 @@ mod tests {
         assert_eq!(limit, 7);
         assert_eq!(target, "42");
         assert_eq!(repo.as_deref(), Some("owner/repo"));
-        assert!(compact);
     }
 
     #[test]

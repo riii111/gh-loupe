@@ -8,7 +8,6 @@ description: GitHubのPR/Issue状態、検索、commitからPRへの逆引き、
 # GitHub read
 
 GitHubの定型的な読み取りには`gh-loupe`を使い、必要な情報だけを取得する。
-Agentは原則として`--compact`を指定する。
 `TARGET`には番号またはGitHub URLを渡し、別repositoryの番号には`--repo OWNER/REPO`を加える。
 
 ## Version
