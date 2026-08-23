@@ -8,13 +8,15 @@ Issue commands require an explicit subcommand:
 
 ```shell
 gh-loupe issue overview TARGET
-gh-loupe issue comments TARGET
+gh-loupe issue comments TARGET [--include-details]
 gh-loupe issue relations TARGET [--limit N]
 ```
 
 `overview` returns `data.repository` and `data.issue`. The Issue object contains the fixed metadata schema, including `body`, `state`, `stateReason`, `subIssues`, and `dependencies`. It does not retrieve or return comments.
 
-`comments` returns `data.repository` and `data.comments`. Each comment has only `id`, `url`, `author`, `body`, `createdAt`, and `updatedAt`. All pages are retrieved and comments are ordered by `createdAt`, then by `id` for equal timestamps.
+`comments` returns `data.repository` and `data.comments`. Each comment has only `id`, `url`, `author`, `body`, `createdAt`, `updatedAt`, and `detailsOmitted`. All pages are retrieved and comments are ordered by `createdAt`, then by `id` for equal timestamps.
+
+By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as pull request reviews. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that comment body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every comment.
 
 `relations` returns `data.repository`, `data.parent`, `data.subIssues`, `data.blockedBy`, and `data.blocking`.
 
@@ -42,6 +44,16 @@ gh-loupe pr checks TARGET --failed-only [--required] [--failed-diagnostics] [--i
 ```
 
 The default output has `data.checks` with the existing check metadata. `--failed-diagnostics` does not change that output to failed-only. With `--failed-only`, the output has `data.summary` and `data.checks`; `summary` contains `total`, `passed`, `pending`, and `failed` for all retrieved checks, while `checks` contains only `fail` and `cancel` buckets. `skipping` counts as `passed` and `cancel` counts as `failed`. `--required` applies to both the summary and returned checks. Zero failures is a successful result with `summary.failed` set to `0` and an empty `checks` array.
+
+## Pull request comments
+
+```shell
+gh-loupe pr comments TARGET [--include-details]
+```
+
+`pr comments` returns `data.comments`. Each comment has only `id`, `url`, `author`, `body`, `createdAt`, `updatedAt`, and `detailsOmitted`. All pages are retrieved and comments are ordered by `createdAt`, then by `id` for equal timestamps.
+
+By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `issue comments`, `pr reviews`, and `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that comment body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every comment.
 
 ## Pull request reviews
 

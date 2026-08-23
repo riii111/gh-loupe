@@ -73,4 +73,6 @@ gh-loupe pr checks --failed-only --failed-diagnostics --compact "$PR"
 | `issue relations` | Issueの親子・依存関係 |
 | `search issues` / `search prs` | repository内のIssue/PR検索 |
 
+`pr comments`と`issue comments`は既定で閉じた`<details>`の内容を省略し、各commentに`detailsOmitted`を返します。原文が必要な場合だけ`--include-details`を指定します。
+
 詳細なcommand仕様とJSON schemaは[`docs/reference.md`](docs/reference.md)および各commandの`--help`を参照してください。

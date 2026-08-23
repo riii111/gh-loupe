@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github::rest;
+use crate::markdown;
 use crate::model::Target;
 
 pub fn overview(target: &Target) -> Result<Value> {
@@ -15,9 +16,9 @@ pub fn overview(target: &Target) -> Result<Value> {
     Ok(Value::Object(result))
 }
 
-pub fn comments(target: &Target) -> Result<Value> {
+pub fn comments(target: &Target, include_details: bool) -> Result<Value> {
     reject_pull_request(&rest::issue(target)?)?;
-    let comments = project_comments(rest::issue_comments(target)?)?;
+    let comments = project_comments(rest::issue_comments(target)?, include_details)?;
     let mut result = Map::new();
     result.insert(
         "repository".to_owned(),
@@ -79,10 +80,10 @@ fn reject_pull_request(issue: &Value) -> Result<()> {
     Ok(())
 }
 
-fn project_comments(comments: Vec<Value>) -> Result<Vec<Value>> {
+fn project_comments(comments: Vec<Value>, include_details: bool) -> Result<Vec<Value>> {
     let mut comments = comments
         .into_iter()
-        .map(project_comment)
+        .map(|comment| project_comment(comment, include_details))
         .collect::<Result<Vec<_>>>()?;
     comments.sort_by(|left, right| {
         left.created_at
@@ -98,7 +99,7 @@ struct Comment {
     value: Value,
 }
 
-fn project_comment(comment: Value) -> Result<Comment> {
+fn project_comment(comment: Value, include_details: bool) -> Result<Comment> {
     let id = required_string_field(&comment, "node_id")?.to_owned();
     let created_at = required_string_field(&comment, "created_at")?.to_owned();
     let mut result = Map::new();
@@ -108,15 +109,19 @@ fn project_comment(comment: Value) -> Result<Comment> {
         Value::String(required_string_field(&comment, "html_url")?.to_owned()),
     );
     result.insert("author".to_owned(), project_author(&comment, "user")?);
-    result.insert(
-        "body".to_owned(),
-        Value::String(required_string_field(&comment, "body")?.to_owned()),
-    );
+    let body = required_string_field(&comment, "body")?;
+    let (body, details_omitted) = if include_details {
+        (body.to_owned(), false)
+    } else {
+        markdown::omit_details(body)
+    };
+    result.insert("body".to_owned(), Value::String(body));
     result.insert("createdAt".to_owned(), Value::String(created_at.clone()));
     result.insert(
         "updatedAt".to_owned(),
         Value::String(required_string_field(&comment, "updated_at")?.to_owned()),
     );
+    result.insert("detailsOmitted".to_owned(), Value::Bool(details_omitted));
     Ok(Comment {
         id,
         created_at,
@@ -360,32 +365,35 @@ mod tests {
 
     #[test]
     fn comments_use_global_ids_and_are_sorted() {
-        let comments = project_comments(vec![
-            json!({
-                "node_id": "IC_z",
-                "html_url": "https://github.com/owner/repository/issues/39#issuecomment-2",
-                "user": {"login": "later"},
-                "body": "later",
-                "created_at": "2026-01-02T00:00:00Z",
-                "updated_at": "2026-01-02T00:00:00Z",
-                "id": 2
-            }),
-            json!({
-                "node_id": "IC_a",
-                "html_url": "https://github.com/owner/repository/issues/39#issuecomment-1",
-                "user": null,
-                "body": "first",
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-                "id": 1
-            }),
-        ])
+        let comments = project_comments(
+            vec![
+                json!({
+                    "node_id": "IC_z",
+                    "html_url": "https://github.com/owner/repository/issues/39#issuecomment-2",
+                    "user": {"login": "later"},
+                    "body": "later",
+                    "created_at": "2026-01-02T00:00:00Z",
+                    "updated_at": "2026-01-02T00:00:00Z",
+                    "id": 2
+                }),
+                json!({
+                    "node_id": "IC_a",
+                    "html_url": "https://github.com/owner/repository/issues/39#issuecomment-1",
+                    "user": null,
+                    "body": "first",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "id": 1
+                }),
+            ],
+            false,
+        )
         .unwrap_or_else(|_| panic!("valid comments"));
 
         assert_eq!(comments[0]["id"], "IC_a");
         assert_eq!(comments[0]["author"], Value::Null);
         assert_eq!(comments[1]["id"], "IC_z");
-        assert_eq!(comments[0].as_object().expect("comment object").len(), 6);
+        assert_eq!(comments[0].as_object().expect("comment object").len(), 7);
         assert_eq!(
             comments[0]["url"],
             "https://github.com/owner/repository/issues/39#issuecomment-1"

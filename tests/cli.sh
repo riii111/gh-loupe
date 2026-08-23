@@ -686,13 +686,38 @@ assert_json '
   (.data | keys == ["comments","repository"]) and
   .data.repository == "riii111/dotfiles" and
   [.data.comments[].id] == ["IC_a","IC_b","IC_z"] and
-  (.data.comments | all(keys == ["author","body","createdAt","id","updatedAt","url"])) and
+  (.data.comments | all(keys == ["author","body","createdAt","detailsOmitted","id","updatedAt","url"])) and
+  (.data.comments | map(select(.id == "IC_z"))[0].body) == "comment\n証拠\nreply" and
+  (.data.comments | map(select(.id == "IC_z"))[0].detailsOmitted) == true and
+  (.data.comments | map(select(.id == "IC_b"))[0].body | contains("`<details>inline</details>`")) and
+  (.data.comments | map(select(.id == "IC_b"))[0].detailsOmitted) == false and
   ([.. | objects | keys[]] | any(. == "reactions" or . == "pull_request" or . == "comments_url") | not)
 ' "$tmpdir/issue-comments-default.stdout" >/dev/null
 grep -Fx 'api repos/riii111/dotfiles/issues/42' "$issue_comments_calls_file" >/dev/null
 grep -Fx 'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100' \
   "$issue_comments_calls_file" >/dev/null
 test "$(wc -l <"$issue_comments_calls_file")" -eq 2
+
+run_cli issue-comments-include-details "GH_TEST_CALLS_FILE=$tmpdir/issue-comments-include-details.calls" -- \
+  issue comments 42 --repo riii111/dotfiles --include-details --compact
+assert_json '
+  (.data.comments | all(.detailsOmitted == false)) and
+  (.data.comments | map(select(.id == "IC_z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
+  (.data.comments | map(select(.id == "IC_b"))[0].body | contains("```markdown"))
+' "$tmpdir/issue-comments-include-details.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/issue-comments-include-details.stdout")" -eq 1
+
+if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" issue comments 42 --repo riii111/dotfiles \
+  --include-details=true >"$tmpdir/issue-comments-include-details-value.stdout" \
+  2>"$tmpdir/issue-comments-include-details-value.stderr"; then
+  issue_include_details_value_status=0
+else
+  issue_include_details_value_status=$?
+fi
+test "$issue_include_details_value_status" -eq 2
+test ! -s "$tmpdir/issue-comments-include-details-value.stdout"
+grep -F 'gh-loupe issue comments: error: unrecognized arguments: --include-details=true' \
+  "$tmpdir/issue-comments-include-details-value.stderr" >/dev/null
 
 issue_overview_calls_file="$tmpdir/issue-overview.calls"
 run_cli issue-overview-no-comments "GH_TEST_CALLS_FILE=$issue_overview_calls_file" -- \
@@ -721,6 +746,18 @@ assert_argument_error issue-relations-limit-zero issue relations 42 --limit 0
 assert_argument_error issue-relations-limit-high issue relations 42 --limit 101
 assert_argument_error issue-relations-limit-equals issue relations 42 --limit=0
 assert_argument_error issue-relations-abbreviated-limit issue relations 42 --lim 10
+assert_argument_error issue-comments-abbreviated-include-details issue comments 42 --incl
+
+run_cli pr-comments-help -- pr comments --help
+grep -F 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--compact] target' \
+  "$tmpdir/pr-comments-help.stdout" >/dev/null
+grep -F -- '--include-details   include folded <details> content (omitted by default)' \
+  "$tmpdir/pr-comments-help.stdout" >/dev/null
+run_cli issue-comments-help -- issue comments --help
+grep -F 'usage: gh-loupe issue comments [-h] [--repo REPO] [--include-details] [--compact] target' \
+  "$tmpdir/issue-comments-help.stdout" >/dev/null
+grep -F -- '--include-details   include folded <details> content (omitted by default)' \
+  "$tmpdir/issue-comments-help.stdout" >/dev/null
 
 run_cli issue-relations-default "GH_TEST_CALLS_FILE=$tmpdir/relations.calls" -- \
   issue relations 42 --repo riii111/dotfiles --compact
@@ -904,6 +941,8 @@ assert_overview_runtime_error overview-invalid-title invalidResponse false \
 assert_argument_error comments-missing-target pr comments
 assert_argument_error comments-abbreviated-repo pr comments 42 --rep riii111/dotfiles
 assert_argument_error comments-abbreviated-compact pr comments 42 --comp
+assert_argument_error comments-abbreviated-include-details pr comments 42 --incl
+assert_argument_error comments-include-details-equals pr comments 42 --include-details=true
 assert_argument_error comments-invalid-zero pr comments 0 --repo riii111/dotfiles
 assert_argument_error comments-invalid-repo pr comments 42 --repo ../..
 assert_argument_error comments-conflicting-repo \
@@ -936,7 +975,7 @@ fi
 test "$comments_status" -eq 2
 test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
-grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--compact] target' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
 grep -F 'gh-loupe pr comments: error: pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
@@ -952,31 +991,43 @@ assert_json '
       "author": null,
       "body": "first by id",
       "createdAt": "2026-01-01T00:00:00Z",
-      "updatedAt": "2026-01-01T02:00:00Z"
+      "updatedAt": "2026-01-01T02:00:00Z",
+      "detailsOmitted": false
     },
     {
       "id": "IC_b",
       "url": "https://example.test/b",
       "author": "author",
-      "body": "second by id",
+      "body": "before\n`<details>inline</details>`\n\n```markdown\n<details><summary>fenced</summary>fenced</details>\n```\n\n<!-- <details><summary>comment</summary>comment</details> -->\n<details open><summary>open</summary>shown</details>\n<details>\n<summary>incomplete</summary>\nnot closed\n<details data-x=\"unterminated\ninvalid",
       "createdAt": "2026-01-01T00:00:00Z",
-      "updatedAt": "2026-01-01T01:00:00Z"
+      "updatedAt": "2026-01-01T01:00:00Z",
+      "detailsOmitted": false
     },
     {
       "id": "IC_z",
       "url": "https://example.test/z",
       "author": "later",
-      "body": "later",
+      "body": "comment\n証拠\nreply",
       "createdAt": "2026-01-02T00:00:00Z",
-      "updatedAt": "2026-01-02T01:00:00Z"
+      "updatedAt": "2026-01-02T01:00:00Z",
+      "detailsOmitted": true
     }
   ] and
-  (.data.comments | all(keys == ["author", "body", "createdAt", "id", "updatedAt", "url"])) and
+  (.data.comments | all(keys == ["author", "body", "createdAt", "detailsOmitted", "id", "updatedAt", "url"])) and
   ([.. | objects | keys[]] | any(. == "pull_request_review_id" or . == "diff_hunk" or . == "review" or . == "pullRequest") | not)
 ' "$tmpdir/comments-default.comments.stdout" >/dev/null
 test "$(cat "$calls_file")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
 test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -gt 1
+
+run_comments comments-include-details GH_PR_COMMENTS=success -- \
+  pr comments 42 --repo riii111/dotfiles --include-details --compact
+assert_json '
+  (.data.comments | all(.detailsOmitted == false)) and
+  (.data.comments | map(select(.id == "IC_z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
+  (.data.comments | map(select(.id == "IC_b"))[0].body | contains("```markdown"))
+' "$tmpdir/comments-include-details.comments.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/comments-include-details.comments.stdout")" -eq 1
 
 run_comments comments-url-compact GH_PR_COMMENTS=empty -- \
   pr comments https://github.com/riii111/dotfiles/pull/42 --compact

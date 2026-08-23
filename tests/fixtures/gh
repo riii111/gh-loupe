@@ -737,9 +737,7 @@ JSON
 JSON
       ;;
     success)
-      cat <<'JSON'
-[[{"node_id":"IC_z","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-4","user":{"login":"later"},"body":"later","created_at":"2026-01-02T00:00:00Z","updated_at":"2026-01-02T01:00:00Z","id":4,"reactions":{"total_count":2}},{"node_id":"IC_b","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-2","user":{"login":"author"},"body":"second by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T01:00:00Z","id":2}],[{"node_id":"IC_a","html_url":"https://github.com/riii111/dotfiles/issues/42#issuecomment-1","user":null,"body":"first by id","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T02:00:00Z","id":1}]]
-JSON
+      cat "$GH_FIXTURE_DATA/comments-success.json"
       ;;
   esac
   exit 0

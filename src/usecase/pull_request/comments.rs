@@ -2,14 +2,15 @@ use serde_json::{Map, Value};
 
 use crate::error::{Exit, Result};
 use crate::github::rest;
+use crate::markdown;
 use crate::model::Target;
 
 use super::{required_field, required_string_field, string_value};
 
-pub fn execute(target: &Target) -> Result<Vec<Value>> {
+pub fn execute(target: &Target, include_details: bool) -> Result<Vec<Value>> {
     let mut comments = rest::pull_request_comments(target)?
         .iter()
-        .map(project)
+        .map(|comment| project(comment, include_details))
         .collect::<Result<Vec<_>>>()?;
     comments.sort_by(|left, right| {
         string_value(left, "createdAt")
@@ -19,8 +20,9 @@ pub fn execute(target: &Target) -> Result<Vec<Value>> {
     Ok(comments)
 }
 
-fn project(comment: &Value) -> Result<Value> {
+fn project(comment: &Value, include_details: bool) -> Result<Value> {
     let mut result = Map::new();
+    let mut details_omitted = false;
     for (source, output) in [
         ("node_id", "id"),
         ("html_url", "url"),
@@ -29,8 +31,15 @@ fn project(comment: &Value) -> Result<Value> {
         ("updated_at", "updatedAt"),
     ] {
         let value = required_string_field(comment, source)?;
-        result.insert(output.to_owned(), Value::String(value.to_owned()));
+        if source == "body" && !include_details {
+            let (body, omitted) = markdown::omit_details(value);
+            result.insert(output.to_owned(), Value::String(body));
+            details_omitted = omitted;
+        } else {
+            result.insert(output.to_owned(), Value::String(value.to_owned()));
+        }
     }
+    result.insert("detailsOmitted".to_owned(), Value::Bool(details_omitted));
     let user = required_field(comment, "user")?;
     let author = match user {
         Value::Null => Value::Null,
