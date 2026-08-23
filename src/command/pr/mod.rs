@@ -1,5 +1,6 @@
 mod checks;
 mod comments;
+mod files;
 mod for_commit;
 mod overview;
 mod review_thread;
@@ -21,6 +22,9 @@ pub(super) enum Action {
         limit: usize,
     },
     Comments,
+    Files {
+        limit: usize,
+    },
     Overview,
     Reviews {
         include_details: bool,
@@ -50,6 +54,7 @@ where
         "checks" => checks::parse_args(program, remaining),
         "for-commit" => for_commit::parse_args(program, remaining),
         "comments" => comments::parse_args(program, remaining),
+        "files" => files::parse_args(program, remaining),
         "overview" => overview::parse_args(program, remaining),
         "reviews" => reviews::parse_args(program, remaining),
         "review-threads" => review_threads::parse_args(program, remaining),
@@ -70,7 +75,7 @@ where
         _ => Err(pr_argument_error(
             program,
             &format!(
-                "argument subcommand: invalid choice: '{subcommand}' (choose from 'overview', 'comments', 'reviews', 'review-threads', 'review-thread', 'checks', 'for-commit')"
+                "argument subcommand: invalid choice: '{subcommand}' (choose from 'overview', 'comments', 'files', 'reviews', 'review-threads', 'review-thread', 'checks', 'for-commit')"
             ),
         )),
     }
@@ -86,6 +91,7 @@ pub(super) fn execute(
         Action::Checks { .. } => checks::argument_error,
         Action::ForCommit { .. } => for_commit::argument_error,
         Action::Comments => comments::argument_error,
+        Action::Files { .. } => files::argument_error,
         Action::Overview => overview::argument_error,
         Action::Reviews { .. } => reviews::argument_error,
         Action::ReviewThread { .. } => review_thread::argument_error,
@@ -112,6 +118,7 @@ pub(super) fn execute(
             "comments".to_owned(),
             Value::Array(comments::execute(&target)?),
         )])),
+        Action::Files { limit } => files::execute(&target, limit)?,
         Action::Overview => overview::execute(&target)?,
         Action::Reviews {
             include_details,
@@ -145,7 +152,7 @@ fn positive_pr_number(value: &str) -> Option<String> {
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr [-h] {{overview,comments,reviews,review-threads,review-thread,checks,for-commit}} ..."
+        "usage: {program} pr [-h] {{overview,comments,files,reviews,review-threads,review-thread,checks,for-commit}} ..."
     )
 }
 
@@ -156,7 +163,7 @@ fn pr_argument_error(program: &str, message: &str) -> Exit {
 fn missing_subcommand_error(program: &str, target: &str) -> Exit {
     Exit {
         message: format!(
-            "{}\n{program} pr: error: a subcommand is required\n\nTry:\n  {program} pr overview {target}\n  {program} pr comments {target}\n  {program} pr reviews {target}\n  {program} pr review-threads {target}\n  {program} pr checks {target}",
+            "{}\n{program} pr: error: a subcommand is required\n\nTry:\n  {program} pr overview {target}\n  {program} pr comments {target}\n  {program} pr files {target}\n  {program} pr reviews {target}\n  {program} pr review-threads {target}\n  {program} pr checks {target}",
             usage(program)
         ),
         code: 2,
@@ -165,7 +172,7 @@ fn missing_subcommand_error(program: &str, target: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  {{overview,comments,reviews,review-threads,review-thread,checks,for-commit}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read review threads\n    checks          read individual checks and optional diagnostics\n    for-commit      find pull requests associated with a commit SHA\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "{}\n\npositional arguments:\n  {{overview,comments,files,reviews,review-threads,review-thread,checks,for-commit}}\n    overview        read pull request state and summaries\n    comments        read pull request conversation comments\n    files           list pull request changed files\n    reviews         list pull request review submissions\n    review-threads  list review thread summaries\n    review-thread   read review threads\n    checks          read individual checks and optional diagnostics\n    for-commit      find pull requests associated with a commit SHA\n\noptions:\n  -h, --help  show this help message and exit\n",
         usage(program)
     );
     super::write_stdout(&text)

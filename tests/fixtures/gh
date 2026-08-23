@@ -346,6 +346,44 @@ if [ "$1 $2" = "api graphql" ]; then
     printf '{"errors":[{"message":"Could not resolve to a node with the global id of missing"}]}\n'
     exit 0
   fi
+  if jq -e '.query | contains("PullRequestFiles")' <<<"$payload" >/dev/null; then
+    case "${GH_TEST_PR_FILES:-success}" in
+      empty)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":0,"additions":0,"deletions":0,"files":{"nodes":[],"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        ;;
+      last-page-cursor)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":1,"additions":1,"deletions":0,"files":{"nodes":[{"path":"last.txt","changeType":"ADDED","additions":1,"deletions":0}],"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":"files-cursor"}}}}}}\n'
+        ;;
+      invalid-node)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":1,"additions":1,"deletions":2,"files":{"nodes":[42],"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        ;;
+      missing-total-count)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":0,"additions":1,"deletions":2,"files":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        ;;
+      invalid-page-info)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":0,"additions":1,"deletions":2,"files":{"nodes":[],"totalCount":0,"pageInfo":{"hasNextPage":true,"endCursor":null}}}}}}\n'
+        ;;
+      page-failure)
+        printf 'simulated pull request files failure\n' >&2
+        exit 34
+        ;;
+      server-truncated)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":4001,"additions":4001,"deletions":4002,"files":{"nodes":[{"path":"first.txt","changeType":"ADDED","additions":1,"deletions":0}],"totalCount":4001,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        ;;
+      success)
+        if [ "$(jq -r '.variables.limit' <<<"$payload")" -eq 1 ]; then
+          printf '{"data":{"repository":{"pullRequest":{"changedFiles":3,"additions":12,"deletions":4,"files":{"nodes":[{"path":"src/new.rs","changeType":"ADDED","additions":10,"deletions":0}],"totalCount":3,"pageInfo":{"hasNextPage":true,"endCursor":"files-cursor"}}}}}}\n'
+        else
+          printf '{"data":{"repository":{"pullRequest":{"changedFiles":3,"additions":12,"deletions":4,"files":{"nodes":[{"path":"src/new.rs","changeType":"ADDED","additions":10,"deletions":0},{"path":"README.md","changeType":"MODIFIED","additions":2,"deletions":4},{"path":"old.txt","changeType":"DELETED","additions":0,"deletions":7}],"totalCount":3,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        fi
+        ;;
+      *)
+        printf 'unknown pull request files response fixture: %s\n' "${GH_TEST_PR_FILES}" >&2
+        exit 90
+        ;;
+    esac
+    exit 0
+  fi
   if jq -e '.query | contains("nodes(ids: $ids)")' <<<"$payload" >/dev/null; then
     case "${GH_TEST_THREAD_DETAIL:-success}" in
       missing)

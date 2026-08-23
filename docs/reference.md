@@ -43,6 +43,16 @@ gh-loupe pr checks TARGET --failed-only [--required] [--failed-diagnostics] [--i
 
 The default output has `data.checks` with the existing check metadata. `--failed-diagnostics` does not change that output to failed-only. With `--failed-only`, the output has `data.summary` and `data.checks`; `summary` contains `total`, `passed`, `pending`, and `failed` for all retrieved checks, while `checks` contains only `fail` and `cancel` buckets. `skipping` counts as `passed` and `cancel` counts as `failed`. `--required` applies to both the summary and returned checks. Zero failures is a successful result with `summary.failed` set to `0` and an empty `checks` array.
 
+## Pull request files
+
+```shell
+gh-loupe pr files TARGET [--limit N]
+```
+
+`pr files` returns at most `N` entries in `data.files`. Each entry contains only `path`, `status`, `additions`, and `deletions`; patches, diff hunks, and file contents are not retrieved. `--limit` defaults to 20 and accepts 1 through 100.
+
+`data.summary` describes the whole pull request, not only the returned entries. It contains `total`, `additions`, and `deletions`. `data.totalCount` is the whole pull request file count, and `data.truncated` is true when the returned list is incomplete, including when GitHub cannot expose every changed file.
+
 ## Pull request reviews
 
 ```shell

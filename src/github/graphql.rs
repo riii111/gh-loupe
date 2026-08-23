@@ -7,10 +7,13 @@ use crate::model::Target;
 
 use super::cli;
 
+pub mod files;
 pub mod issue_relations;
 mod pagination;
 pub mod review_thread;
 pub mod review_threads;
+
+pub use files::pull_request_files;
 
 const OVERVIEW_QUERY: &str = r"
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {

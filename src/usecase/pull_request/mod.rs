@@ -4,6 +4,7 @@ use crate::error::{Exit, Result};
 
 pub mod checks;
 pub mod comments;
+pub mod files;
 pub mod overview;
 pub mod review_thread;
 pub mod review_threads;
