@@ -351,6 +351,9 @@ if [ "$1 $2" = "api graphql" ]; then
       empty)
         printf '{"data":{"repository":{"pullRequest":{"changedFiles":0,"additions":0,"deletions":0,"files":{"nodes":[],"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
         ;;
+      last-page-cursor)
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":1,"additions":1,"deletions":0,"files":{"nodes":[{"path":"last.txt","changeType":"ADDED","additions":1,"deletions":0}],"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":"files-cursor"}}}}}}\n'
+        ;;
       invalid-node)
         printf '{"data":{"repository":{"pullRequest":{"changedFiles":1,"additions":1,"deletions":2,"files":{"nodes":[42],"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
         ;;

@@ -94,9 +94,11 @@ fn validate_response(pull_request: &Value) -> Result<()> {
         .get("hasNextPage")
         .and_then(Value::as_bool)
         .ok_or_else(invalid_graphql_response)?;
-    match (has_next_page, page_info.get("endCursor")) {
-        (true, Some(Value::String(cursor))) if !cursor.is_empty() => Ok(()),
-        (false, Some(Value::Null)) => Ok(()),
+    if !has_next_page {
+        return Ok(());
+    }
+    match page_info.get("endCursor") {
+        Some(Value::String(cursor)) if !cursor.is_empty() => Ok(()),
         _ => Err(invalid_graphql_response()),
     }
 }

@@ -82,6 +82,11 @@ run_files empty GH_TEST_PR_FILES=empty "$GH_LOUPE_BIN" pr files 42 --repo riii11
 assert_json '.data.files == [] and .data.summary == {"total":0,"additions":0,"deletions":0} and .data.truncated == false' \
   "$tmpdir/empty.stdout" >/dev/null
 
+run_files last-page-cursor GH_TEST_PR_FILES=last-page-cursor "$GH_LOUPE_BIN" \
+  pr files 42 --repo riii111/dotfiles
+assert_json '.data.files == [{"path":"last.txt","status":"ADDED","additions":1,"deletions":0}] and .data.truncated == false' \
+  "$tmpdir/last-page-cursor.stdout" >/dev/null
+
 run_files url "$GH_LOUPE_BIN" pr files https://github.com/riii111/dotfiles/pull/42 --compact
 test "$(wc -l <"$tmpdir/url.stdout" | tr -d ' ')" -eq 1
 
@@ -109,6 +114,7 @@ assert_runtime_error() {
   fi
   test "$status" -eq 1
   test ! -s "$tmpdir/$name.stdout"
+  # shellcheck disable=SC2016
   assert_json --arg kind "$expected_kind" '.schemaVersion == 1 and .error.kind == $kind' \
     "$tmpdir/$name.stderr" >/dev/null
 }
