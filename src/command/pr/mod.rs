@@ -23,6 +23,8 @@ pub(super) enum Action {
     },
     Comments {
         include_details: bool,
+        limit: Option<usize>,
+        since: Option<String>,
     },
     Files {
         limit: usize,
@@ -116,10 +118,11 @@ pub(super) fn execute(
             diagnostics,
         } => checks::execute(&target, required, diagnostics)?,
         Action::ForCommit { .. } => unreachable!("for-commit returns before resolving a PR target"),
-        Action::Comments { include_details } => Value::Object(Map::from_iter([(
-            "comments".to_owned(),
-            Value::Array(comments::execute(&target, include_details)?),
-        )])),
+        Action::Comments {
+            include_details,
+            limit,
+            since,
+        } => comments::execute(&target, include_details, limit, since.as_deref())?,
         Action::Files { limit } => files::execute(&target, limit)?,
         Action::Overview => overview::execute(&target)?,
         Action::Reviews {

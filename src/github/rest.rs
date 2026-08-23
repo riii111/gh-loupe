@@ -21,11 +21,8 @@ pub fn issue(target: &Target) -> Result<Value> {
     Ok(issue)
 }
 
-pub fn issue_comments(target: &Target) -> Result<Vec<Value>> {
-    let endpoint = format!(
-        "repos/{}/issues/{}/comments?per_page=100",
-        target.repository, target.number
-    );
+pub fn issue_comments(target: &Target, since: Option<&str>) -> Result<Vec<Value>> {
+    let endpoint = comments_endpoint(target, since);
     let pages = cli::json_runtime(
         ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
         None,
@@ -55,11 +52,8 @@ pub fn pull_request_reviews(target: &Target) -> Result<Vec<Value>> {
     )
 }
 
-pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
-    let endpoint = format!(
-        "repos/{}/issues/{}/comments?per_page=100",
-        target.repository, target.number
-    );
+pub fn pull_request_comments(target: &Target, since: Option<&str>) -> Result<Vec<Value>> {
+    let endpoint = comments_endpoint(target, since);
     let pages = cli::json_runtime(
         ["api", "--method", "GET", "--paginate", "--slurp", &endpoint],
         None,
@@ -70,6 +64,18 @@ pub fn pull_request_comments(target: &Target) -> Result<Vec<Value>> {
         "GitHub returned an invalid comments page",
         "GitHub returned an invalid conversation comment",
     )
+}
+
+fn comments_endpoint(target: &Target, since: Option<&str>) -> String {
+    let mut endpoint = format!(
+        "repos/{}/issues/{}/comments?per_page=100",
+        target.repository, target.number
+    );
+    if let Some(since) = since {
+        endpoint.push_str("&since=");
+        endpoint.push_str(&percent_encode(since));
+    }
+    endpoint
 }
 
 pub fn search_issues(repository: &str, query: &str, limit: usize) -> Result<Value> {

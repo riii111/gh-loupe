@@ -1,11 +1,17 @@
 use crate::error::{Exit, Result};
 use crate::output;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Action {
     Overview,
-    Comments { include_details: bool },
-    Relations { limit: i32 },
+    Comments {
+        include_details: bool,
+        limit: Option<usize>,
+        since: Option<String>,
+    },
+    Relations {
+        limit: i32,
+    },
 }
 
 pub(super) fn parse<I>(program: &str, mut remaining: I) -> Result<super::Args>
@@ -50,12 +56,12 @@ pub(super) fn execute(
     repo: Option<String>,
     program: &str,
 ) -> Result<serde_json::Value> {
-    let argument_error: fn(&str, &str) -> Exit = match action {
+    let argument_error: fn(&str, &str) -> Exit = match &action {
         Action::Overview => overview::argument_error,
         Action::Comments { .. } => comments::argument_error,
         Action::Relations { .. } => relations::argument_error,
     };
-    let validate_number = match action {
+    let validate_number = match &action {
         Action::Relations { .. } => positive_graphql_number,
         Action::Overview | Action::Comments { .. } => super::target::positive_number,
     };
@@ -69,7 +75,11 @@ pub(super) fn execute(
     )?;
     let data = match action {
         Action::Overview => overview::execute(&target)?,
-        Action::Comments { include_details } => comments::execute(&target, include_details)?,
+        Action::Comments {
+            include_details,
+            limit,
+            since,
+        } => comments::execute(&target, include_details, limit, since.as_deref())?,
         Action::Relations { limit } => relations::execute(&target, limit)?,
     };
     Ok(output::success(data))

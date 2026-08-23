@@ -8,13 +8,15 @@ Issue commands require an explicit subcommand:
 
 ```shell
 gh-loupe issue overview TARGET
-gh-loupe issue comments TARGET [--include-details]
+gh-loupe issue comments TARGET [--include-details] [--limit N] [--since TIMESTAMP]
 gh-loupe issue relations TARGET [--limit N]
 ```
 
 `overview` returns `data.repository` and `data.issue`. The Issue object contains the fixed metadata schema, including `body`, `state`, `stateReason`, `subIssues`, and `dependencies`. It does not retrieve or return comments.
 
 `comments` returns `data.repository` and `data.comments`. Each comment has only `id`, `url`, `author`, `body`, `createdAt`, `updatedAt`, and `detailsOmitted`. All pages are retrieved and comments are ordered by `createdAt`, then by `id` for equal timestamps.
+
+`--limit` accepts 1 through 100 and returns the latest comments in the same chronological order. `--since TIMESTAMP` selects comments whose `updatedAt` is later than the timestamp, including comments created earlier and edited afterward. Either option adds `totalCount` for the comments remaining after `--since` and before `--limit`, and `truncated`, which is true only when `--limit` omits comments. Without either option, the existing response shape is preserved.
 
 By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as pull request reviews. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that comment body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every comment.
 
@@ -48,10 +50,12 @@ The default output has `data.checks` with the existing check metadata. `--failed
 ## Pull request comments
 
 ```shell
-gh-loupe pr comments TARGET [--include-details]
+gh-loupe pr comments TARGET [--include-details] [--limit N] [--since TIMESTAMP]
 ```
 
 `pr comments` returns `data.comments`. Each comment has only `id`, `url`, `author`, `body`, `createdAt`, `updatedAt`, and `detailsOmitted`. All pages are retrieved and comments are ordered by `createdAt`, then by `id` for equal timestamps.
+
+`--limit` accepts 1 through 100 and returns the latest comments in the same chronological order. `--since TIMESTAMP` selects comments whose `updatedAt` is later than the timestamp, including comments created earlier and edited afterward. Either option adds `totalCount` for the comments remaining after `--since` and before `--limit`, and `truncated`, which is true only when `--limit` omits comments. Without either option, the existing response shape is preserved.
 
 By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `issue comments`, `pr reviews`, and `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that comment body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every comment.
 

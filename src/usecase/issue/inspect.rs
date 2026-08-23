@@ -16,15 +16,30 @@ pub fn overview(target: &Target) -> Result<Value> {
     Ok(Value::Object(result))
 }
 
-pub fn comments(target: &Target, include_details: bool) -> Result<Value> {
+pub fn comments(
+    target: &Target,
+    include_details: bool,
+    limit: Option<usize>,
+    since: Option<&str>,
+) -> Result<Value> {
     reject_pull_request(&rest::issue(target)?)?;
-    let comments = project_comments(rest::issue_comments(target)?, include_details)?;
+    let mut comments =
+        project_comments(rest::issue_comments(target, since)?, include_details, since)?;
+    if let Some(limit) = limit {
+        let start = comments.total_count.saturating_sub(limit);
+        comments.comments.drain(..start);
+        comments.truncated = comments.comments.len() < comments.total_count;
+    }
     let mut result = Map::new();
     result.insert(
         "repository".to_owned(),
         Value::String(target.repository.clone()),
     );
-    result.insert("comments".to_owned(), Value::Array(comments));
+    result.insert("comments".to_owned(), Value::Array(comments.comments));
+    if limit.is_some() || since.is_some() {
+        result.insert("totalCount".to_owned(), Value::from(comments.total_count));
+        result.insert("truncated".to_owned(), Value::Bool(comments.truncated));
+    }
     Ok(Value::Object(result))
 }
 
@@ -80,28 +95,48 @@ fn reject_pull_request(issue: &Value) -> Result<()> {
     Ok(())
 }
 
-fn project_comments(comments: Vec<Value>, include_details: bool) -> Result<Vec<Value>> {
+struct CommentList {
+    comments: Vec<Value>,
+    total_count: usize,
+    truncated: bool,
+}
+
+fn project_comments(
+    comments: Vec<Value>,
+    include_details: bool,
+    since: Option<&str>,
+) -> Result<CommentList> {
     let mut comments = comments
         .into_iter()
         .map(|comment| project_comment(comment, include_details))
         .collect::<Result<Vec<_>>>()?;
+    if let Some(since) = since {
+        comments.retain(|comment| comment.updated_at.as_str() > since);
+    }
     comments.sort_by(|left, right| {
         left.created_at
             .cmp(&right.created_at)
             .then_with(|| left.id.cmp(&right.id))
     });
-    Ok(comments.into_iter().map(|comment| comment.value).collect())
+    let total_count = comments.len();
+    Ok(CommentList {
+        comments: comments.into_iter().map(|comment| comment.value).collect(),
+        total_count,
+        truncated: false,
+    })
 }
 
 struct Comment {
     id: String,
     created_at: String,
+    updated_at: String,
     value: Value,
 }
 
 fn project_comment(comment: Value, include_details: bool) -> Result<Comment> {
     let id = required_string_field(&comment, "node_id")?.to_owned();
     let created_at = required_string_field(&comment, "created_at")?.to_owned();
+    let updated_at = required_string_field(&comment, "updated_at")?.to_owned();
     let mut result = Map::new();
     result.insert("id".to_owned(), Value::String(id.clone()));
     result.insert(
@@ -125,6 +160,7 @@ fn project_comment(comment: Value, include_details: bool) -> Result<Comment> {
     Ok(Comment {
         id,
         created_at,
+        updated_at,
         value: Value::Object(result),
     })
 }
@@ -387,15 +423,22 @@ mod tests {
                 }),
             ],
             false,
+            None,
         )
         .unwrap_or_else(|_| panic!("valid comments"));
 
-        assert_eq!(comments[0]["id"], "IC_a");
-        assert_eq!(comments[0]["author"], Value::Null);
-        assert_eq!(comments[1]["id"], "IC_z");
-        assert_eq!(comments[0].as_object().expect("comment object").len(), 7);
+        assert_eq!(comments.comments[0]["id"], "IC_a");
+        assert_eq!(comments.comments[0]["author"], Value::Null);
+        assert_eq!(comments.comments[1]["id"], "IC_z");
         assert_eq!(
-            comments[0]["url"],
+            comments.comments[0]
+                .as_object()
+                .expect("comment object")
+                .len(),
+            7
+        );
+        assert_eq!(
+            comments.comments[0]["url"],
             "https://github.com/owner/repository/issues/39#issuecomment-1"
         );
     }

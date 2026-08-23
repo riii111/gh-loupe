@@ -269,7 +269,7 @@ run_comments() {
   assert_json '
     .schemaVersion == 1 and
     (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
-    (.data | keys == ["comments"])
+    (.data | has("comments"))
   ' "$tmpdir/$name.comments.stdout" >/dev/null
 }
 
@@ -709,6 +709,15 @@ assert_json '
 ' "$tmpdir/issue-comments-include-details.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/issue-comments-include-details.stdout")" -eq 1
 
+run_cli issue-comments-limit-since GH_TEST_ISSUE_COMMENTS=success -- \
+  issue comments 42 --repo riii111/dotfiles --limit 1 --since 2026-01-01T01:30:00Z
+assert_json '
+  (.data | keys == ["comments","repository","totalCount","truncated"]) and
+  [.data.comments[].id] == ["IC_z"] and
+  .data.totalCount == 2 and
+  .data.truncated == true
+' "$tmpdir/issue-comments-limit-since.stdout" >/dev/null
+
 if env PATH="$tmpdir/bin:$PATH" "$tmpdir/rust/gh-loupe" issue comments 42 --repo riii111/dotfiles \
   --include-details=true >"$tmpdir/issue-comments-include-details-value.stdout" \
   2>"$tmpdir/issue-comments-include-details-value.stderr"; then
@@ -749,16 +758,29 @@ assert_argument_error issue-relations-limit-high issue relations 42 --limit 101
 assert_argument_error issue-relations-limit-equals issue relations 42 --limit=0
 assert_argument_error issue-relations-abbreviated-limit issue relations 42 --lim 10
 assert_argument_error issue-comments-abbreviated-include-details issue comments 42 --incl
+assert_argument_error issue-comments-limit-zero issue comments 42 --limit 0
+assert_argument_error issue-comments-limit-high issue comments 42 --limit 101
+assert_argument_error issue-comments-limit-equals issue comments 42 --limit=0
+assert_argument_error issue-comments-abbreviated-limit issue comments 42 --lim 10
+assert_argument_error issue-comments-since-empty issue comments 42 --since=
 
 run_cli pr-comments-help -- pr comments --help
-grep -F 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] target' \
+grep -F 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--limit N] [--since TIMESTAMP] target' \
   "$tmpdir/pr-comments-help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
+  "$tmpdir/pr-comments-help.stdout" >/dev/null
+grep -F -- '--limit N           return the latest 1 through 100 comments' \
+  "$tmpdir/pr-comments-help.stdout" >/dev/null
+grep -F -- '--since TIMESTAMP   return comments updated after TIMESTAMP' \
   "$tmpdir/pr-comments-help.stdout" >/dev/null
 run_cli issue-comments-help -- issue comments --help
-grep -F 'usage: gh-loupe issue comments [-h] [--repo REPO] [--include-details] target' \
+grep -F 'usage: gh-loupe issue comments [-h] [--repo REPO] [--include-details] [--limit N] [--since TIMESTAMP] target' \
   "$tmpdir/issue-comments-help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
+  "$tmpdir/issue-comments-help.stdout" >/dev/null
+grep -F -- '--limit N           return the latest 1 through 100 comments' \
+  "$tmpdir/issue-comments-help.stdout" >/dev/null
+grep -F -- '--since TIMESTAMP   return comments updated after TIMESTAMP' \
   "$tmpdir/issue-comments-help.stdout" >/dev/null
 
 run_cli issue-relations-default "GH_TEST_CALLS_FILE=$tmpdir/relations.calls" -- \
@@ -973,7 +995,7 @@ fi
 test "$comments_status" -eq 2
 test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
-grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] target' \
+grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--limit N] [--since TIMESTAMP] target' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
 grep -F 'gh-loupe pr comments: error: pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
@@ -1018,6 +1040,35 @@ assert_json '
 test "$(cat "$calls_file")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
 test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -eq 1
+
+run_comments comments-limit GH_PR_COMMENTS=success -- \
+  pr comments 42 --repo riii111/dotfiles --limit 2
+assert_json '
+  (.data | keys == ["comments","totalCount","truncated"]) and
+  [.data.comments[].id] == ["IC_b","IC_z"] and
+  .data.totalCount == 3 and
+  .data.truncated == true
+' "$tmpdir/comments-limit.comments.stdout" >/dev/null
+
+run_comments comments-since GH_PR_COMMENTS=success -- \
+  pr comments 42 --repo riii111/dotfiles --since 2026-01-01T01:30:00Z
+assert_json '
+  (.data | keys == ["comments","totalCount","truncated"]) and
+  [.data.comments[].id] == ["IC_a","IC_z"] and
+  .data.totalCount == 2 and
+  .data.truncated == false
+' "$tmpdir/comments-since.comments.stdout" >/dev/null
+
+calls_file="$tmpdir/comments-filter.calls"
+run_comments comments-filter "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=success -- \
+  pr comments 42 --repo riii111/dotfiles --limit=1 --since=2026-01-01T01:30:00Z
+assert_json '
+  [.data.comments[].id] == ["IC_z"] and
+  .data.totalCount == 2 and
+  .data.truncated == true
+' "$tmpdir/comments-filter.comments.stdout" >/dev/null
+test "$(cat "$calls_file")" = \
+  'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100&since=2026-01-01T01%3A30%3A00Z'
 
 run_comments comments-include-details GH_PR_COMMENTS=success -- \
   pr comments 42 --repo riii111/dotfiles --include-details
