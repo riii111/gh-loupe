@@ -55,6 +55,16 @@ gh-loupe pr comments TARGET [--include-details]
 
 By default, closed `<details>` blocks in `body` are omitted using the same Markdown rules as `issue comments`, `pr reviews`, and `pr review-thread`. Human text, `<details open>`, incomplete or malformed tags, and tags inside code spans, fenced code, or HTML comments are preserved. `detailsOmitted` is true only when that comment body was changed. `--include-details` returns the original body and sets `detailsOmitted` to false for every comment.
 
+## Pull request files
+
+```shell
+gh-loupe pr files TARGET [--limit N]
+```
+
+`pr files` returns at most `N` entries in `data.files`. Each entry contains only `path`, `status`, `additions`, and `deletions`; patches, diff hunks, and file contents are not retrieved. `--limit` defaults to 20 and accepts 1 through 100.
+
+`data.summary` describes the whole pull request, not only the returned entries. It contains `total`, `additions`, and `deletions`. `data.totalCount` is the whole pull request file count, and `data.truncated` is true when the returned list is incomplete, including when GitHub cannot expose every changed file.
+
 ## Pull request reviews
 
 ```shell
