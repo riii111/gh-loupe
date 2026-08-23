@@ -642,9 +642,25 @@ JSON
       cat "$GH_FIXTURE_DATA/overview-timing.json"
       exit 0
     fi
-    if ! jq -e '.query | contains("title") and ((contains("body") or contains("comments") or contains("reviews")) | not)' <<<"$payload" >/dev/null; then
+    overview_include_body=0
+    if jq -e '.query | contains("      body")' <<<"$payload" >/dev/null; then
+      overview_include_body=1
+    fi
+    if [ "$overview_include_body" -eq 0 ] \
+      && ! jq -e '.query | contains("title") and ((contains("body") or contains("comments") or contains("reviews")) | not)' <<<"$payload" >/dev/null; then
       printf 'overview query requested content fields\n' >&2
       exit 89
+    fi
+    if [ "$overview_include_body" -eq 1 ] \
+      && ! jq -e '.query | contains("title") and contains("body") and ((contains("comments") or contains("reviews")) | not)' <<<"$payload" >/dev/null; then
+      printf 'overview body query requested unrelated content fields\n' >&2
+      exit 89
+    fi
+    if [ "${GH_OVERVIEW_BODY:-}" = invalid ]; then
+      cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","body":42,"state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+JSON
+      exit 0
     fi
     if [ "${GH_OVERVIEW_TITLE:-}" = missing ]; then
       cat "$GH_FIXTURE_DATA/overview-missing-title.json"
@@ -655,9 +671,20 @@ JSON
       exit 0
     fi
     if [ "${GH_OVERVIEW_NULL_FIELDS:-}" = 1 ]; then
-      cat "$GH_FIXTURE_DATA/overview-null-fields.json"
+      if [ "$overview_include_body" -eq 1 ]; then
+        jq '.data.repository.pullRequest.body = null' \
+          "$GH_FIXTURE_DATA/overview-null-fields.json"
+      else
+        cat "$GH_FIXTURE_DATA/overview-null-fields.json"
+      fi
       exit 0
     fi
+    overview_body='intent
+<details data-source="bot">
+<summary>evidence</summary>
+secret
+</details>
+after'
     if [ -n "${GH_OVERVIEW_PAGINATION:-}" ]; then
       cursor="$(jq -r '(.variables.cursor // "initial")' <<<"$payload")"
       case "${GH_OVERVIEW_PAGINATION}" in
@@ -674,15 +701,34 @@ JSON
         empty) page_info='{"hasNextPage":true,"endCursor":""}' ;;
         wrong-type) page_info='{"hasNextPage":true,"endCursor":42}' ;;
       esac
-      cat <<JSON
+      if [ "$overview_include_body" -eq 1 ]; then
+        jq --arg body "$overview_body" \
+          --argjson page_info "$page_info" \
+          '.data.repository.pullRequest.body = $body | .data.repository.pullRequest.reviewThreads.pageInfo = $page_info' \
+          "$GH_FIXTURE_DATA/overview-page-1.json"
+      else
+        cat <<JSON
 {"data":{"repository":{"pullRequest":{"number":42,"title":"Add pull request title","url":"https://github.com/riii111/dotfiles/pull/42","state":"OPEN","isDraft":false,"headRefOid":"head","baseRefOid":"base","reviewDecision":"APPROVED","mergeStateStatus":"CLEAN","reviewThreads":{"nodes":[],"pageInfo":$page_info}}}}}
 JSON
+      fi
       exit 0
     fi
     if jq -e '.variables.cursor == "overview-cursor"' <<<"$payload" >/dev/null; then
-      cat "$GH_FIXTURE_DATA/overview-page-2.json"
+      if [ "$overview_include_body" -eq 1 ]; then
+        jq --arg body "$overview_body" \
+          '.data.repository.pullRequest.body = $body' \
+          "$GH_FIXTURE_DATA/overview-page-2.json"
+      else
+        cat "$GH_FIXTURE_DATA/overview-page-2.json"
+      fi
     else
-      cat "$GH_FIXTURE_DATA/overview-page-1.json"
+      if [ "$overview_include_body" -eq 1 ]; then
+        jq --arg body "$overview_body" \
+          '.data.repository.pullRequest.body = $body' \
+          "$GH_FIXTURE_DATA/overview-page-1.json"
+      else
+        cat "$GH_FIXTURE_DATA/overview-page-1.json"
+      fi
     fi
     exit 0
   fi

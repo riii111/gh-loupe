@@ -828,6 +828,27 @@ assert_json '
 ' "$tmpdir/overview-default.overview.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -eq 1
 
+run_overview overview-body -- pr overview 42 --repo riii111/dotfiles --include-body
+assert_json '
+  .data.pullRequest.body == "intent\nevidence\nafter" and
+  .data.pullRequest.detailsOmitted == true and
+  (.data.pullRequest | keys | contains(["body", "detailsOmitted"]))
+' "$tmpdir/overview-body.overview.stdout" >/dev/null
+
+run_overview overview-body-with-details -- pr overview 42 --repo riii111/dotfiles \
+  --include-body --include-details
+assert_json '
+  .data.pullRequest.body == "intent\n<details data-source=\"bot\">\n<summary>evidence</summary>\nsecret\n</details>\nafter" and
+  .data.pullRequest.detailsOmitted == false
+' "$tmpdir/overview-body-with-details.overview.stdout" >/dev/null
+
+run_overview overview-null-body GH_OVERVIEW_NULL_FIELDS=1 -- \
+  pr overview 42 --repo riii111/dotfiles --include-body
+assert_json '
+  .data.pullRequest.body == null and
+  .data.pullRequest.detailsOmitted == false
+' "$tmpdir/overview-null-body.overview.stdout" >/dev/null
+
 for mode in repeat cycle missing empty wrong-type; do
   case "$mode" in
     repeat) expected_calls=2 ;;
@@ -887,6 +908,10 @@ assert_json '.data.checks.all == {"total": 0, "passed": 0, "pending": 0, "failed
 
 assert_argument_error overview-abbreviated-option pr overview 42 --comp
 assert_argument_error overview-unknown-option pr overview 42 --include-resolved
+assert_argument_error overview-details-without-body pr overview 42 --include-details
+grep -F 'gh-loupe pr overview: error: argument --include-details: requires --include-body' \
+  "$tmpdir/overview-details-without-body.argument.stderr" >/dev/null
+assert_argument_error overview-include-body-equals pr overview 42 --include-body=true
 assert_argument_error overview-invalid-target pr overview nope --repo riii111/dotfiles
 assert_overview_runtime_error overview-unknown-bucket invalidResponse false \
   GH_OVERVIEW_CHECKS=unknown -- pr overview 42 --repo riii111/dotfiles
@@ -935,6 +960,8 @@ assert_overview_runtime_error overview-missing-title invalidResponse false \
   GH_OVERVIEW_TITLE=missing -- pr overview 42 --repo riii111/dotfiles
 assert_overview_runtime_error overview-invalid-title invalidResponse false \
   GH_OVERVIEW_TITLE=invalid -- pr overview 42 --repo riii111/dotfiles
+assert_overview_runtime_error overview-invalid-body invalidResponse false \
+  GH_OVERVIEW_BODY=invalid -- pr overview 42 --repo riii111/dotfiles --include-body
 
 assert_argument_error comments-missing-target pr comments
 assert_argument_error comments-abbreviated-repo pr comments 42 --rep riii111/dotfiles
