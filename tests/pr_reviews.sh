@@ -49,6 +49,7 @@ run_reviews success GH_TEST_CALLS_FILE="$tmpdir/calls" "$GH_LOUPE_BIN" \
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+  (.data | keys == ["reviews"]) and
   .data.reviews == [
     {"id":"review-unknown","author":"future","state":"FUTURE_STATE","body":"future","submittedAt":"2025-12-31T00:00:00Z","commitOid":"oid-future","detailsOmitted":false},
     {"id":"review-a","author":"alice","state":"CHANGES_REQUESTED","body":"change","submittedAt":"2026-01-01T00:00:00Z","commitOid":"oid-a","detailsOmitted":false},
@@ -62,6 +63,21 @@ assert_json '
 ' "$tmpdir/success.stdout" >/dev/null
 test "$(cat "$tmpdir/calls")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/pulls/42/reviews?per_page=100'
+
+run_reviews limit "$GH_LOUPE_BIN" pr reviews \
+  42 --repo riii111/dotfiles --limit 2
+assert_json '
+  (.data | keys == ["reviews","totalCount","truncated"]) and
+  [.data.reviews[].id] == ["review-null","review-null-a"] and
+  .data.totalCount == 6 and
+  .data.truncated == true and
+  (.data.reviews | all(keys == ["author","body","commitOid","detailsOmitted","id","state","submittedAt"]))
+' "$tmpdir/limit.stdout" >/dev/null
+
+run_reviews limit-boundary "$GH_LOUPE_BIN" pr reviews \
+  42 --repo riii111/dotfiles --limit 100
+assert_json '.data.totalCount == 6 and .data.truncated == false and (.data.reviews | length == 6)' \
+  "$tmpdir/limit-boundary.stdout" >/dev/null
 
 run_reviews include-details "$GH_LOUPE_BIN" pr reviews \
   42 --repo riii111/dotfiles --include-details
@@ -103,6 +119,29 @@ test ! -s "$tmpdir/include-details-value.stdout"
 grep -F 'gh-loupe pr reviews: error: unrecognized arguments: --include-details=true' \
   "$tmpdir/include-details-value.stderr" >/dev/null
 
+for limit in 0 101; do
+  if env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles \
+    --limit "$limit" >"$tmpdir/limit-$limit.stdout" 2>"$tmpdir/limit-$limit.stderr"; then
+    limit_status=0
+  else
+    limit_status=$?
+  fi
+  test "$limit_status" -eq 2
+  test ! -s "$tmpdir/limit-$limit.stdout"
+  grep -F 'argument --limit: must be between 1 and 100' \
+    "$tmpdir/limit-$limit.stderr" >/dev/null
+done
+
+if env PATH="$tmpdir/bin:$PATH" "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles \
+  --lim 2 >"$tmpdir/limit-abbreviated.stdout" 2>"$tmpdir/limit-abbreviated.stderr"; then
+  limit_abbreviated_status=0
+else
+  limit_abbreviated_status=$?
+fi
+test "$limit_abbreviated_status" -eq 2
+test ! -s "$tmpdir/limit-abbreviated.stdout"
+grep -F 'unrecognized arguments: --lim 2' "$tmpdir/limit-abbreviated.stderr" >/dev/null
+
 assert_runtime_error invalid-response invalidResponse \
   GH_TEST_REVIEWS=invalid-page "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 assert_runtime_error invalid-field invalidResponse \
@@ -113,7 +152,9 @@ assert_runtime_error page-failure network \
   GH_TEST_REVIEWS=page-failure "$GH_LOUPE_BIN" pr reviews 42 --repo riii111/dotfiles
 
 run_reviews help "$GH_LOUPE_BIN" pr reviews --help
-grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--include-details] target' \
+grep -F 'usage: gh-loupe pr reviews [-h] [--repo REPO] [--include-details] [--limit N] target' \
   "$tmpdir/help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
+  "$tmpdir/help.stdout" >/dev/null
+grep -F -- '--limit N           return the latest 1 through 100 reviews' \
   "$tmpdir/help.stdout" >/dev/null
