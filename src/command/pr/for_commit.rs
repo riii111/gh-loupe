@@ -59,7 +59,6 @@ where
         action: super::super::Action::Pr(super::Action::ForCommit { limit }),
         target: sha,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -96,7 +95,7 @@ pub(super) fn execute(
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
     super::super::argument_error(
         program,
-        &format!("usage: {program} pr for-commit [-h] [--repo REPO] [--compact] [--limit N] sha"),
+        &format!("usage: {program} pr for-commit [-h] [--repo REPO] [--limit N] sha"),
         "pr for-commit",
         message,
     )
@@ -104,7 +103,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     super::super::write_stdout(&format!(
-        "usage: {program} pr for-commit [-h] [--repo REPO] [--compact] [--limit N] sha\n\npositional arguments:\n  sha          hexadecimal commit SHA, 7 to 40 characters\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N pull requests, from 1 through 100 (default: 20)\n  --compact    emit one-line JSON\n"
+        "usage: {program} pr for-commit [-h] [--repo REPO] [--limit N] sha\n\npositional arguments:\n  sha          hexadecimal commit SHA, 7 to 40 characters\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N pull requests, from 1 through 100 (default: 20)\n"
     ))
 }
 

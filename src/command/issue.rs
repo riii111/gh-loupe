@@ -111,7 +111,7 @@ fn parse_target_args<I>(
     values: I,
     argument_error: fn(&str, &str) -> Exit,
     print_help: fn(&str) -> Result<()>,
-) -> Result<(String, Option<String>, bool)>
+) -> Result<(String, Option<String>)>
 where
     I: Iterator<Item = String>,
 {
@@ -127,16 +127,16 @@ where
         ));
     };
     super::unrecognized_args(program, argument_error, &parsed.unrecognized)?;
-    Ok((target, parsed.repo, parsed.compact))
+    Ok((target, parsed.repo))
 }
 
 fn target_usage(program: &str, command: &str) -> String {
-    format!("usage: {program} issue {command} [-h] [--repo REPO] [--compact] target")
+    format!("usage: {program} issue {command} [-h] [--repo REPO] target")
 }
 
 fn target_help(program: &str, command: &str, description: &str) -> String {
     format!(
-        "{}\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --compact    emit one-line JSON\n\n{}\n",
+        "{}\n\npositional arguments:\n  target       Issue number or GitHub issue URL\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n\n{}\n",
         target_usage(program, command),
         description
     )

@@ -14,7 +14,6 @@ struct Args {
     action: Action,
     target: String,
     repo: Option<String>,
-    compact: bool,
     program: String,
 }
 
@@ -29,7 +28,6 @@ pub fn run() -> Result<()> {
         action,
         target,
         repo,
-        compact,
         program,
     } = parse_args()?;
     let result = match action {
@@ -37,12 +35,8 @@ pub fn run() -> Result<()> {
         Action::Issue(action) => issue::execute(action, &target, repo, &program)?,
         Action::Search(action) => search::execute(action, &target, repo, &program)?,
     };
-    let output = if compact {
-        serde_json::to_string(&result)
-    } else {
-        serde_json::to_string_pretty(&result)
-    }
-    .map_err(|error| Exit::message(error.to_string()))?;
+    let output =
+        serde_json::to_string(&result).map_err(|error| Exit::message(error.to_string()))?;
     write_stdout(&format!("{output}\n"))
 }
 
@@ -115,7 +109,6 @@ pub fn exact_long_option_value<'a>(value: &'a str, option: &str) -> Option<&'a s
 struct SubcommandArgs {
     positionals: Vec<String>,
     repo: Option<String>,
-    compact: bool,
     unrecognized: Vec<String>,
 }
 
@@ -133,7 +126,6 @@ where
 {
     let mut positionals = Vec::new();
     let mut repo = None;
-    let mut compact = false;
     let mut positional_only = false;
     let mut unrecognized = Vec::new();
 
@@ -170,7 +162,6 @@ where
                 }
                 repo = Some(value);
             }
-            "--compact" => compact = true,
             "-h" | "--help" => {
                 print_help(program)?;
                 std::process::exit(0);
@@ -191,7 +182,6 @@ where
     Ok(SubcommandArgs {
         positionals,
         repo,
-        compact,
         unrecognized,
     })
 }

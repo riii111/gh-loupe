@@ -33,7 +33,6 @@ where
         action: super::super::Action::Issue(super::Action::Comments { include_details }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -44,16 +43,14 @@ pub(super) fn execute(target: &Target, include_details: bool) -> Result<serde_js
 
 fn print_help(program: &str) -> Result<()> {
     super::super::write_stdout(&format!(
-        "usage: {program} issue comments [-h] [--repo REPO] [--include-details] [--compact] target\n\npositional arguments:\n  target              Issue number or GitHub issue URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n\nIssue conversation comments are returned in chronological order.\n"
+        "usage: {program} issue comments [-h] [--repo REPO] [--include-details] target\n\npositional arguments:\n  target              Issue number or GitHub issue URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n\nIssue conversation comments are returned in chronological order.\n"
     ))
 }
 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
     super::super::argument_error(
         program,
-        &format!(
-            "usage: {program} issue comments [-h] [--repo REPO] [--include-details] [--compact] target"
-        ),
+        &format!("usage: {program} issue comments [-h] [--repo REPO] [--include-details] target"),
         "issue comments",
         message,
     )

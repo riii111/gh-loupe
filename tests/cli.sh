@@ -298,7 +298,7 @@ done
 
 run_cli issue-relations-help -- issue relations --help
 test ! -s "$tmpdir/issue-relations-help.stderr"
-grep -Fx 'usage: gh-loupe issue relations [-h] [--repo REPO] [--compact] [--limit N] target' \
+grep -Fx 'usage: gh-loupe issue relations [-h] [--repo REPO] [--limit N] target' \
   "$tmpdir/issue-relations-help.stdout" >/dev/null
 grep -Fx '  --limit N    limit each relation list to 1 through 100 items (default: 20)' \
   "$tmpdir/issue-relations-help.stdout" >/dev/null
@@ -313,11 +313,11 @@ for subcommand in issues prs; do
   grep -E "^    $subcommand  +" "$tmpdir/search-help.stdout" >/dev/null
 done
 run_cli search-issues-help -- search issues --help
-grep -F 'usage: gh-loupe search issues [-h] [--repo REPO] [--compact] [--limit N] query' \
+grep -F 'usage: gh-loupe search issues [-h] [--repo REPO] [--limit N] query' \
   "$tmpdir/search-issues-help.stdout" >/dev/null
 grep -F -- '--limit N' "$tmpdir/search-issues-help.stdout" >/dev/null
 run_cli for-commit-help -- pr for-commit --help
-grep -F 'usage: gh-loupe pr for-commit [-h] [--repo REPO] [--compact] [--limit N] sha' \
+grep -F 'usage: gh-loupe pr for-commit [-h] [--repo REPO] [--limit N] sha' \
   "$tmpdir/for-commit-help.stdout" >/dev/null
 
 assert_argument_error_without_github search-missing-query search issues
@@ -330,7 +330,7 @@ assert_argument_error_without_github search-abbreviated-limit search issues keyw
 
 search_calls_file="$tmpdir/search.calls"
 run_cli search-issues-default "GH_TEST_CALLS_FILE=$search_calls_file" -- \
-  search issues keyword --repo riii111/dotfiles --compact
+  search issues keyword --repo riii111/dotfiles
 assert_json '
   .schemaVersion == 1 and
   (.data | keys == ["incompleteResults","issues","repository","totalCount","truncated"]) and
@@ -354,7 +354,7 @@ assert_json '
 ' "$tmpdir/search-prs-default.stdout" >/dev/null
 
 run_cli search-inferred-repo "GH_TEST_CALLS_FILE=$tmpdir/search-inferred.calls" -- \
-  search issues keyword --compact
+  search issues keyword
 test "$(sed -n '1p' "$tmpdir/search-inferred.calls")" = 'repo view --json nameWithOwner'
 grep -F 'repo%3Ariii111%2Fdotfiles%20is%3Aissue' "$tmpdir/search-inferred.calls" >/dev/null
 
@@ -399,7 +399,7 @@ assert_argument_error_without_github for-commit-limit-high pr for-commit 0123456
 
 commit_calls_file="$tmpdir/commit.calls"
 run_cli for-commit-empty "GH_TEST_CALLS_FILE=$commit_calls_file" GH_TEST_COMMIT_RESPONSE=empty -- \
-  pr for-commit 0123456 --repo riii111/dotfiles --compact
+  pr for-commit 0123456 --repo riii111/dotfiles
 assert_json '.data.repository == "riii111/dotfiles" and .data.pullRequests == [] and .data.truncated == false' \
   "$tmpdir/for-commit-empty.stdout" >/dev/null
 grep -Fx 'api --method GET repos/riii111/dotfiles/commits/0123456/pulls?per_page=21' \
@@ -490,13 +490,19 @@ assert_argument_error root-missing-resource
 assert_argument_error pr-missing-subcommand pr
 assert_argument_error issue-missing-subcommand issue
 assert_argument_error issue-pr-only-option issue overview 42 --include-resolved
-grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] target' \
   "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
 grep -F 'gh-loupe issue overview: error: unrecognized arguments: --include-resolved' \
   "$tmpdir/issue-pr-only-option.argument.stderr" >/dev/null
 
+assert_argument_error issue-compact-option issue overview 42 --compact
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] target' \
+  "$tmpdir/issue-compact-option.argument.stderr" >/dev/null
+grep -F 'gh-loupe issue overview: error: unrecognized arguments: --compact' \
+  "$tmpdir/issue-compact-option.argument.stderr" >/dev/null
+
 assert_argument_error issue-invalid-target issue overview 0
-grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] target' \
   "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
 grep -F 'gh-loupe issue overview: error: issue must be a positive number or GitHub issue URL' \
   "$tmpdir/issue-invalid-target.argument.stderr" >/dev/null
@@ -573,16 +579,11 @@ assert_runtime_failure issue-error-precedence notFound issue \
   GH_TEST_MISSING_ISSUE=1 -- \
   issue overview 42 --repo riii111/dotfiles
 
-run_cli issue-url-compact -- issue overview https://github.com/riii111/dotfiles/issues/42 --compact
-test ! -s "$tmpdir/issue-url-compact.stderr"
-test "$(wc -l <"$tmpdir/issue-url-compact.stdout" | tr -d ' ')" -eq 1
+run_cli issue-url -- issue overview https://github.com/riii111/dotfiles/issues/42
+test ! -s "$tmpdir/issue-url.stderr"
+test "$(wc -l <"$tmpdir/issue-url.stdout" | tr -d ' ')" -eq 1
 assert_json '.schemaVersion == 1 and .data.issue.number == 42 and (.data | has("comments") | not)' \
-  "$tmpdir/issue-url-compact.stdout" >/dev/null
-
-run_cli issue-pretty-for-compact -- issue overview 42 --repo riii111/dotfiles
-run_cli issue-compact-for-pretty -- issue overview 42 --repo riii111/dotfiles --compact
-test "$(jq -c 'del(.observedAt)' "$tmpdir/issue-pretty-for-compact.stdout")" = \
-  "$(jq -c 'del(.observedAt)' "$tmpdir/issue-compact-for-pretty.stdout")"
+  "$tmpdir/issue-url.stdout" >/dev/null
 
 run_cli issue-nullable GH_TEST_ISSUE_RESPONSE=nullable -- issue overview 42 --repo riii111/dotfiles
 jq -e '
@@ -618,7 +619,7 @@ else
 fi
 test "$issue_status" -eq 2
 test ! -s "$tmpdir/issue-conflicting-repo.stdout"
-grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] [--compact] target' \
+grep -Fx 'usage: gh-loupe issue overview [-h] [--repo REPO] target' \
   "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
 grep -F 'gh-loupe issue overview: error: --repo conflicts with the issue URL' \
   "$tmpdir/issue-conflicting-repo.stderr" >/dev/null
@@ -679,7 +680,7 @@ assert_json '
 
 issue_comments_calls_file="$tmpdir/issue-comments.calls"
 run_cli issue-comments-default "GH_TEST_CALLS_FILE=$issue_comments_calls_file" -- \
-  issue comments https://github.com/riii111/dotfiles/issues/42 --compact
+  issue comments https://github.com/riii111/dotfiles/issues/42
 test ! -s "$tmpdir/issue-comments-default.stderr"
 # shellcheck disable=SC2016
 assert_json '
@@ -700,7 +701,7 @@ grep -Fx 'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/c
 test "$(wc -l <"$issue_comments_calls_file")" -eq 2
 
 run_cli issue-comments-include-details "GH_TEST_CALLS_FILE=$tmpdir/issue-comments-include-details.calls" -- \
-  issue comments 42 --repo riii111/dotfiles --include-details --compact
+  issue comments 42 --repo riii111/dotfiles --include-details
 assert_json '
   (.data.comments | all(.detailsOmitted == false)) and
   (.data.comments | map(select(.id == "IC_z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
@@ -750,18 +751,18 @@ assert_argument_error issue-relations-abbreviated-limit issue relations 42 --lim
 assert_argument_error issue-comments-abbreviated-include-details issue comments 42 --incl
 
 run_cli pr-comments-help -- pr comments --help
-grep -F 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--compact] target' \
+grep -F 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] target' \
   "$tmpdir/pr-comments-help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
   "$tmpdir/pr-comments-help.stdout" >/dev/null
 run_cli issue-comments-help -- issue comments --help
-grep -F 'usage: gh-loupe issue comments [-h] [--repo REPO] [--include-details] [--compact] target' \
+grep -F 'usage: gh-loupe issue comments [-h] [--repo REPO] [--include-details] target' \
   "$tmpdir/issue-comments-help.stdout" >/dev/null
 grep -F -- '--include-details   include folded <details> content (omitted by default)' \
   "$tmpdir/issue-comments-help.stdout" >/dev/null
 
 run_cli issue-relations-default "GH_TEST_CALLS_FILE=$tmpdir/relations.calls" -- \
-  issue relations 42 --repo riii111/dotfiles --compact
+  issue relations 42 --repo riii111/dotfiles
 test ! -s "$tmpdir/issue-relations-default.stderr"
 assert_json '
   .schemaVersion == 1 and
@@ -778,7 +779,7 @@ assert_json '
 test "$(grep -c 'api graphql --input -' "$tmpdir/relations.calls")" -eq 1
 
 run_cli issue-relations-limit "GH_TEST_RELATIONS_RESPONSE=success" -- \
-  issue relations 42 --repo riii111/dotfiles --limit=2 --compact
+  issue relations 42 --repo riii111/dotfiles --limit=2
 assert_json '.data.subIssues.totalCount == 3 and .data.subIssues.truncated and (.data.subIssues.items | length == 2)' \
   "$tmpdir/issue-relations-limit.stdout" >/dev/null
 run_cli issue-relations-empty GH_TEST_RELATIONS_RESPONSE=empty -- \
@@ -825,7 +826,7 @@ assert_json '
   .data.reviewThreads == {"unresolved": 2} and
   ([.. | objects | keys[]] | any(. == "body" or . == "comments" or . == "reviews" or . == "bucket" or . == "name") | not)
 ' "$tmpdir/overview-default.overview.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -gt 1
+test "$(wc -l <"$tmpdir/overview-default.overview.stdout")" -eq 1
 
 for mode in repeat cycle missing empty wrong-type; do
   case "$mode" in
@@ -849,10 +850,6 @@ awk '
   $2 == "end" && starts < 3 { invalid = 1 }
   END { exit invalid }
 ' "$timing_file"
-
-run_overview overview-compact -- pr overview https://github.com/riii111/dotfiles/pull/42 --compact
-test "$(wc -l <"$tmpdir/overview-compact.overview.stdout")" -eq 1
-assert_json '.data.reviewThreads.unresolved == 2' "$tmpdir/overview-compact.overview.stdout" >/dev/null
 
 run_overview overview-null-fields GH_OVERVIEW_NULL_FIELDS=1 -- pr overview 42 --repo riii111/dotfiles
 assert_json '
@@ -941,9 +938,9 @@ assert_overview_runtime_error overview-invalid-title invalidResponse false \
 
 assert_argument_error comments-missing-target pr comments
 assert_argument_error comments-abbreviated-repo pr comments 42 --rep riii111/dotfiles
-assert_argument_error comments-abbreviated-compact pr comments 42 --comp
 assert_argument_error comments-abbreviated-include-details pr comments 42 --incl
 assert_argument_error comments-include-details-equals pr comments 42 --include-details=true
+assert_argument_error comments-abbreviated-option pr comments 42 --comp
 assert_argument_error comments-invalid-zero pr comments 0 --repo riii111/dotfiles
 assert_argument_error comments-invalid-repo pr comments 42 --repo ../..
 assert_argument_error comments-conflicting-repo \
@@ -976,7 +973,7 @@ fi
 test "$comments_status" -eq 2
 test ! -s "$tmpdir/comments-invalid.stdout"
 test ! -e "$calls_file"
-grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] [--compact] target' \
+grep -Fx 'usage: gh-loupe pr comments [-h] [--repo REPO] [--include-details] target' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
 grep -F 'gh-loupe pr comments: error: pr must be a positive number within GitHub GraphQL Int range or GitHub pr URL' \
   "$tmpdir/comments-invalid.stderr" >/dev/null
@@ -1020,10 +1017,10 @@ assert_json '
 ' "$tmpdir/comments-default.comments.stdout" >/dev/null
 test "$(cat "$calls_file")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
-test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -gt 1
+test "$(wc -l <"$tmpdir/comments-default.comments.stdout")" -eq 1
 
 run_comments comments-include-details GH_PR_COMMENTS=success -- \
-  pr comments 42 --repo riii111/dotfiles --include-details --compact
+  pr comments 42 --repo riii111/dotfiles --include-details
 assert_json '
   (.data.comments | all(.detailsOmitted == false)) and
   (.data.comments | map(select(.id == "IC_z"))[0].body) == "comment\n<details data-source=\"bot\">\n<summary>証拠</summary>\n省略\n</details>\nreply" and
@@ -1031,14 +1028,14 @@ assert_json '
 ' "$tmpdir/comments-include-details.comments.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/comments-include-details.comments.stdout")" -eq 1
 
-run_comments comments-url-compact GH_PR_COMMENTS=empty -- \
-  pr comments https://github.com/riii111/dotfiles/pull/42 --compact
-assert_json '.data.comments == []' "$tmpdir/comments-url-compact.comments.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/comments-url-compact.comments.stdout")" -eq 1
+run_comments comments-url-empty GH_PR_COMMENTS=empty -- \
+  pr comments https://github.com/riii111/dotfiles/pull/42
+assert_json '.data.comments == []' "$tmpdir/comments-url-empty.comments.stdout" >/dev/null
+test "$(wc -l <"$tmpdir/comments-url-empty.comments.stdout")" -eq 1
 
 calls_file="$tmpdir/comments-inferred.calls"
 run_comments comments-inferred-repo "GH_TEST_CALLS_FILE=$calls_file" GH_PR_COMMENTS=empty -- \
-  pr comments 42 --compact
+  pr comments 42
 test "$(sed -n '1p' "$calls_file")" = 'repo view --json nameWithOwner'
 test "$(sed -n '2p' "$calls_file")" = \
   'api --method GET --paginate --slurp repos/riii111/dotfiles/issues/42/comments?per_page=100'
@@ -1059,7 +1056,7 @@ assert_runtime_failure comments-repo-auth authentication comments \
 
 assert_argument_error threads-missing-target pr review-threads
 assert_argument_error threads-abbreviated-repo pr review-threads 42 --rep riii111/dotfiles
-assert_argument_error threads-abbreviated-compact pr review-threads 42 --comp
+assert_argument_error threads-abbreviated-option pr review-threads 42 --comp
 assert_argument_error threads-abbreviated-include-resolved pr review-threads 42 --incl
 assert_argument_error threads-invalid-zero pr review-threads 0 --repo riii111/dotfiles
 assert_argument_error threads-invalid-repo pr review-threads 42 --repo ../..
@@ -1109,10 +1106,10 @@ assert_json '
   ] and
   ([.. | objects | keys[]] | any(. == "body" or . == "author" or . == "url" or . == "diffHunk" or . == "resolvedBy") | not)
 ' "$tmpdir/threads-default.review_threads.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/threads-default.review_threads.stdout")" -gt 1
+test "$(wc -l <"$tmpdir/threads-default.review_threads.stdout")" -eq 1
 
 run_review_threads threads-including-resolved -- \
-  pr review-threads 42 --repo riii111/dotfiles --include-resolved --compact
+  pr review-threads 42 --repo riii111/dotfiles --include-resolved
 assert_json '
   .data.reviewThreads[0].id == "thread-resolved-summary" and
   .data.reviewThreads[0].commentCount == 2 and
@@ -1150,7 +1147,7 @@ assert_runtime_failure threads-repo-auth authentication runtime \
 assert_argument_error thread-missing-target pr review-thread
 assert_argument_error thread-missing-id pr review-thread 42 --repo riii111/dotfiles
 assert_argument_error thread-abbreviated-repo pr review-thread 42 thread-detail --rep riii111/dotfiles
-assert_argument_error thread-abbreviated-compact pr review-thread 42 thread-detail --comp
+assert_argument_error thread-abbreviated-option pr review-thread 42 thread-detail --comp
 assert_argument_error thread-abbreviated-diff-hunk pr review-thread 42 thread-detail --incl
 assert_argument_error thread-abbreviated-details pr review-thread 42 thread-detail --include-det
 assert_argument_error thread-details-value pr review-thread 42 thread-detail --include-details=true
@@ -1202,10 +1199,10 @@ assert_json '
   }] and
   ([.. | objects | keys[]] | any(. == "diffHunk" or . == "databaseId" or . == "resolvedBy" or . == "replyTo" or . == "pullRequest") | not)
 ' "$tmpdir/thread-default.review_thread.stdout" >/dev/null
-test "$(wc -l <"$tmpdir/thread-default.review_thread.stdout")" -gt 1
+test "$(wc -l <"$tmpdir/thread-default.review_thread.stdout")" -eq 1
 
 run_review_thread thread-diff-hunk -- \
-  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk --compact
+  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk
 assert_json '
   [.data.reviewThreads[0].comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
   (.data.reviewThreads[0].comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
@@ -1224,7 +1221,7 @@ assert_json '
 ' "$tmpdir/thread-details-default.review_thread.stdout" >/dev/null
 
 run_review_thread thread-details-included GH_TEST_THREAD_DETAILS=1 -- \
-  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-details --compact
+  pr review-thread 42 thread-detail --repo riii111/dotfiles --include-details
 assert_json '
   .data.reviewThreads[0].detailsOmitted == false and
   (.data.reviewThreads[0] | keys == ["comments", "detailsOmitted", "diffSide", "id", "isOutdated", "isResolved", "line", "originalLine", "path", "startLine"]) and
@@ -1245,19 +1242,12 @@ assert_json '
 ' "$tmpdir/thread-multiple.review_thread.stdout" >/dev/null
 
 run_review_thread thread-multiple-options GH_TEST_THREAD_DETAILS=1 -- \
-  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles --include-details --include-diff-hunk --compact
+  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles --include-details --include-diff-hunk
 assert_json '
   [.data.reviewThreads[].id] == ["thread-a", "thread-b"] and
   ([.data.reviewThreads[].detailsOmitted] | all == false) and
   ([.data.reviewThreads[].comments[] | has("diffHunk")] | all == true)
 ' "$tmpdir/thread-multiple-options.review_thread.stdout" >/dev/null
-
-run_review_thread thread-pretty -- \
-  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles
-run_review_thread thread-compact -- \
-  pr review-thread 42 thread-a thread-b --repo riii111/dotfiles --compact
-test "$(jq -c 'del(.observedAt)' "$tmpdir/thread-pretty.review_thread.stdout")" = \
-  "$(jq -c 'del(.observedAt)' "$tmpdir/thread-compact.review_thread.stdout")"
 
 run_review_thread thread-many-one GH_TEST_THREAD_DETAIL_MANY=1 -- \
   pr review-thread 42 thread-a --repo riii111/dotfiles

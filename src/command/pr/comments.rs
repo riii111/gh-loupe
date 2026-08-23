@@ -34,7 +34,6 @@ where
         action: super::super::Action::Pr(super::Action::Comments { include_details }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -44,9 +43,7 @@ pub(super) fn execute(target: &Target, include_details: bool) -> Result<Vec<Valu
 }
 
 fn usage(program: &str) -> String {
-    format!(
-        "usage: {program} pr comments [-h] [--repo REPO] [--include-details] [--compact] target"
-    )
+    format!("usage: {program} pr comments [-h] [--repo REPO] [--include-details] target")
 }
 
 pub(super) fn argument_error(program: &str, message: &str) -> Exit {
@@ -55,7 +52,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n",
         usage(program)
     );
     super::super::write_stdout(&text)
