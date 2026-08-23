@@ -14,7 +14,15 @@ GitHubの定型的な読み取りには`gh-loupe`を使い、必要な情報だ�
 
 Required gh-loupe version: 0.11.0
 
-最初に`gh-loupe --version`を実行し、インストール済みbinaryが`0.11.0`以上であることを確認する。
+installerはSkillの`VERSION`、Cargo packageのversion、生成したbinaryの`gh-loupe --version`を照合する。binaryとSkillの互換性はinstallerが保証するため、セッション開始時や正常な取得の前に`gh-loupe --version`を実行しない。
+
+次の異常を検出した場合だけ、診断のために`gh-loupe --version`を実行する。
+
+- commandまたはoptionが未知である。
+- 期待するfieldが応答にない。
+- `schemaVersion`がこのSkillで認識できない。
+
+versionが`0.11.0`以上なら、該当commandの入力・応答仕様を確認する。versionが古い、または取得できないなら、installerを再実行してbinaryとSkillを更新してからcommandを再試行する。
 
 ## Commands
 
