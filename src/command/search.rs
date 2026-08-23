@@ -108,7 +108,6 @@ where
         action: super::Action::Search(action),
         target: query,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -164,9 +163,7 @@ fn search_argument_error(program: &str, message: &str) -> Exit {
 fn argument_error(program: &str, message: &str) -> Exit {
     super::argument_error(
         program,
-        &format!(
-            "usage: {program} search {{issues,prs}} [-h] [--repo REPO] [--compact] [--limit N] query"
-        ),
+        &format!("usage: {program} search {{issues,prs}} [-h] [--repo REPO] [--limit N] query"),
         "search",
         message,
     )
@@ -190,7 +187,7 @@ fn print_pull_requests_help(program: &str) -> Result<()> {
 
 fn print_subcommand_help(program: &str, name: &str, description: &str) -> Result<()> {
     super::write_stdout(&format!(
-        "usage: {program} search {name} [-h] [--repo REPO] [--compact] [--limit N] query\n\npositional arguments:\n  query       GitHub search keywords\n\noptions:\n  -h, --help   show this help message and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N items, from 1 through 100 (default: 20)\n  --compact    emit one-line JSON\n\n{description}\n"
+        "usage: {program} search {name} [-h] [--repo REPO] [--limit N] query\n\npositional arguments:\n  query       GitHub search keywords\n\noptions:\n  -h, --help   show this help and exit\n  --repo REPO  OWNER/REPO; inferred from cwd when omitted\n  --limit N    return at most N items, from 1 through 100 (default: 20)\n\n{description}\n"
     ))
 }
 

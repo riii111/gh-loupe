@@ -72,7 +72,6 @@ where
         }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -94,7 +93,7 @@ pub(super) fn execute(
 
 fn usage(program: &str) -> String {
     format!(
-        "usage: {program} pr review-thread [-h] [--repo REPO] [--include-diff-hunk] [--include-details] [--compact] target review_thread_id [review_thread_id ...]"
+        "usage: {program} pr review-thread [-h] [--repo REPO] [--include-diff-hunk] [--include-details] target review_thread_id [review_thread_id ...]"
     )
 }
 
@@ -104,7 +103,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n  review_thread_id    one to 20 GraphQL review thread node IDs\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk include diffHunk on every comment\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n  review_thread_id    one to 20 GraphQL review thread node IDs\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-diff-hunk include diffHunk on every comment\n  --include-details   include folded <details> content (omitted by default)\n",
         usage(program)
     );
     super::super::write_stdout(&text)

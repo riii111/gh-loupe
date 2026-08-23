@@ -61,7 +61,6 @@ where
         }),
         target,
         repo: parsed.repo,
-        compact: parsed.compact,
         program: program.to_owned(),
     })
 }
@@ -82,9 +81,7 @@ pub(super) fn execute(
 }
 
 fn usage(program: &str) -> String {
-    format!(
-        "usage: {program} pr reviews [-h] [--repo REPO] [--include-details] [--compact] [--limit N] target"
-    )
+    format!("usage: {program} pr reviews [-h] [--repo REPO] [--include-details] [--limit N] target")
 }
 
 fn parse_limit(value: &str, program: &str) -> Result<usize> {
@@ -104,7 +101,7 @@ pub(super) fn argument_error(program: &str, message: &str) -> Exit {
 
 fn print_help(program: &str) -> Result<()> {
     let text = format!(
-        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --compact           emit one-line JSON\n  --limit N           return the latest 1 through 100 reviews\n",
+        "{}\n\npositional arguments:\n  target              PR number or GitHub pull request URL\n\noptions:\n  -h, --help          show this help message and exit\n  --repo REPO         OWNER/REPO; inferred from cwd when omitted\n  --include-details   include folded <details> content (omitted by default)\n  --limit N           return the latest 1 through 100 reviews\n",
         usage(program)
     );
     super::super::write_stdout(&text)
