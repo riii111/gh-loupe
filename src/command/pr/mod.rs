@@ -27,7 +27,10 @@ pub(super) enum Action {
     Files {
         limit: usize,
     },
-    Overview,
+    Overview {
+        include_body: bool,
+        include_details: bool,
+    },
     Reviews {
         include_details: bool,
         limit: Option<usize>,
@@ -94,7 +97,7 @@ pub(super) fn execute(
         Action::ForCommit { .. } => for_commit::argument_error,
         Action::Comments { .. } => comments::argument_error,
         Action::Files { .. } => files::argument_error,
-        Action::Overview => overview::argument_error,
+        Action::Overview { .. } => overview::argument_error,
         Action::Reviews { .. } => reviews::argument_error,
         Action::ReviewThread { .. } => review_thread::argument_error,
         Action::ReviewThreads { .. } => review_threads::argument_error,
@@ -121,7 +124,10 @@ pub(super) fn execute(
             Value::Array(comments::execute(&target, include_details)?),
         )])),
         Action::Files { limit } => files::execute(&target, limit)?,
-        Action::Overview => overview::execute(&target)?,
+        Action::Overview {
+            include_body,
+            include_details,
+        } => overview::execute(&target, include_body, include_details)?,
         Action::Reviews {
             include_details,
             limit,

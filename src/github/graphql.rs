@@ -37,6 +37,29 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 }
 ";
 
+const OVERVIEW_QUERY_WITH_BODY: &str = r"
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      title
+      url
+      body
+      state
+      isDraft
+      headRefOid
+      baseRefOid
+      reviewDecision
+      mergeStateStatus
+      reviewThreads(first: 100, after: $cursor) {
+        nodes { isResolved }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+";
+
 const CHECK_CONTEXTS_QUERY: &str = r"
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -152,7 +175,7 @@ pub fn pull_request_check_contexts(
     }
 }
 
-pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
+pub fn pull_request_overview(target: &Target, include_body: bool) -> Result<(Value, usize)> {
     let (owner, name) = target
         .repository
         .split_once('/')
@@ -171,7 +194,12 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
             "number": number,
             "cursor": cursor_tracker.cursor(),
         });
-        let data = query(OVERVIEW_QUERY, &variables)?;
+        let document = if include_body {
+            OVERVIEW_QUERY_WITH_BODY
+        } else {
+            OVERVIEW_QUERY
+        };
+        let data = query(document, &variables)?;
         let mut current = pagination::take_value_at(data, &["repository", "pullRequest"])?;
         if current.is_null() {
             return Err(Exit::runtime(&RuntimeError::not_found(format!(
@@ -192,7 +220,7 @@ pub fn pull_request_overview(target: &Target) -> Result<(Value, usize)> {
             unresolved += usize::from(!is_resolved);
         }
         if cursor_tracker.next(&connection)?.is_none() {
-            validate_overview_fields(&current)?;
+            validate_overview_fields(&current, include_body)?;
             break current;
         }
     };
@@ -296,7 +324,7 @@ pub(super) fn graphql_error_message(errors: &Value) -> String {
     )
 }
 
-fn validate_overview_fields(pull_request: &Value) -> Result<()> {
+fn validate_overview_fields(pull_request: &Value, include_body: bool) -> Result<()> {
     let fields: [(&str, FieldValidator); 9] = [
         ("number", Value::is_u64),
         ("title", Value::is_string),
@@ -313,6 +341,14 @@ fn validate_overview_fields(pull_request: &Value) -> Result<()> {
             .get(field)
             .ok_or_else(invalid_graphql_response)?;
         if !valid(value) {
+            return Err(invalid_graphql_response());
+        }
+    }
+    if include_body {
+        let body = pull_request
+            .get("body")
+            .ok_or_else(invalid_graphql_response)?;
+        if !string_or_null(body) {
             return Err(invalid_graphql_response());
         }
     }

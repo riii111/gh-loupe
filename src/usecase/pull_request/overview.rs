@@ -2,13 +2,14 @@ use std::thread;
 
 use serde_json::{Map, Value};
 
-use crate::error::{Exit, Result};
+use crate::error::{Exit, Result, RuntimeError};
 use crate::github::{checks, graphql};
+use crate::markdown;
 use crate::model::Target;
 
-pub fn execute(target: &Target) -> Result<Value> {
+pub fn execute(target: &Target, include_body: bool, include_details: bool) -> Result<Value> {
     let (graphql_result, required_result, all_result) = thread::scope(|scope| {
-        let graphql = scope.spawn(|| graphql::pull_request_overview(target));
+        let graphql = scope.spawn(|| graphql::pull_request_overview(target, include_body));
         let required = scope.spawn(|| checks::required_check_buckets(target));
         let all = scope.spawn(|| checks::all_check_buckets(target));
 
@@ -22,7 +23,10 @@ pub fn execute(target: &Target) -> Result<Value> {
             all.join().expect("all checks worker must not panic"),
         )
     });
-    let (pull_request, unresolved) = graphql_result?;
+    let (mut pull_request, unresolved) = graphql_result?;
+    if include_body {
+        project_body(&mut pull_request, include_details)?;
+    }
     let required = summarize_required_checks(&required_result?)?;
     let all = summarize_all_checks(&all_result?)?;
     let mut checks = Map::new();
@@ -40,6 +44,34 @@ pub fn execute(target: &Target) -> Result<Value> {
     result.insert("checks".to_owned(), Value::Object(checks));
     result.insert("reviewThreads".to_owned(), Value::Object(review_threads));
     Ok(Value::Object(result))
+}
+
+fn project_body(pull_request: &mut Value, include_details: bool) -> Result<()> {
+    let body = pull_request
+        .get("body")
+        .cloned()
+        .ok_or_else(invalid_graphql_response)?;
+    let (body, details_omitted) = match body {
+        Value::Null => (Value::Null, false),
+        Value::String(body) if include_details => (Value::String(body), false),
+        Value::String(body) => {
+            let (body, omitted) = markdown::omit_details(&body);
+            (Value::String(body), omitted)
+        }
+        _ => return Err(invalid_graphql_response()),
+    };
+    let pull_request = pull_request
+        .as_object_mut()
+        .ok_or_else(invalid_graphql_response)?;
+    pull_request.insert("body".to_owned(), body);
+    pull_request.insert("detailsOmitted".to_owned(), Value::Bool(details_omitted));
+    Ok(())
+}
+
+fn invalid_graphql_response() -> Exit {
+    Exit::runtime(&RuntimeError::invalid_response(
+        "GitHub returned an invalid GraphQL response",
+    ))
 }
 
 fn summarize_required_checks(checks: &Value) -> Result<Value> {

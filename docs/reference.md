@@ -45,6 +45,14 @@ gh-loupe pr checks TARGET --failed-only [--required] [--failed-diagnostics] [--i
 
 The default output has `data.checks` with the existing check metadata. `--failed-diagnostics` does not change that output to failed-only. With `--failed-only`, the output has `data.summary` and `data.checks`; `summary` contains `total`, `passed`, `pending`, and `failed` for all retrieved checks, while `checks` contains only `fail` and `cancel` buckets. `skipping` counts as `passed` and `cancel` counts as `failed`. `--required` applies to both the summary and returned checks. Zero failures is a successful result with `summary.failed` set to `0` and an empty `checks` array.
 
+## Pull request overview
+
+```shell
+gh-loupe pr overview TARGET [--include-body] [--include-details]
+```
+
+The default output keeps the existing `data.pullRequest` schema and does not retrieve or return the pull request body. `--include-body` adds `body` and `detailsOmitted` to `data.pullRequest`. Closed `<details>` blocks in the body are omitted by default using the shared Markdown rules; `detailsOmitted` is true only when the body was changed. `--include-details` returns the original body and is accepted only together with `--include-body`.
+
 ## Pull request comments
 
 ```shell
