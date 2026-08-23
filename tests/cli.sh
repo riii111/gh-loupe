@@ -90,8 +90,8 @@ assert_target_guidance() {
   local expected
   case "$resource" in
     pr)
-      expected="$(printf 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...\ngh-loupe pr: error: a subcommand is required\n\nTry:\n  gh-loupe pr overview %s\n  gh-loupe pr comments %s\n  gh-loupe pr reviews %s\n  gh-loupe pr review-threads %s\n  gh-loupe pr checks %s' \
-        "$target" "$target" "$target" "$target" "$target")"
+      expected="$(printf 'usage: gh-loupe pr [-h] {overview,comments,files,reviews,review-threads,review-thread,checks,for-commit} ...\ngh-loupe pr: error: a subcommand is required\n\nTry:\n  gh-loupe pr overview %s\n  gh-loupe pr comments %s\n  gh-loupe pr files %s\n  gh-loupe pr reviews %s\n  gh-loupe pr review-threads %s\n  gh-loupe pr checks %s' \
+        "$target" "$target" "$target" "$target" "$target" "$target")"
       ;;
     issue)
       expected="$(printf 'usage: gh-loupe issue [-h] {overview,comments,relations} ...\ngh-loupe issue: error: a subcommand is required\n\nTry:\n  gh-loupe issue overview %s\n  gh-loupe issue comments %s\n  gh-loupe issue relations %s' \
@@ -283,8 +283,8 @@ test "$(cat "$tmpdir/root-version.stdout")" = "gh-loupe $GH_LOUPE_PACKAGE_VERSIO
 
 run_cli pr-help -- pr --help
 test ! -s "$tmpdir/pr-help.stderr"
-grep -F 'usage: gh-loupe pr [-h] {overview,comments,reviews,review-threads,review-thread,checks,for-commit} ...' "$tmpdir/pr-help.stdout" >/dev/null
-for subcommand in overview comments reviews review-threads review-thread checks for-commit; do
+grep -F 'usage: gh-loupe pr [-h] {overview,comments,files,reviews,review-threads,review-thread,checks,for-commit} ...' "$tmpdir/pr-help.stdout" >/dev/null
+for subcommand in overview comments files reviews review-threads review-thread checks for-commit; do
   grep -E "^    $subcommand  +" "$tmpdir/pr-help.stdout" >/dev/null
 done
 

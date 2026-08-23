@@ -63,6 +63,7 @@ gh-loupe pr checks --failed-only --failed-diagnostics --compact "$PR"
 |---|---|
 | `pr overview` | PRの状態、review decision、CI集計 |
 | `pr comments` | PR全体へのコメント |
+| `pr files` | PRの変更ファイル一覧 |
 | `pr reviews` | review submission |
 | `pr review-threads` | inline review threadの一覧 |
 | `pr review-thread` | 指定したinline review thread |
