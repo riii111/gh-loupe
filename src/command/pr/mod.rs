@@ -21,7 +21,9 @@ pub(super) enum Action {
     ForCommit {
         limit: usize,
     },
-    Comments,
+    Comments {
+        include_details: bool,
+    },
     Files {
         limit: usize,
     },
@@ -90,7 +92,7 @@ pub(super) fn execute(
     let argument_error: fn(&str, &str) -> Exit = match &action {
         Action::Checks { .. } => checks::argument_error,
         Action::ForCommit { .. } => for_commit::argument_error,
-        Action::Comments => comments::argument_error,
+        Action::Comments { .. } => comments::argument_error,
         Action::Files { .. } => files::argument_error,
         Action::Overview => overview::argument_error,
         Action::Reviews { .. } => reviews::argument_error,
@@ -114,9 +116,9 @@ pub(super) fn execute(
             diagnostics,
         } => checks::execute(&target, required, diagnostics)?,
         Action::ForCommit { .. } => unreachable!("for-commit returns before resolving a PR target"),
-        Action::Comments => Value::Object(Map::from_iter([(
+        Action::Comments { include_details } => Value::Object(Map::from_iter([(
             "comments".to_owned(),
-            Value::Array(comments::execute(&target)?),
+            Value::Array(comments::execute(&target, include_details)?),
         )])),
         Action::Files { limit } => files::execute(&target, limit)?,
         Action::Overview => overview::execute(&target)?,

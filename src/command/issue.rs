@@ -4,7 +4,7 @@ use crate::output;
 #[derive(Clone, Copy)]
 pub(super) enum Action {
     Overview,
-    Comments,
+    Comments { include_details: bool },
     Relations { limit: i32 },
 }
 
@@ -52,12 +52,12 @@ pub(super) fn execute(
 ) -> Result<serde_json::Value> {
     let argument_error: fn(&str, &str) -> Exit = match action {
         Action::Overview => overview::argument_error,
-        Action::Comments => comments::argument_error,
+        Action::Comments { .. } => comments::argument_error,
         Action::Relations { .. } => relations::argument_error,
     };
     let validate_number = match action {
         Action::Relations { .. } => positive_graphql_number,
-        Action::Overview | Action::Comments => super::target::positive_number,
+        Action::Overview | Action::Comments { .. } => super::target::positive_number,
     };
     let target = super::target::resolve_target(
         target_value,
@@ -69,7 +69,7 @@ pub(super) fn execute(
     )?;
     let data = match action {
         Action::Overview => overview::execute(&target)?,
-        Action::Comments => comments::execute(&target)?,
+        Action::Comments { include_details } => comments::execute(&target, include_details)?,
         Action::Relations { limit } => relations::execute(&target, limit)?,
     };
     Ok(output::success(data))
