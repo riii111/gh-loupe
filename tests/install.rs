@@ -135,7 +135,7 @@ fn build_failure_preserves_existing_destinations() {
     );
     assert_no_installer_work(&binary_root.join("bin"));
     assert_no_installer_work(&skill_root);
-    assert!(directory_entries(&temporary_root).is_empty());
+    assert_eq!(directory_entries(&temporary_root), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn binary_directory_symlink_fails_before_replacement() {
             .file_type()
             .is_symlink()
     );
-    assert!(directory_entries(&binary_target).is_empty());
+    assert_eq!(directory_entries(&binary_target), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -344,7 +344,7 @@ fn staging_validation_failure_preserves_existing_destinations() {
     );
     assert_no_installer_work(&binary_root.join("bin"));
     assert_no_installer_work(&skill_root);
-    assert!(directory_entries(&temporary_root).is_empty());
+    assert_eq!(directory_entries(&temporary_root), Vec::<PathBuf>::new());
 }
 
 fn assert_directories_equal(expected: &Path, actual: &Path) {

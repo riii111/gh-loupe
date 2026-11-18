@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.100.0
           components: rustfmt
       - run: cargo fmt --all -- --check
 
@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.100.0
           components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo build --workspace --release --locked
 
