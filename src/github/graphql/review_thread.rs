@@ -111,9 +111,7 @@ fn review_thread_node_from_nodes(
     null_node_id: Option<&str>,
     requested_ids: &[String],
 ) -> Result<String> {
-    let expected_context = null_node_id
-        .map(|id| format!(" for review thread {id}"))
-        .unwrap_or_default();
+    let expected_context = null_node_id.map_or_default(|id| format!(" for review thread {id}"));
     let node = node.as_object().ok_or_else(|| match node {
         Value::Null => not_found(format!(
             "review thread not found: {}",
