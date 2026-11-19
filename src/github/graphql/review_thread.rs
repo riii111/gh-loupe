@@ -29,6 +29,7 @@ query ReviewThreadDetails($ids: [ID!]!) {
           id
           url
           body
+          state
           author { login }
           createdAt
           updatedAt
@@ -53,6 +54,7 @@ query ReviewThreadDetailComments($id: ID!, $cursor: String!) {
           id
           url
           body
+          state
           author { login }
           createdAt
           updatedAt

@@ -98,7 +98,7 @@ gh-loupe pr review-thread TARGET REVIEW_THREAD_ID [REVIEW_THREAD_ID ...]
 
 `review-threads` returns unresolved threads by default. `--include-resolved` includes resolved threads as well.
 
-`review-thread` accepts 1 through 20 thread IDs, returns them in input order under `data.reviewThreads`, and emits no partial JSON when any requested thread fails. Closed `<details>` blocks in comments are omitted by default; `--include-details` preserves them, and `--include-diff-hunk` adds `diffHunk` to every comment.
+`review-thread` accepts 1 through 20 thread IDs, returns them in input order under `data.reviewThreads`, and emits no partial JSON when any requested thread fails. Each comment includes its GitHub `state`, including `PENDING` for the authenticated reviewer’s pending comments. Closed `<details>` blocks in comments are omitted by default; `--include-details` preserves them, and `--include-diff-hunk` adds `diffHunk` to every comment.
 
 ## Search
 

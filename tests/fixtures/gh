@@ -385,6 +385,7 @@ if [ "$1 $2" = "api graphql" ]; then
     exit 0
   fi
   if jq -e '.query | contains("nodes(ids: $ids)")' <<<"$payload" >/dev/null; then
+    jq -e '.query | contains("          state")' <<<"$payload" >/dev/null || exit 91
     case "${GH_TEST_THREAD_DETAIL:-success}" in
       missing)
         printf '{"data":{"nodes":[null]}}\n'
@@ -420,12 +421,12 @@ if [ "$1 $2" = "api graphql" ]; then
             cycle) detail_end_cursor=thread-detail-cycle-a ;;
           esac
           cat <<JSON
-{"data":{"nodes":[{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}]}}
+{"data":{"nodes":[{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","state":"SUBMITTED","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","state":"PENDING","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}]}}
 JSON
         else
           nodes_json=$(
             jq -cn --argjson ids "$ids_json" --arg many "${GH_TEST_THREAD_DETAIL_MANY:-}" --arg details "${GH_TEST_THREAD_DETAILS:-}" '
-            def comment($id; $body; $date): {id:$id,url:("https://example.test/" + $id),body:$body,author:null,createdAt:$date,updatedAt:$date,diffHunk:"@@ fixture",replyTo:null};
+            def comment($id; $body; $date): {id:$id,url:("https://example.test/" + $id),body:$body,state:"SUBMITTED",author:null,createdAt:$date,updatedAt:$date,diffHunk:"@@ fixture",replyTo:null};
             $ids | reverse | map(. as $thread | {__typename:"PullRequestReviewThread",id:$thread,isResolved:false,isOutdated:false,path:("src/" + $thread + ".rs"),line:42,originalLine:39,startLine:null,diffSide:"RIGHT",pullRequest:{number:42,repository:{nameWithOwner:"riii111/dotfiles"}},comments:{nodes:(if $many == "1" then [range(0;100) | . as $index | comment(("comment-" + ($index|tostring));(if $details == "1" and $thread == $ids[0] then "<details>evidence</details>" else "first" end);"2026-01-01T00:00:00Z")] else [comment(("comment-" + $thread + "-first");(if $details == "1" and $thread == $ids[0] then "<details>evidence</details>" else "first" end);"2026-01-01T00:00:00Z")] end),pageInfo:{hasNextPage:true,endCursor:("cursor-" + $thread)}}})
             '
           )
@@ -436,6 +437,7 @@ JSON
     exit 0
   fi
   if jq -e '.query | contains("ReviewThreadDetailComments")' <<<"$payload" >/dev/null; then
+    jq -e '.query | contains("          state")' <<<"$payload" >/dev/null || exit 91
     thread_id="$(jq -r '.variables.id' <<<"$payload")"
     if [ "${GH_TEST_THREAD_DETAILS:-}" = 1 ]; then
       case "$thread_id" in
@@ -476,12 +478,12 @@ JSON
       exit 0
     fi
     if [ "${GH_TEST_THREAD_DETAIL_MANY:-}" = 1 ]; then
-      many_comment="$(jq -cn --arg id "$thread_id" '{id:("comment-" + $id + "-100"),url:("https://example.test/" + $id + "/100"),body:"last",author:null,createdAt:"2026-01-01T00:00:01Z",updatedAt:"2026-01-01T00:00:01Z",diffHunk:"@@ fixture",replyTo:null}')"
+      many_comment="$(jq -cn --arg id "$thread_id" '{id:("comment-" + $id + "-100"),url:("https://example.test/" + $id + "/100"),body:"last",state:"PENDING",author:null,createdAt:"2026-01-01T00:00:01Z",updatedAt:"2026-01-01T00:00:01Z",diffHunk:"@@ fixture",replyTo:null}')"
       printf '{"data":{"node":{"__typename":"PullRequestReviewThread","id":"%s","comments":{"nodes":[%s],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}\n' "$thread_id" "$many_comment"
       exit 0
     fi
     cat <<JSON
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"$thread_id","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"${comment_a_body:-first by id}","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"$thread_id","comments":{"nodes":[{"id":"comment-a","url":"https://example.test/a","body":"${comment_a_body:-first by id}","state":"PENDING","author":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-03T00:00:00Z","diffHunk":"@@ a","replyTo":{"id":"comment-b"}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 JSON
     exit 0
   fi
@@ -518,7 +520,7 @@ JSON
           cycle) detail_end_cursor=thread-detail-cycle-a ;;
         esac
         cat <<JSON
-{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}}}
+{"data":{"node":{"__typename":"PullRequestReviewThread","id":"thread-detail","isResolved":false,"isOutdated":true,"path":"src/lib.rs","line":42,"originalLine":39,"startLine":null,"diffSide":"RIGHT","pullRequest":{"number":42,"repository":{"nameWithOwner":"riii111/dotfiles"}},"comments":{"nodes":[{"id":"comment-z","url":"https://example.test/z","body":"$comment_z_body","state":"SUBMITTED","author":{"login":"reviewer"},"createdAt":"2026-01-02T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","diffHunk":"@@ z","replyTo":null},{"id":"comment-b","url":"https://example.test/b","body":"$comment_b_body","state":"PENDING","author":{"login":"author"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","diffHunk":"@@ b","replyTo":null}],"pageInfo":{"hasNextPage":true,"endCursor":"$detail_end_cursor"}}}}}
 JSON
         ;;
     esac
