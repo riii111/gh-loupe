@@ -3,7 +3,7 @@ members = ["."]
 resolver = "3"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.13.1"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -22,7 +22,6 @@ rust-version.workspace = true
 description = "Read fixed GitHub pull request and issue metadata through the GitHub CLI"
 license.workspace = true
 repository.workspace = true
-homepage = "https://github.com/riii111/gh-loupe"
 readme = "README.md"
 keywords = ["github", "cli", "pull-request", "agent"]
 categories = ["command-line-utilities", "development-tools"]
