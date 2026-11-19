@@ -37,9 +37,10 @@ parallel_enter() {
     fi
     started=$((started + 1))
     printf '%s\n' "$started" >"$GH_DIAGNOSTICS_ROUNDS_FILE"
-    local round=$(((started - 1) / 4 + 1))
-    if [ ! -f "${GH_DIAGNOSTICS_MAX_ROUND_FILE}" ] || [ "$round" -gt "$(cat "$GH_DIAGNOSTICS_MAX_ROUND_FILE")" ]; then
-      printf '%s\n' "$round" >"$GH_DIAGNOSTICS_MAX_ROUND_FILE"
+    # A later read could observe another process writing the counter, so retain this process's assigned round.
+    parallel_round=$(((started - 1) / 4 + 1))
+    if [ ! -f "${GH_DIAGNOSTICS_MAX_ROUND_FILE}" ] || [ "$parallel_round" -gt "$(cat "$GH_DIAGNOSTICS_MAX_ROUND_FILE")" ]; then
+      printf '%s\n' "$parallel_round" >"$GH_DIAGNOSTICS_MAX_ROUND_FILE"
     fi
   fi
   parallel_unlock
@@ -78,9 +79,7 @@ parallel_barrier() {
 }
 
 parallel_timing_barrier() {
-  local started
-  started="$(cat "$GH_DIAGNOSTICS_ROUNDS_FILE")"
-  local batch=$(((started - 1) / 4 + 1))
+  local batch="$parallel_round"
   local expected=$((GH_DIAGNOSTICS_FAILURES - (batch - 1) * 4))
   if [ "$expected" -gt 4 ]; then
     expected=4
@@ -94,7 +93,10 @@ parallel_timing_barrier() {
   printf '%s\n' "$((count + 1))" >"$batch_file"
   parallel_unlock
   for _ in $(seq 1 5000); do
-    if [ "$(cat "$batch_file")" -ge "$expected" ]; then
+    parallel_lock
+    count="$(cat "$batch_file")"
+    parallel_unlock
+    if [ "$count" -ge "$expected" ]; then
       return
     fi
     sleep 0.001
