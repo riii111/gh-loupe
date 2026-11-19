@@ -69,7 +69,10 @@ parallel_barrier() {
   printf '%s\n' "$((started + 1))" >"$GH_DIAGNOSTICS_STARTED_FILE"
   parallel_unlock
   for _ in $(seq 1 5000); do
-    if [ "$(cat "$GH_DIAGNOSTICS_STARTED_FILE")" -ge "${GH_DIAGNOSTICS_FAILURES}" ]; then
+    parallel_lock
+    started="$(cat "$GH_DIAGNOSTICS_STARTED_FILE")"
+    parallel_unlock
+    if [ "$started" -ge "${GH_DIAGNOSTICS_FAILURES}" ]; then
       return
     fi
     sleep 0.001
