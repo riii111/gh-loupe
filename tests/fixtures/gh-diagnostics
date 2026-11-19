@@ -7,13 +7,14 @@ fi
 
 parallel_lock() {
   local lock="${GH_DIAGNOSTICS_ACTIVE_FILE}.lock"
-  while ! mkdir "$lock" 2>/dev/null; do
+  # Some mkdir implementations do not reliably exclude concurrent creators, so use noclobber.
+  while ! (set -C; : >"$lock") 2>/dev/null; do
     sleep 0.001
   done
 }
 
 parallel_unlock() {
-  rmdir "${GH_DIAGNOSTICS_ACTIVE_FILE}.lock"
+  rm "${GH_DIAGNOSTICS_ACTIVE_FILE}.lock"
 }
 
 parallel_enter() {
