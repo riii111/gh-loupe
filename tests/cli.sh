@@ -1249,6 +1249,7 @@ assert_json '
         "id": "comment-a",
         "url": "https://example.test/a",
         "body": "first by id",
+        "state": "PENDING",
         "author": null,
         "createdAt": "2026-01-01T00:00:00Z",
         "updatedAt": "2026-01-03T00:00:00Z",
@@ -1258,6 +1259,7 @@ assert_json '
         "id": "comment-b",
         "url": "https://example.test/b",
         "body": "second by id",
+        "state": "PENDING",
         "author": "author",
         "createdAt": "2026-01-01T00:00:00Z",
         "updatedAt": "2026-01-01T00:00:00Z",
@@ -1267,6 +1269,7 @@ assert_json '
         "id": "comment-z",
         "url": "https://example.test/z",
         "body": "later",
+        "state": "SUBMITTED",
         "author": "reviewer",
         "createdAt": "2026-01-02T00:00:00Z",
         "updatedAt": "2026-01-02T00:00:00Z",
@@ -1283,7 +1286,7 @@ run_review_thread thread-diff-hunk -- \
   pr review-thread 42 thread-detail --repo riii111/dotfiles --include-diff-hunk
 assert_json '
   [.data.reviewThreads[0].comments[].diffHunk] == ["@@ a", "@@ b", "@@ z"] and
-  (.data.reviewThreads[0].comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "updatedAt", "url"]))
+  (.data.reviewThreads[0].comments | all(keys == ["author", "body", "createdAt", "diffHunk", "id", "replyToId", "state", "updatedAt", "url"]))
 ' "$tmpdir/thread-diff-hunk.review_thread.stdout" >/dev/null
 test "$(wc -l <"$tmpdir/thread-diff-hunk.review_thread.stdout")" -eq 1
 
@@ -1329,7 +1332,7 @@ assert_json '
 
 run_review_thread thread-many-one GH_TEST_THREAD_DETAIL_MANY=1 -- \
   pr review-thread 42 thread-a --repo riii111/dotfiles
-assert_json '.data.reviewThreads[0].comments | length == 101' \
+assert_json '(.data.reviewThreads[0].comments | length == 101) and ([.data.reviewThreads[].comments[] | select(.state == "PENDING") | .id] == ["comment-thread-a-100"])' \
   "$tmpdir/thread-many-one.review_thread.stdout" >/dev/null
 
 run_review_thread thread-many-multiple GH_TEST_THREAD_DETAIL_MANY=1 -- \

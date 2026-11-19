@@ -69,7 +69,7 @@ fn project_comment(
 ) -> Result<(Value, bool)> {
     let mut result = Map::new();
     let mut details_omitted = false;
-    for field in ["id", "url", "body", "createdAt", "updatedAt"] {
+    for field in ["id", "url", "body", "state", "createdAt", "updatedAt"] {
         let value = required_string_field(comment, field)?;
         if field == "body" && !include_details {
             let (body, omitted) = markdown::omit_details(value);
