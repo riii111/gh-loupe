@@ -477,6 +477,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bounded_pipe_preserves_utf8_across_reads() {
+        let bytes = "結果\n".as_bytes();
+        let input = Cursor::new(&bytes[..1]).chain(Cursor::new(&bytes[1..]));
+
+        let output = collect_bounded_pipe(input, 64 * 1024, 200).expect("collect bounded output");
+
+        assert!(
+            output.valid_utf8,
+            "the combined bytes form a valid UTF-8 log"
+        );
+        assert_eq!(output.bytes, bytes);
+    }
+
+    #[test]
     fn bounded_pipe_rejects_invalid_utf8_in_discarded_prefix() {
         let mut input = vec![0xff];
         input.extend(std::iter::repeat_n(b'x', 100_000));

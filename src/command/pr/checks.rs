@@ -180,6 +180,17 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_default_to_ninety_seconds() {
+        let args = parse_args("gh-loupe", values(&["42", "--failed-diagnostics"]))
+            .unwrap_or_else(|error| panic!("parse diagnostics arguments: {}", error.stderr_line()));
+        let RootAction::Pr(Action::Checks { diagnostics, .. }) = args.action else {
+            panic!("expected PR checks");
+        };
+
+        assert_eq!(diagnostics.timeout_seconds, 90);
+    }
+
+    #[test]
     fn parser_rejects_unrepresentable_timeout() {
         let error = parse_timeout("gh-loupe", &u64::MAX.to_string())
             .expect_err("unrepresentable timeout must be rejected");

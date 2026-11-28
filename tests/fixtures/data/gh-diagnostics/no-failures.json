@@ -13,10 +13,10 @@
                       {
                         "__typename": "CheckRun",
                         "databaseId": 103,
-                        "name": "pass",
+                        "name": "skip",
                         "isRequired": true,
                         "status": "COMPLETED",
-                        "conclusion": "SUCCESS",
+                        "conclusion": "SKIPPED",
                         "startedAt": "2026-08-11T09:00:00Z",
                         "completedAt": "2026-08-11T09:01:00Z",
                         "detailsUrl": "https://example.test/pass",

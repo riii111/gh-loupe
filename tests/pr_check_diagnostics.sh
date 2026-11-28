@@ -37,6 +37,7 @@ assert_json '
   [.data.checks[].name] == ["actions-failure", "external-cancel", "pass"] and
   [.data.checks[0].annotations[].path] == ["a.rs", "a.rs", "z.rs"] and
   [.data.checks[0].annotations[].startLine] == [1, 2, 9] and
+  [.data.checks[0].annotations[].endLine] == [1, 2, 10] and
   .data.checks[1].annotations == [] and
   .data.checks[1].workflow == null and
   .data.checks[1].startedAt == null and
@@ -45,6 +46,9 @@ assert_json '
   ([.data.checks[] | has("log")] | all(. == false))
 ' "$tmpdir/diagnostics.json" >/dev/null
 grep -F -- 'check-runs/100/annotations?per_page=100' "$tmpdir/calls" >/dev/null
+if grep -F -- '/actions/jobs/' "$tmpdir/calls"; then
+  exit 1
+fi
 
 run_diagnostics normal --failed-only --failed-diagnostics --quiet \
   >"$tmpdir/failed-only.json" 2>"$tmpdir/failed-only.stderr"
@@ -78,14 +82,17 @@ run_diagnostics status-duplicate --failed-diagnostics --quiet \
   >"$tmpdir/status-duplicate.json"
 assert_json '
   (.data.checks | length) == 2 and
-  (.data.checks | all(.name == "duplicate-status" and .annotations == []))
+  (.data.checks | all(.name == "duplicate-status" and .annotations == [] and
+    .link == "https://ci.example.test/status"))
 ' "$tmpdir/status-duplicate.json" >/dev/null
 
 GH_DIAGNOSTICS_CALLS="$tmpdir/check-run-collision-calls" run_diagnostics check-run-collision \
-  --failed-diagnostics --quiet >"$tmpdir/check-run-collision.json"
+  --include-failed-logs --quiet >"$tmpdir/check-run-collision.json"
 assert_json '
-  [.data.checks[].name] == ["duplicate", "duplicate"] and
-  [.data.checks[].annotations[0].path] == ["first.rs", "second.rs"]
+  [.data.checks[] | [.name, .annotations[0].path]] ==
+    [["build", null], ["duplicate", "first.rs"], ["duplicate", "second.rs"], ["legacy", null]] and
+  (.data.checks[0] | has("annotations") | not) and
+  (.data.checks[3] | .annotations == [] and has("log") and .log == null)
 ' "$tmpdir/check-run-collision.json" >/dev/null
 test "$(grep -c 'check-runs/102/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
 test "$(grep -c 'check-runs/103/annotations' "$tmpdir/check-run-collision-calls")" -eq 1
@@ -157,7 +164,7 @@ test "$(cat "$tmpdir/staggered-active")" -eq 0
 test "$(cat "$tmpdir/staggered-max")" -eq 2
 test "$(wc -l <"$tmpdir/staggered-calls" | tr -d ' ')" -eq 3
 
-if GH_DIAGNOSTICS_FAILURES=4 \
+if GH_DIAGNOSTICS_FAILURES=6 \
   GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-error-active" \
   GH_DIAGNOSTICS_MAX_FILE="$tmpdir/parallel-error-max" \
   GH_DIAGNOSTICS_STARTED_FILE="$tmpdir/parallel-error-started" \
@@ -176,6 +183,10 @@ assert_json '
 ' "$tmpdir/parallel-error.stderr" >/dev/null
 test "$(cat "$tmpdir/parallel-error-active")" -eq 0
 test "$(cat "$tmpdir/parallel-error-max")" -eq 4
+if [ "$(grep -c '/annotations' "$tmpdir/parallel-error-calls")" -ne 4 ]; then
+  cat "$tmpdir/parallel-error-calls" >&2
+  exit 1
+fi
 
 if GH_DIAGNOSTICS_FAILURES=4 \
   GH_DIAGNOSTICS_ACTIVE_FILE="$tmpdir/parallel-rate-limit-active" \
@@ -226,8 +237,16 @@ assert_json '
   (.data.checks[0].log.text | endswith("final-tail\n"))
 ' "$tmpdir/large-log.json" >/dev/null
 
+run_diagnostics many-short-lines --include-failed-logs --quiet >"$tmpdir/short-lines.json"
+assert_json '
+  .data.checks[0].log |
+  .truncated == true and .omittedLines == 1 and .omittedBytes == 9 and
+  (.text | split("\n") | length == 201 and .[0] == "line-002" and .[-2:] == ["line-201", ""])
+' "$tmpdir/short-lines.json" >/dev/null
+
 run_diagnostics utf8-boundary --include-failed-logs --quiet >"$tmpdir/utf8-boundary.json"
 assert_json '
+  .data.checks[0].log.truncated == true and
   .data.checks[0].log.omittedLines == 0 and
   .data.checks[0].log.omittedBytes == 65538 and
   (.data.checks[0].log.text | utf8bytelength) == 65534 and
@@ -240,6 +259,12 @@ assert_json '
   (.data.checks[0].annotations | length) == 3 and
   .data.checks[0].log != null
 ' "$tmpdir/mixed-case.json" >/dev/null
+
+run_diagnostics cancelled-actions --include-failed-logs --quiet >"$tmpdir/cancelled-actions.json"
+assert_json '
+  .data.checks[0] | .name == "actions-failure" and .bucket == "cancel" and
+  (.annotations | length) == 3 and (.log.text | endswith("tail\n"))
+' "$tmpdir/cancelled-actions.json" >/dev/null
 
 run_diagnostics required-filter --required --failed-diagnostics --quiet \
   >"$tmpdir/required-filter.json"
@@ -257,13 +282,22 @@ assert_json '
   .data.checks[0].name == "required-failure"
 ' "$tmpdir/required-failed-only.json" >/dev/null
 
-for mode in graphql-error missing-pr; do
+run_diagnostics required-filter --failed-only --failed-diagnostics --quiet >"$tmpdir/all-failures.json"
+assert_json '
+  .data.summary == {"total":2,"passed":0,"pending":0,"failed":2} and
+  [.data.checks[].name] == ["optional-failure", "required-failure"]
+' "$tmpdir/all-failures.json" >/dev/null
+
+for mode in graphql-error partial-rate-limit missing-pr; do
+  retryable=false
   case "$mode" in
     graphql-error) expected_kind=githubCli ;;
+    partial-rate-limit) expected_kind=rateLimited; retryable=true ;;
     missing-pr) expected_kind=notFound ;;
   esac
   if run_diagnostics "$mode" --failed-diagnostics --failed-only --quiet \
     >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    cat "$tmpdir/$mode.stdout" >&2
     status=0
   else
     status=$?
@@ -272,8 +306,8 @@ for mode in graphql-error missing-pr; do
   test ! -s "$tmpdir/$mode.stdout"
   test "$(wc -l <"$tmpdir/$mode.stderr" | tr -d ' ')" -eq 1
   # shellcheck disable=SC2016
-  assert_json --arg kind "$expected_kind" \
-    '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == false' \
+  assert_json --arg kind "$expected_kind" --argjson retryable "$retryable" \
+    '.schemaVersion == 1 and .error.kind == $kind and .error.retryable == $retryable' \
     "$tmpdir/$mode.stderr" >/dev/null
 done
 
@@ -311,10 +345,14 @@ test "$status" -eq 1
 test ! -s "$tmpdir/job-id-mismatch.stdout"
 tail -n 1 "$tmpdir/job-id-mismatch.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
 
-run_diagnostics no-failures --failed-diagnostics \
-  >"$tmpdir/no-failures.json" 2>"$tmpdir/no-failures.stderr"
+if ! run_diagnostics no-failures --failed-diagnostics \
+  >"$tmpdir/no-failures.json" 2>"$tmpdir/no-failures.stderr"; then
+  cat "$tmpdir/no-failures.stderr" >&2
+  exit 1
+fi
 test ! -s "$tmpdir/no-failures.stderr"
-assert_json '(.data.checks | length) == 1 and (.data.checks[0] | has("annotations") | not)' \
+assert_json '(.data.checks | length) == 1 and
+  (.data.checks[0] | .state == "SKIPPED" and (has("annotations") | not))' \
   "$tmpdir/no-failures.json" >/dev/null
 
 run_diagnostics no-failures --failed-only --failed-diagnostics --quiet \
@@ -324,6 +362,16 @@ assert_json '
   .data.summary == {"total":1,"passed":1,"pending":0,"failed":0} and
   .data.checks == []
 ' "$tmpdir/no-failures-failed-only.json" >/dev/null
+
+run_diagnostics no-rollup --failed-only --failed-diagnostics --quiet >"$tmpdir/no-rollup.json"
+assert_json '.data == {"summary":{"total":0,"passed":0,"pending":0,"failed":0},"checks":[]}' \
+  "$tmpdir/no-rollup.json" >/dev/null
+
+run_diagnostics two-pages --failed-only --failed-diagnostics --quiet >"$tmpdir/two-pages.json"
+assert_json '
+  .data.summary == {"total":2,"passed":1,"pending":0,"failed":1} and
+  [.data.checks[].name] == ["required-failure"]
+' "$tmpdir/two-pages.json" >/dev/null
 
 for mode in pagination-repeat pagination-cycle pagination-missing pagination-empty pagination-wrong-type head-oid-changed; do
   case "$mode" in
@@ -363,13 +411,17 @@ done
 
 if run_diagnostics annotation-malformed --failed-diagnostics --quiet \
   >"$tmpdir/annotation-malformed.stdout" 2>"$tmpdir/annotation-malformed.stderr"; then
+  cat "$tmpdir/annotation-malformed.stdout" >&2
   status=0
 else
   status=$?
 fi
 test "$status" -eq 1
 test ! -s "$tmpdir/annotation-malformed.stdout"
-tail -n 1 "$tmpdir/annotation-malformed.stderr" | assert_json '.schemaVersion == 1 and .error.kind == "invalidResponse"' >/dev/null
+assert_json '
+  .schemaVersion == 1 and .error.kind == "invalidResponse" and
+  .error.message == "GitHub returned an invalid annotation page"
+' "$tmpdir/annotation-malformed.stderr" >/dev/null
 
 for mode in graphql-missing-completed graphql-wrong-completed; do
   if run_diagnostics "$mode" --failed-diagnostics --failed-only --quiet \
@@ -401,6 +453,32 @@ test "$(grep -c '"schemaVersion":1,"error"' "$tmpdir/timeout.stderr")" -eq 1
 if kill -0 "$(cat "$tmpdir/pid")" 2>/dev/null; then
   exit 1
 fi
+
+for mode in slow-check-list cumulative-timeout; do
+  if [ "$mode" = slow-check-list ]; then
+    seconds=1
+  else
+    seconds=3
+  fi
+  calls_file="$tmpdir/$mode-calls"
+  if GH_DIAGNOSTICS_CALLS="$calls_file" run_diagnostics "$mode" \
+    --required --failed-diagnostics --timeout "$seconds" --quiet \
+    >"$tmpdir/$mode.stdout" 2>"$tmpdir/$mode.stderr"; then
+    cat "$tmpdir/$mode.stdout" >&2
+    status=0
+  else
+    status=$?
+  fi
+  test "$status" -eq 1
+  test ! -s "$tmpdir/$mode.stdout"
+  assert_json '.schemaVersion == 1 and .error.kind == "timeout" and .error.retryable' \
+    "$tmpdir/$mode.stderr" >/dev/null
+  if [ "$mode" = cumulative-timeout ]; then
+    grep -F -- '/annotations' "$calls_file" >/dev/null
+  elif grep -F -- '/annotations' "$calls_file"; then
+    exit 1
+  fi
+done
 
 if run_diagnostics normal --failed-diagnostics --timeout 18446744073709551615 \
   >"$tmpdir/unrepresentable-timeout.stdout" 2>"$tmpdir/unrepresentable-timeout.stderr"; then

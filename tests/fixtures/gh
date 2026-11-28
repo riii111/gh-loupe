@@ -259,7 +259,9 @@ if [ "$1 $2" = "pr checks" ]; then
       exit 8
       ;;
     nullable)
-      cat "$GH_FIXTURE_DATA/checks-nullable.json"
+      jq --arg fields "${!#}" '($fields | split(",")) as $selected |
+        map(with_entries(select(.key as $key | $selected | index($key))))' \
+        "$GH_FIXTURE_DATA/checks-nullable.json"
       exit 0
       ;;
     failed)
@@ -368,7 +370,7 @@ if [ "$1 $2" = "api graphql" ]; then
         exit 34
         ;;
       server-truncated)
-        printf '{"data":{"repository":{"pullRequest":{"changedFiles":4001,"additions":4001,"deletions":4002,"files":{"nodes":[{"path":"first.txt","changeType":"ADDED","additions":1,"deletions":0}],"totalCount":4001,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
+        printf '{"data":{"repository":{"pullRequest":{"changedFiles":4001,"additions":4001,"deletions":4002,"files":{"nodes":[{"path":"first.txt","changeType":"ADDED","additions":1,"deletions":0}],"totalCount":1,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}\n'
         ;;
       success)
         if [ "$(jq -r '.variables.limit' <<<"$payload")" -eq 1 ]; then

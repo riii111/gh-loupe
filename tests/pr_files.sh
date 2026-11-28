@@ -49,10 +49,13 @@ assert_json '
   (.data.files | all(keys == ["additions","deletions","path","status"])) and
   ([.. | objects | keys[]] | any(. == "patch" or . == "diffHunk" or . == "body" or . == "contents") | not)
 ' "$tmpdir/default.stdout" >/dev/null
-jq -s -e '
+# shellcheck disable=SC2016
+assert_json -s '
   length == 1 and
-  .[0].variables.limit == 20 and
+  (.[0].variables | .owner == "riii111" and .name == "dotfiles" and .number == 42 and .limit == 20) and
   (.[0].query | contains("PullRequestFiles")) and
+  (.[0].query | test("files\\s*\\(\\s*first\\s*:\\s*\\$limit\\b")) and
+  (.[0].query | test("\\bchangeType\\b")) and
   (.[0].query | [contains("patch"), contains("diffHunk"), contains("body"), contains("contents")] | any | not)
 ' "$tmpdir/default.payloads" >/dev/null
 
@@ -83,8 +86,8 @@ assert_json '.data.files == [] and .data.summary == {"total":0,"additions":0,"de
   "$tmpdir/empty.stdout" >/dev/null
 
 run_files last-page-cursor GH_TEST_PR_FILES=last-page-cursor "$GH_LOUPE_BIN" \
-  pr files 42 --repo riii111/dotfiles
-assert_json '.data.files == [{"path":"last.txt","status":"ADDED","additions":1,"deletions":0}] and .data.truncated == false' \
+  pr files 42 --repo riii111/dotfiles --limit 1
+assert_json '.data.files == [{"path":"last.txt","status":"ADDED","additions":1,"deletions":0}] and .data.totalCount == 1 and .data.truncated == false' \
   "$tmpdir/last-page-cursor.stdout" >/dev/null
 
 run_files url "$GH_LOUPE_BIN" pr files https://github.com/riii111/dotfiles/pull/42
@@ -119,6 +122,8 @@ assert_runtime_error() {
     "$tmpdir/$name.stderr" >/dev/null
 }
 
+assert_runtime_error missing-pr notFound GH_TEST_MISSING_PR=1 "$GH_LOUPE_BIN" \
+  pr files 42 --repo riii111/dotfiles
 assert_runtime_error invalid-node invalidResponse GH_TEST_PR_FILES=invalid-node "$GH_LOUPE_BIN" \
   pr files 42 --repo riii111/dotfiles
 assert_runtime_error missing-total-count invalidResponse GH_TEST_PR_FILES=missing-total-count "$GH_LOUPE_BIN" \
