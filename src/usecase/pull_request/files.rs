@@ -135,6 +135,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_more_nodes_than_declared_file_counts() {
+        let mut pr_count_too_small = response();
+        pr_count_too_small["changedFiles"] = json!(1);
+        let mut connection_count_too_small = response();
+        connection_count_too_small["files"]["totalCount"] = json!(1);
+
+        for (label, input) in [
+            ("pull request", pr_count_too_small),
+            ("files connection", connection_count_too_small),
+        ] {
+            let error = project(input, 20).expect_err(label);
+            assert!(
+                error.stderr_line().contains("invalid number of nodes"),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_more_nodes_than_requested_limit() {
         let error = project(response(), 1).expect_err("limit must be enforced");
         assert!(error.stderr_line().contains("invalid number of nodes"));

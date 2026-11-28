@@ -12,6 +12,18 @@
                     "nodes": [
                       {
                         "__typename": "CheckRun",
+                        "databaseId": 101,
+                        "name": "build",
+                        "isRequired": true,
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "startedAt": "2026-08-11T09:00:00Z",
+                        "completedAt": "2026-08-11T09:01:00Z",
+                        "detailsUrl": null,
+                        "checkSuite": {"workflowRun": null}
+                      },
+                      {
+                        "__typename": "CheckRun",
                         "databaseId": 102,
                         "name": "duplicate",
                         "isRequired": true,
@@ -47,6 +59,13 @@
                             }
                           }
                         }
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "legacy",
+                        "state": "FAILURE",
+                        "isRequired": true,
+                        "targetUrl": null
                       }
                     ],
                     "pageInfo": {

@@ -330,6 +330,63 @@ mod tests {
     }
 
     #[test]
+    fn required_checks_reject_a_missing_required_marker() {
+        let mut context = valid_check_run_context();
+        context
+            .as_object_mut()
+            .expect("context object")
+            .remove("isRequired");
+
+        let Err(error) = validate_check_contexts(&[context], true) else {
+            panic!("a required filter cannot classify a check without its required marker");
+        };
+
+        assert!(
+            error
+                .stderr_line()
+                .contains("invalid required check marker")
+        );
+    }
+
+    #[test]
+    fn unknown_check_context_type_rejects_the_response() {
+        let unknown = json!({"__typename": "UnknownContext", "isRequired": true});
+
+        let Err(error) = validate_check_contexts(&[valid_check_run_context(), unknown], false)
+        else {
+            panic!("an unknown context makes the check list incomplete");
+        };
+
+        assert!(error.stderr_line().contains("unknown check context type"));
+    }
+
+    #[test]
+    fn check_run_conclusions_must_match_completion_status() {
+        for (status, conclusion, message) in [
+            (
+                "COMPLETED",
+                Value::Null,
+                "completed check run without a conclusion",
+            ),
+            (
+                "IN_PROGRESS",
+                json!("SUCCESS"),
+                "non-completed check run with a conclusion",
+            ),
+        ] {
+            let mut context = valid_check_run_context();
+            context["status"] = json!(status);
+            context["conclusion"] = conclusion;
+
+            let Err(error) = validate_check_contexts(&[context], false) else {
+                panic!("accepted {status} with an inconsistent conclusion");
+            };
+
+            assert!(error.stderr_line().contains(message), "{status}");
+        }
+    }
+
+    #[test]
     fn unknown_check_run_status_fails_closed() {
         let mut context = valid_check_run_context();
         context["status"] = json!("BROKEN");

@@ -22,6 +22,7 @@ GH_TEST_ARGS_FILE="$tmpdir/default-args" run_checks success >"$tmpdir/default.js
 assert_json '
   .schemaVersion == 1 and
   (.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+  (.data | keys) == ["checks"] and
   [.data.checks[].name] == ["alpha", "alpha", "zeta"] and
   [.data.checks[0:2][].link] == ["https://example.test/a", "https://example.test/b"] and
   (.data.checks[] | keys == ["bucket", "completedAt", "link", "name", "startedAt", "state", "workflow"])
@@ -40,7 +41,7 @@ run_checks failed --failed-only >"$tmpdir/failed-only.json"
 assert_json '
   .data.summary == {"total":5,"passed":2,"pending":1,"failed":2} and
   [.data.checks[].name] == ["cancelled", "failed"] and
-  [.data.checks[].bucket] == ["cancel", "fail"]
+  [.data.checks[] | [.state, .bucket]] == [["CANCELLED", "cancel"], ["FAILURE", "fail"]]
 ' "$tmpdir/failed-only.json" >/dev/null
 
 GH_TEST_ARGS_FILE="$tmpdir/failed-only-required-args" \
@@ -102,7 +103,10 @@ assert_json '
   .data.checks[0].completedAt == null and
   .data.checks[1].workflow == "CI" and
   .data.checks[1].startedAt == "2026-08-11T09:00:00Z" and
-  .data.checks[1].completedAt == "2026-08-11T09:05:00Z"
+  .data.checks[1].completedAt == "2026-08-11T09:05:00Z" and
+  .data.checks[2].name == "running" and
+  .data.checks[2].startedAt == "2026-08-11T09:00:00Z" and
+  .data.checks[2].completedAt == null
 ' "$tmpdir/nullable.json" >/dev/null
 
 run_checks no-required --required >"$tmpdir/no-required.json"

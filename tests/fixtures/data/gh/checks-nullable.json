@@ -16,5 +16,14 @@
     "workflow": "CI",
     "startedAt": "2026-08-11T09:00:00Z",
     "completedAt": "2026-08-11T09:05:00Z"
+  },
+  {
+    "name": "running",
+    "state": "IN_PROGRESS",
+    "bucket": "pending",
+    "link": "",
+    "workflow": "CI",
+    "startedAt": "2026-08-11T09:00:00Z",
+    "completedAt": "0001-01-01T00:00:00Z"
   }
 ]
